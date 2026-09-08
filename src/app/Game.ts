@@ -16,7 +16,7 @@ import type { BuildingKind } from '../sim/defs';
 import { BUILDINGS, BUILDING_ORDER, ROVERS } from '../sim/defs';
 import { SPEEDS, AUTOSAVE_INTERVAL_S, SAVE_VERSION } from '../sim/config';
 
-const SAVE_KEY = 'red-frontier-save-v2';
+const SAVE_KEY = 'red-frontier-save-v3';
 const TAP_TRAVEL = 8; // px before a press becomes a camera drag
 const DRAG_START = 5; // px before a press counts as a drag at all
 const LONG_PRESS_MS = 480;
@@ -369,7 +369,17 @@ export class Game {
       if (pick.type === 'rover') {
         this.selected = { type: 'rover', id: pick.id };
       } else if (pick.type === 'building') {
-        this.selected = { type: 'building', id: pick.id };
+        // With a rover selected, tapping a battered or buried structure sends
+        // the rover to service it — the same grammar as deposit → mine.
+        const rv =
+          this.selected?.type === 'rover' ? this.sim.roverById(this.selected.id) : undefined;
+        const job = this.sim.needsMaintenance(pick.id);
+        if (rv && job) {
+          if (job === 'repair') this.sim.issueRepair(rv.id, pick.id);
+          else this.sim.issueClean(rv.id, pick.id);
+        } else {
+          this.selected = { type: 'building', id: pick.id };
+        }
       } else if (pick.type === 'colonist') {
         this.selected = { type: 'colonist', id: pick.id };
       } else if (pick.type === 'deposit') {
@@ -451,6 +461,11 @@ export class Game {
         break;
       case 'shelter':
         this.sim.orderColonist({ type: 'shelter' });
+        break;
+      case 'service':
+        if (this.selected.type === 'building') {
+          this.sim.dispatchMaintenance(this.selected.id);
+        }
         break;
     }
     this.syncUI(true);

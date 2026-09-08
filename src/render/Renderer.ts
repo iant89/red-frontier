@@ -13,7 +13,12 @@ import type { SunState } from '../sim/clock';
 import { sunDirection } from '../sim/clock';
 import type { Colonist } from '../sim/lifesupport';
 
-export type OverlayMode = 'none' | 'power' | 'life';
+export type OverlayMode = 'none' | 'power' | 'life' | 'weather';
+
+/** Sky tint the dust drags everything toward during a storm. */
+const DUST_HAZE = new THREE.Color(0x9a5f33);
+/** Side length of the (camera-following) airborne-dust particle box. */
+const DUST_FIELD = 240;
 
 /** Sky/light keyframes across a sol. The renderer reads the sim's sun only. */
 const SKY_NIGHT = new THREE.Color(0x07070f);
@@ -52,12 +57,19 @@ export class GameRenderer {
   private fillLight!: THREE.DirectionalLight;
   private skyMat!: THREE.MeshBasicMaterial;
   private padLight!: THREE.PointLight;
-  private buildingMeshes = new Map<number, { group: THREE.Group; body: THREE.Object3D; pad: THREE.Mesh; construction: THREE.Object3D }>();
+  private buildingMeshes = new Map<
+    number,
+    { group: THREE.Group; body: THREE.Object3D; pad: THREE.Mesh; construction: THREE.Object3D; damageRing: THREE.Mesh }
+  >();
   private depositMeshes = new Map<number, THREE.Group>();
 
   selectionRing: THREE.Mesh;
   ghostGroup: THREE.Group;
   private ghostBody: THREE.Mesh;
+
+  private dustField: THREE.Points | null = null;
+  private dustPositions: Float32Array | null = null;
+  private lastSimT = 0;
 
   private sun!: THREE.DirectionalLight;
   private raycaster = new THREE.Raycaster();
@@ -107,6 +119,7 @@ export class GameRenderer {
     );
     this.ghostGroup.add(this.ghostBody);
     this.buildSpawnPad();
+    this.buildDustField();
   }
 
   private buildEnvironment(): void {
@@ -157,7 +170,7 @@ export class GameRenderer {
    * Drive every light in the scene from the simulation's authoritative sun
    * (TDD §12 — one source of truth for both solar output and rendering).
    */
-  private applySun(sun: SunState): void {
+  private applySun(sun: SunState, dust: number, visibility: number): void {
     const dir = sunDirection(sun);
     const dist = 700;
     this.sun.position.set(dir.x * dist, Math.max(24, dir.y * dist), dir.z * dist);
@@ -167,22 +180,99 @@ export class GameRenderer {
     const day = Math.max(0, Math.min(1, sun.altitude * 2.2));
     const twilight = Math.max(0, 1 - Math.abs(sun.altitude) * 3.4);
 
-    this.sun.intensity = 2.2 * sun.irradiance;
+    // The sim's dust transmission is the same number the panels use — a storm
+    // visibly darkens the world by exactly as much as it dims the grid.
+    const transmission = 1 - 0.75 * Math.pow(dust, 1.1);
+    this.sun.intensity = 2.2 * sun.irradiance * (0.35 + 0.65 * transmission);
     this.sun.color.copy(SUN_LOW).lerp(SUN_HIGH, Math.min(1, Math.max(0, sun.altitude * 2.6)));
     this.sun.castShadow = sun.irradiance > 0.03;
 
-    const sky = SKY_NIGHT.clone().lerp(SKY_TWILIGHT, twilight).lerp(SKY_DAY, day);
+    let sky = SKY_NIGHT.clone().lerp(SKY_TWILIGHT, twilight).lerp(SKY_DAY, day);
+    sky.lerp(DUST_HAZE, Math.min(0.72, dust * 0.85 * Math.max(0.25, day)));
     this.skyMat.color.copy(sky);
     (this.scene.background as THREE.Color).copy(sky);
-    const fog = this.scene.fog as THREE.Fog;
-    fog.color.copy(FOG_NIGHT.clone().lerp(FOG_DAY, Math.max(day, twilight * 0.55)));
 
-    this.hemi.intensity = 0.1 + 0.68 * day;
+    const fog = this.scene.fog as THREE.Fog;
+    const hazed = FOG_NIGHT.clone().lerp(FOG_DAY, Math.max(day, twilight * 0.55));
+    fog.color.copy(hazed.lerp(DUST_HAZE, Math.min(0.85, dust * 0.9)));
+    // Visibility closes the fog in — a severe storm pulls the horizon to your feet.
+    const stormy = 1 - visibility;
+    fog.near = 380 - 330 * stormy;
+    fog.far = 1700 - 1330 * stormy;
+
+    this.hemi.intensity = (0.1 + 0.68 * day) * (0.55 + 0.45 * transmission);
     this.hemi.color.copy(SUN_LOW).lerp(SUN_HIGH, day);
     this.fillLight.intensity = 0.06 + 0.26 * (1 - day);
-    this.padLight.intensity = 1.5 * (1 - day);
+    this.padLight.intensity = 1.5 * (1 - day) + 0.6 * stormy * day;
 
-    this.renderer.toneMappingExposure = 0.82 + 0.3 * day;
+    this.renderer.toneMappingExposure = 0.82 + 0.3 * day - 0.12 * stormy;
+  }
+
+  // ---------------- weather atmosphere ----------------
+  /** Grit in the wind: a cheap wrapped particle field driven by the sim. */
+  private buildDustField(): void {
+    const N = 900;
+    const pos = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) {
+      pos[i * 3] = (Math.random() - 0.5) * DUST_FIELD;
+      pos[i * 3 + 1] = Math.random() * 46;
+      pos[i * 3 + 2] = (Math.random() - 0.5) * DUST_FIELD;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    this.dustPositions = pos;
+    this.dustField = new THREE.Points(
+      geo,
+      new THREE.PointsMaterial({
+        color: 0xc49a6c,
+        size: 1.15,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        sizeAttenuation: true,
+      }),
+    );
+    this.dustField.frustumCulled = false;
+    this.scene.add(this.dustField);
+  }
+
+  private syncDustField(sim: Simulation): void {
+    const wx = sim.weather;
+    const pts = this.dustField;
+    if (!pts || !this.dustPositions) return;
+    const mat = pts.material as THREE.PointsMaterial;
+    // Nearly invisible on a clear sol; a storm becomes a wall of flying grit.
+    mat.opacity = Math.min(0.66, Math.max(0, wx.dust * 0.95 - 0.03));
+
+    // Sim seconds advanced since last frame (frozen while paused — weather is
+    // sim state, not a screen effect).
+    const dt = Math.min(0.5, Math.max(0, sim.simTime - this.lastSimT));
+    this.lastSimT = sim.simTime;
+
+    // Wind vector from the sim's speed/bearing.
+    const wv = wx.windSpeed * 0.45;
+    const vx = Math.sin(wx.windDirRad) * wv;
+    const vz = Math.cos(wx.windDirRad) * wv;
+
+    // Keep the field centred near the camera and wrap particles through it.
+    const c = this.camera;
+    const cx = Math.round(c.position.x / DUST_FIELD) * DUST_FIELD;
+    const cz = Math.round(c.position.z / DUST_FIELD) * DUST_FIELD;
+    pts.position.set(cx, 0, cz);
+
+    const pos = this.dustPositions;
+    const drift = vx * dt;
+    const driftZ = vz * dt;
+    const half = DUST_FIELD / 2;
+    for (let i = 0; i < pos.length; i += 3) {
+      pos[i] += drift + Math.sin(sim.simTime * 0.9 + i) * 0.4 * dt;
+      pos[i + 2] += driftZ + Math.cos(sim.simTime * 0.8 + i) * 0.4 * dt;
+      if (pos[i] > half) pos[i] -= DUST_FIELD;
+      else if (pos[i] < -half) pos[i] += DUST_FIELD;
+      if (pos[i + 2] > half) pos[i + 2] -= DUST_FIELD;
+      else if (pos[i + 2] < -half) pos[i + 2] += DUST_FIELD;
+    }
+    (pts.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
   }
 
   private buildTerrain(): THREE.Mesh {
@@ -266,7 +356,8 @@ export class GameRenderer {
       y: -sim.sun.azimuthRad,
       z: -(Math.PI / 2 - el) * 0.55,
     };
-    this.applySun(sim.sun);
+    this.applySun(sim.sun, sim.weather.dust, sim.weather.visibility);
+    this.syncDustField(sim);
     this.syncRovers(sim.rovers);
     this.syncBuildings(sim.buildings);
     this.syncDeposits(sim.world.deposits);
@@ -358,7 +449,9 @@ export class GameRenderer {
       const relevant =
         this.overlayMode === 'power'
           ? def.powerProduceKw > 0 || def.powerDrawKw > 0 || def.batteryKWh > 0
-          : !!def.process || !!def.fluidCapacity;
+          : this.overlayMode === 'weather'
+            ? def.generation === 'solar' || def.exposure >= 0.5
+            : !!def.process || !!def.fluidCapacity;
       if (!relevant || b.state !== 'online') continue;
       seen.add(b.id);
 
@@ -407,6 +500,19 @@ export class GameRenderer {
           scale = 0.7;
         }
         if (b.powerSat < 0.995) color = 0xd9553f;
+      } else if (this.overlayMode === 'weather') {
+        // Red = storm-damaged, amber = dust-buried array, white = exposed and
+        // weatherproof enough. Shape stays the ring, so it reads everywhere.
+        if (b.damaged) {
+          color = 0xd9553f;
+          scale = 1.5;
+        } else if (def.generation === 'solar') {
+          color = b.cleanliness < 0.55 ? 0xd98c3f : b.cleanliness < 0.8 ? 0xe0c060 : 0xf0ead8;
+          scale = 0.8 + b.cleanliness * 0.9;
+        } else {
+          color = 0xf0ead8;
+          scale = 0.6 + def.exposure;
+        }
       } else {
         const p = def.process;
         if (p?.fluidOut?.water || def.fluidCapacity?.water) color = 0x4aa3e0;
@@ -459,11 +565,15 @@ export class GameRenderer {
         const body = this.makeBuildingBody(b.kind, b.id);
         const pad = this.makePadMesh(BUILDINGS[b.kind].radius);
         const construction = this.makeConstructionMesh(BUILDINGS[b.kind].radius);
+        const damageRing = this.makeRing(0xd9553f, BUILDINGS[b.kind].radius * 1.05, 0.5);
+        damageRing.position.y = 0.55;
+        damageRing.visible = false;
         group.add(pad);
         group.add(body);
         group.add(construction);
+        group.add(damageRing);
         this.buildingRoot.add(group);
-        rec = { group, body, pad, construction };
+        rec = { group, body, pad, construction, damageRing };
         this.buildingMeshes.set(b.id, rec);
       }
       const y = this.world.heightAt(b.x, b.z);
@@ -489,8 +599,17 @@ export class GameRenderer {
        */
       if (b.state === 'online') {
         const running = b.enabled && b.powerSat > 0.02;
-        const dim = !b.enabled ? 0.34 : b.powerSat < 0.5 ? 0.6 : 1;
+        let dim = !b.enabled ? 0.34 : b.powerSat < 0.5 ? 0.6 : 1;
+        // Dust on the glass reads as a duller array; storm damage as a red ring.
+        if (BUILDINGS[b.kind].generation === 'solar') {
+          dim *= 0.55 + 0.45 * b.cleanliness;
+        }
         this.setGroupBrightness(rec.body, dim);
+        rec.damageRing.visible = b.damaged;
+        if (b.damaged) {
+          const pulse = 0.6 + 0.4 * Math.sin(this.clockT * 5);
+          (rec.damageRing.material as THREE.MeshBasicMaterial).opacity = 0.5 + 0.4 * pulse;
+        }
 
         if (b.kind === 'solar') {
           // Tilt the array toward the sun; park it flat after dark.

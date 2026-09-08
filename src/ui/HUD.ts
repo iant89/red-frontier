@@ -22,11 +22,17 @@ import {
 } from '../sim/defs';
 import type { Building, Rover, Simulation, Colonist } from '../sim/Simulation';
 import { roverStatusText, colonistStatusText } from '../sim/Simulation';
-import { POWER_TIER_LABELS, SUIT_O2_CAPACITY } from '../sim/config';
+import { stormLabel } from '../sim/weather';
+import {
+  POWER_TIER_LABELS,
+  SUIT_O2_CAPACITY,
+  SOL_SECONDS,
+  BUILDING_MAX_HEALTH,
+} from '../sim/config';
 import type { PowerTier } from '../sim/config';
 import type { Alert, Severity } from '../sim/alerts';
 
-export type OverlayMode = 'none' | 'power' | 'life';
+export type OverlayMode = 'none' | 'power' | 'life' | 'weather';
 
 export interface HUDCallbacks {
   onSpeed: (idx: number) => void;
@@ -144,6 +150,28 @@ export class HUD {
           <div class="tiers" id="tiers"></div>
         </div>
         <div class="vdivide"></div>
+        <div id="wx-block">
+          <div class="wx-head">
+            <span class="vh-title">Weather</span>
+            <span class="wx-badge" id="wx-badge">Clear</span>
+          </div>
+          <div class="wx-grid">
+            <div class="wx-cell" title="Wind speed and bearing. Storm winds damage exposed structures.">
+              <span class="k">Wind</span>
+              <span class="wx-wind"><i class="wx-arrow" id="wx-arrow"></i><span class="v" id="wx-wind">—</span></span>
+            </div>
+            <div class="wx-cell" title="Airborne dust. Dims the sun for panels and crops alike.">
+              <span class="k">Dust</span>
+              <span class="wx-bar"><i id="wx-dust-bar" style="width:0%"></i></span>
+            </div>
+            <div class="wx-cell" title="Visibility. Storm haze closes the world in.">
+              <span class="k">Visibility</span>
+              <span class="wx-bar"><i id="wx-vis-bar" style="width:100%"></i></span>
+            </div>
+          </div>
+          <div class="wx-status" id="wx-status">Clear skies.</div>
+        </div>
+        <div class="vdivide"></div>
         <div id="life-block"></div>
         <div class="vdivide"></div>
         <div id="crew-block">
@@ -165,7 +193,8 @@ export class HUD {
         <h1>RED FRONTIER</h1>
         <div class="tag">
           One human. A handful of machines. An entire planet that doesn’t want you there.<br/>
-          <b>Prototype 2</b> — power grids, the Mars sol, and the water → oxygen → food chain that keeps a person alive.
+          <b>Prototype 3</b> — power grids, the Mars sol, the water → oxygen → food chain that keeps a person alive,
+          and the wind, dust and storms that test all of it.
         </div>
         <div class="actions">
           <label>World seed
@@ -311,6 +340,7 @@ export class HUD {
       ['none', '◻', 'No overlay (V)'],
       ['power', '⚡', 'Power overlay — generation, load and reach (V)'],
       ['life', '💧', 'Life-support overlay — fluid producers and consumers (V)'],
+      ['weather', '🌪', 'Weather overlay — array cleanliness and storm damage (V)'],
     ];
     for (const [mode, icon, tip] of modes) {
       const b = document.createElement('button');
@@ -335,7 +365,7 @@ export class HUD {
   }
 
   cycleOverlay(): OverlayMode {
-    const order: OverlayMode[] = ['none', 'power', 'life'];
+    const order: OverlayMode[] = ['none', 'power', 'life', 'weather'];
     const next = order[(order.indexOf(this.overlay) + 1) % order.length];
     this.setOverlay(next);
     return next;
@@ -470,6 +500,37 @@ export class HUD {
     }
 
     this.drawPowerGraph(sim);
+
+    // ---- weather ----
+    const wx = sim.weather;
+    const badge = this.el('wx-badge');
+    badge.textContent = stormLabel(wx.storm);
+    badge.className = `wx-badge ${
+      wx.storm === 'calm' ? '' : wx.storm === 'severe' || wx.storm === 'planetary' ? 'crit' : 'warn'
+    }`;
+    this.el('wx-wind').textContent = `${Math.round(wx.windSpeed)} m/s`;
+    // The arrow points the way the wind blows (world +Z reads as "up").
+    this.el('wx-arrow').style.transform = `rotate(${(wx.windDirRad * 180) / Math.PI}deg)`;
+    this.el('wx-dust-bar').style.width = `${Math.round(wx.dust * 100)}%`;
+    this.el('wx-vis-bar').style.width = `${Math.round(wx.visibility * 100)}%`;
+
+    const wxStatus = this.el('wx-status');
+    const fc = wx.forecast();
+    const active = wx.current();
+    if (active) {
+      wxStatus.textContent = `${stormLabel(active.kind)} — passing in ${fmtDuration(
+        wx.passesIn() / SOL_SECONDS,
+      )}. Rovers are sheltering.`;
+      wxStatus.className = 'wx-status bad';
+    } else if (fc) {
+      wxStatus.textContent = `${fc.label} forecast — arriving in ~${fmtDuration(
+        fc.arrivesIn / SOL_SECONDS,
+      )}. Charge batteries, shelter the crews.`;
+      wxStatus.className = 'wx-status warn';
+    } else {
+      wxStatus.textContent = `Clear skies · ${Math.round(wx.solarTransmission * 100)}% sunlight through the dust`;
+      wxStatus.className = 'wx-status';
+    }
 
     // ---- life support ----
     for (const f of ALL_FLUIDS) {
@@ -671,6 +732,7 @@ export class HUD {
         </div>
         <div id="b-body"></div>
         <div class="action-grid" id="b-actions">
+          <button class="btn" data-act="service" id="b-service">Clean panels</button>
           <button class="btn" data-act="toggle" id="b-toggle">Switch off</button>
           <button class="btn danger" data-act="demolish">Dismantle</button>
         </div>`;
@@ -716,8 +778,23 @@ export class HUD {
       );
     } else {
       if (def.powerProduceKw > 0) {
+        const clean = def.generation === 'solar' ? b.cleanliness : 1;
         rows.push(
-          `<div class="stat"><span class="k">Generating</span><span class="v good">${b.genKw.toFixed(1)} / ${def.powerProduceKw} kW</span></div>`,
+          `<div class="stat"><span class="k">Generating</span><span class="v ${b.genKw > 0.01 ? 'good' : 'warn'}">${b.genKw.toFixed(1)} / ${def.powerProduceKw} kW</span></div>`,
+        );
+        if (def.generation === 'solar') {
+          const pct = Math.round(clean * 100);
+          rows.push(
+            `<div class="stat"><span class="k">Panel dust</span><span class="v ${pct < 55 ? 'bad' : pct < 80 ? 'warn' : ''}">${pct}% clean</span></div>`,
+            `<div class="bar-wrap"><div class="bar-fill ${pct < 55 ? 'red' : pct < 80 ? 'amber' : 'cyan'}" style="width:${pct}%"></div></div>`,
+          );
+        }
+      }
+      if (b.health < BUILDING_MAX_HEALTH - 0.5) {
+        const hp = Math.round(b.health);
+        rows.push(
+          `<div class="stat"><span class="k">Structure</span><span class="v ${b.damaged ? 'bad' : hp < 60 ? 'warn' : ''}">${b.damaged ? 'Damaged — offline' : `${hp}%`}</span></div>`,
+          `<div class="bar-wrap"><div class="bar-fill ${b.damaged || hp < 40 ? 'red' : 'amber'}" style="width:${hp}%"></div></div>`,
         );
       }
       if (def.powerDrawKw > 0 || def.idlePowerKw > 0) {
@@ -764,6 +841,15 @@ export class HUD {
     const toggle = q('b-toggle') as HTMLButtonElement;
     toggle.style.display = b.state === 'online' ? '' : 'none';
     toggle.textContent = b.enabled ? 'Switch off' : 'Switch on';
+
+    const svc = q('b-service') as HTMLButtonElement;
+    const needsRepair = b.state === 'online' && b.health < BUILDING_MAX_HEALTH - 0.5;
+    const needsClean =
+      b.state === 'online' &&
+      BUILDINGS[b.kind].generation === 'solar' &&
+      b.cleanliness < 0.995;
+    svc.style.display = needsRepair || needsClean ? '' : 'none';
+    svc.textContent = needsRepair ? 'Dispatch repair' : 'Clean panels';
   }
 
   showColonist(c: Colonist, sim: Simulation): void {

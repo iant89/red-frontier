@@ -148,9 +148,14 @@ export class AlertBus {
         title: a.title,
         detail: a.detail,
         since: a.since,
+        // lastSeen is part of authoritative state (restores must replay
+        // identically), not UI cosmetics.
+        lastSeen: a.lastSeen,
         entityId: a.entityId,
       })),
-      log: this.log.slice(-60),
+      // The whole retained history, not a tail: a restored colony must be
+      // byte-identical to the one that was saved, determinism tests included.
+      log: this.log.slice(),
     };
   }
 
@@ -164,7 +169,7 @@ export class AlertBus {
         title: a.title ?? a.key,
         detail: a.detail ?? '',
         since: a.since ?? 0,
-        lastSeen: a.since ?? 0,
+        lastSeen: a.lastSeen ?? a.since ?? 0,
         entityId: a.entityId,
       });
     }
