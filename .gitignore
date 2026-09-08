@@ -1,0 +1,10 @@
+# deps & build output
+node_modules/
+dist/
+node_modules/.test-dist/
+
+# editor / os
+.DS_Store
+*.log
+.vscode/
+.idea/

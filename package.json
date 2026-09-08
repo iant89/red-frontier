@@ -1,0 +1,22 @@
+{
+  "name": "red-frontier",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Red Frontier - browser Mars survival RTS (Prototype 1 vertical slice)",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test:sim": "node scripts/run-tests.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "vite": "^5.4.2"
+  },
+  "dependencies": {
+    "three": "^0.168.0",
+    "@types/three": "^0.168.0"
+  }
+}
