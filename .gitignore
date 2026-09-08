@@ -8,3 +8,6 @@ node_modules/.test-dist/
 *.log
 .vscode/
 .idea/
+
+# local scratch probes (not part of the project)
+.probe/

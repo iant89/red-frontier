@@ -1,15 +1,25 @@
-import * as THREE from 'three';
+/**
+ * Application shell: owns the frame loop, input, and the wiring between the
+ * simulation, the renderer and the HUD.
+ *
+ * The dependency arrows all point one way. The sim knows nothing about this
+ * file; the renderer and HUD only read the sim. Everything the player does
+ * arrives here as a gesture and leaves as a *command* on the simulation.
+ */
+
 import { Simulation } from '../sim/Simulation';
 import { GameRenderer } from '../render/Renderer';
+import type { OverlayMode } from '../render/Renderer';
 import { CameraRig } from './CameraRig';
 import { HUD } from '../ui/HUD';
 import type { BuildingKind } from '../sim/defs';
-import { BUILDINGS, ROVERS } from '../sim/defs';
-import { SPEEDS, AUTOSAVE_INTERVAL_S } from '../sim/config';
+import { BUILDINGS, BUILDING_ORDER, ROVERS } from '../sim/defs';
+import { SPEEDS, AUTOSAVE_INTERVAL_S, SAVE_VERSION } from '../sim/config';
 
-const SAVE_KEY = 'red-frontier-autosave';
+const SAVE_KEY = 'red-frontier-save-v2';
 const TAP_TRAVEL = 8; // px before a press becomes a camera drag
 const DRAG_START = 5; // px before a press counts as a drag at all
+const LONG_PRESS_MS = 480;
 
 function hashSeed(s: string): number {
   let h = 2166136261;
@@ -32,7 +42,11 @@ interface ActivePointer {
   dragging: boolean;
 }
 
-type Selection = { type: 'rover'; id: number } | { type: 'building'; id: number } | null;
+type Selection =
+  | { type: 'rover'; id: number }
+  | { type: 'building'; id: number }
+  | { type: 'colonist'; id: number }
+  | null;
 
 export class Game {
   sim: Simulation | null = null;
@@ -53,45 +67,68 @@ export class Game {
   private lastInspector = 0;
   private started = false;
   private shiftHeld = false;
+  private longPressTimer: number | null = null;
+  private endShown = false;
 
   private canvas: HTMLCanvasElement;
 
   constructor() {
     this.canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
     this.hud = new HUD({
-      onSpeed: (i) => {
-        /* handled by HUD itself */
+      onSpeed: () => {
+        /* HUD owns the speed index; the loop reads it */
       },
       onPickBuild: (k) => this.setPendingBuild(k),
-      onAction: (a) => this.handleAction(a),
+      onAction: (a, arg) => this.handleAction(a, arg),
       onStart: (seedText, near) => this.begin(seedText, near),
+      onOverlay: (m) => this.renderer?.setOverlay(m),
     });
     this.attachInput();
     window.addEventListener('resize', () => this.resize());
 
-    const resume = localStorage.getItem(SAVE_KEY);
-    if (resume) {
-      const holder = document.querySelector('#start-overlay .actions');
-      if (holder) {
-        const btn = document.createElement('button');
-        btn.className = 'btn primary';
-        btn.textContent = '▶ Resume last auto-save';
-        btn.addEventListener('pointerdown', () => this.resume());
-        holder.appendChild(btn);
-      }
-    }
+    // Persist on tab hide — TDD §23 asks for saves on visibility transitions.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden' && this.started) this.save(true);
+    });
 
+    this.offerResume();
     this.loop(performance.now());
   }
 
-  // ---------- mission start ----------
+  private offerResume(): void {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return;
+    let label = '▶ Resume last save';
+    try {
+      const data = JSON.parse(raw);
+      if (data?.clock) label = `▶ Resume — Sol ${(data.clock.sol ?? 0) + 1}`;
+    } catch {
+      /* a corrupt save still gets a button; restore() will report the problem */
+    }
+    const holder = document.querySelector('#start-overlay .actions');
+    if (!holder) return;
+    const btn = document.createElement('button');
+    btn.className = 'btn';
+    btn.textContent = label;
+    btn.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.resume();
+    });
+    holder.appendChild(btn);
+  }
+
+  // ------------------------------------------------------ mission start ----
   private begin(seedText: string, near: number): void {
     this.seed = hashSeed(seedText || 'mars2066');
-    const sim = new Simulation({ seed: this.seed, nearDeposits: near });
-    this.launch(sim);
-    this.hideStart();
-    this.hud.addLog('ok', 'Mission start. Two rovers, a landing pad, and a world that doesn’t want you here.');
-    this.hud.addLog('info', 'Select a rover, then tap a nearby deposit to mine. Build storage to stockpile more.');
+    this.launch(new Simulation({ seed: this.seed, nearDeposits: near }));
+    this.hud.addLog(
+      'ok',
+      'Descent stage down and stable. Two rovers deployed. You have a few sols of air, water and rations.',
+    );
+    this.hud.addLog(
+      'info',
+      'Priority one: ice → Water Extractor → Oxygen Generator. Solar dies at night, so build batteries too.',
+    );
   }
 
   private resume(): void {
@@ -102,34 +139,35 @@ export class Game {
       const sim = new Simulation({ seed: data?.seed ?? 1 });
       sim.restore(data);
       this.launch(sim);
-      this.hideStart();
-      this.hud.addLog('ok', 'Auto-save restored.');
+      this.hud.addLog('ok', `Save restored — ${sim.clock.format()}.`);
     } catch (e) {
       console.error(e);
-      this.hud.addLog('warn', 'Could not restore the auto-save.');
+      this.hud.addLog(
+        'warn',
+        `Could not restore that save (${(e as Error).message}). Starting fresh is safest.`,
+      );
     }
-  }
-
-  private hideStart(): void {
-    const ov = document.getElementById('start-overlay');
-    if (ov) ov.style.display = 'none';
   }
 
   private launch(sim: Simulation): void {
     this.sim = sim;
     this.selected = null;
     this.pendingBuild = null;
+    this.endShown = false;
     this.hud.setBuild(null);
     this.lastAuto = performance.now();
     this.renderer = new GameRenderer(this.canvas, sim.world);
+    this.renderer.setOverlay(this.hud.overlay as OverlayMode);
     this.rig = new CameraRig(this.renderer.camera);
     this.resize();
-    this.hud.updateResources(sim);
+    this.hud.updateVitals(sim);
     this.syncUI(true);
+    const ov = document.getElementById('start-overlay');
+    if (ov) ov.style.display = 'none';
     this.started = true;
   }
 
-  // ---------- input ----------
+  // -------------------------------------------------------------- input ----
   private attachInput(): void {
     const c = this.canvas;
     c.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -165,7 +203,7 @@ export class Game {
     } catch {
       /* ignore */
     }
-    this.shiftHeld = e.shiftKey || e.button === 2;
+    this.shiftHeld = e.shiftKey || e.button === 1;
     const p: ActivePointer = {
       id: e.pointerId,
       x: e.clientX,
@@ -180,6 +218,18 @@ export class Game {
     this.pointers.set(e.pointerId, p);
     this.pointerCount = this.pointers.size;
     if (this.pointerCount === 2) this.resetPinch();
+
+    // Long press = context order on touch (TDD §18).
+    if (this.longPressTimer !== null) window.clearTimeout(this.longPressTimer);
+    if (this.pointerCount === 1 && e.pointerType !== 'mouse') {
+      this.longPressTimer = window.setTimeout(() => {
+        const still = this.pointers.get(e.pointerId);
+        if (still && still.travel < TAP_TRAVEL) {
+          still.dragging = true; // consume the gesture
+          this.contextTap(still.x, still.y);
+        }
+      }, LONG_PRESS_MS);
+    }
   }
 
   private resetPinch(): void {
@@ -229,6 +279,10 @@ export class Game {
   }
 
   private pointerUp(e: PointerEvent): void {
+    if (this.longPressTimer !== null) {
+      window.clearTimeout(this.longPressTimer);
+      this.longPressTimer = null;
+    }
     const p = this.pointers.get(e.pointerId);
     if (!p) return;
     this.pointers.delete(e.pointerId);
@@ -240,10 +294,14 @@ export class Game {
       else this.primaryTap(e.clientX, e.clientY);
     }
     if (this.pointerCount === 2) this.resetPinch();
-    if (e.button === 2) this.shiftHeld = false;
+    if (e.button === 1) this.shiftHeld = false;
   }
 
   private pointerCancel(e: PointerEvent): void {
+    if (this.longPressTimer !== null) {
+      window.clearTimeout(this.longPressTimer);
+      this.longPressTimer = null;
+    }
     this.pointers.delete(e.pointerId);
     this.pointerCount = this.pointers.size;
   }
@@ -251,7 +309,9 @@ export class Game {
   private keyDown(e: KeyboardEvent): void {
     if (e.key === 'Shift') this.shiftHeld = true;
     if (!this.started) return;
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+    const key = e.key.toLowerCase();
+
+    if ((e.ctrlKey || e.metaKey) && key === 's') {
       e.preventDefault();
       this.save();
       return;
@@ -263,26 +323,38 @@ export class Game {
     }
     if (e.key === ' ') {
       e.preventDefault();
-      const next = this.hud.speedIdx === 0 ? 1 : 0;
-      this.hud.setSpeed(next);
+      this.hud.setSpeed(this.hud.speedIdx === 0 ? 1 : 0);
       return;
     }
-    const kinds: BuildingKind[] = ['warehouse', 'solar', 'battery', 'workshop', 'habitat'];
-    const idx = ['1', '2', '3', '4', '5'].indexOf(e.key);
-    if (idx >= 0) {
-      this.setPendingBuild(this.pendingBuild === kinds[idx] ? null : kinds[idx]);
+    if (key === 'v') {
+      this.renderer?.setOverlay(this.hud.cycleOverlay() as OverlayMode);
+      return;
+    }
+    if (key === 'f') {
+      this.centerOnSelected();
+      return;
+    }
+    // Number keys select build blueprints in palette order.
+    const idx = ['1', '2', '3', '4', '5', '6', '7', '8', '9'].indexOf(e.key);
+    if (idx >= 0 && idx < BUILDING_ORDER.length) {
+      const kind = BUILDING_ORDER[idx];
+      this.setPendingBuild(this.pendingBuild === kind ? null : kind);
     }
   }
 
+  // ---------------------------------------------------------- gestures ----
   private contextTap(x: number, y: number): void {
     if (!this.renderer || !this.sim) return;
     if (this.pendingBuild) {
       this.setPendingBuild(null);
       return;
     }
+    const pt = this.renderer.raycastTerrain(x, y);
+    if (!pt) return;
     if (this.selected?.type === 'rover') {
-      const pt = this.renderer.raycastTerrain(x, y);
-      if (pt) this.sim.issueMove(this.selected.id, pt.x, pt.z);
+      this.sim.issueMove(this.selected.id, pt.x, pt.z);
+    } else if (this.selected?.type === 'colonist') {
+      this.sim.orderColonist({ type: 'moveTo', x: pt.x, z: pt.z });
     }
   }
 
@@ -298,11 +370,19 @@ export class Game {
         this.selected = { type: 'rover', id: pick.id };
       } else if (pick.type === 'building') {
         this.selected = { type: 'building', id: pick.id };
+      } else if (pick.type === 'colonist') {
+        this.selected = { type: 'colonist', id: pick.id };
       } else if (pick.type === 'deposit') {
         if (this.selected?.type === 'rover') {
           this.sim.issueMine(this.selected.id, pick.id);
         } else {
-          this.hud.addLog('info', 'Select a rover first, then tap a deposit to mine it.');
+          const d = this.sim.world.deposits.find((dp) => dp.id === pick.id);
+          this.hud.addLog(
+            'info',
+            d
+              ? `${d.resource} deposit — about ${Math.round(d.amount)} kg. Select a rover, then tap it to mine.`
+              : 'Select a rover first, then tap a deposit to mine it.',
+          );
         }
       }
       this.syncUI(true);
@@ -310,9 +390,7 @@ export class Game {
     }
     const pt = this.renderer.raycastTerrain(x, y);
     if (!pt) return;
-    if (this.selected?.type === 'rover') {
-      this.sim.issueMove(this.selected.id, pt.x, pt.z);
-    }
+    if (this.selected?.type === 'rover') this.sim.issueMove(this.selected.id, pt.x, pt.z);
   }
 
   private setPendingBuild(kind: BuildingKind | null): void {
@@ -329,18 +407,53 @@ export class Game {
     const b = this.sim.placeBuilding(this.pendingBuild, pt.x, pt.z);
     if (b) {
       this.selected = { type: 'building', id: b.id };
-    } else {
-      this.hud.addLog('warn', 'Cannot build here.');
+      // Shift-place keeps the blueprint armed for laying out solar farms.
+      if (!this.shiftHeld) this.setPendingBuild(null);
     }
   }
 
-  private handleAction(a: string): void {
-    if (!this.selected) return;
-    if (a === 'stop' && this.selected.type === 'rover' && this.sim) {
-      this.sim.stopRover(this.selected.id);
-    } else if (a === 'recenter') {
+  private handleAction(a: string, arg?: number | string): void {
+    if (!this.sim) return;
+    if (a === 'focus' && typeof arg === 'number') {
+      const r = this.sim.roverById(arg);
+      const b = this.sim.buildingById(arg);
+      if (r) this.selected = { type: 'rover', id: arg };
+      else if (b) this.selected = { type: 'building', id: arg };
+      else if (this.sim.colonist.id === arg) this.selected = { type: 'colonist', id: arg };
       this.centerOnSelected();
+      this.syncUI(true);
+      return;
     }
+    if (!this.selected) return;
+    switch (a) {
+      case 'stop':
+        if (this.selected.type === 'rover') this.sim.stopRover(this.selected.id);
+        break;
+      case 'recenter':
+        this.centerOnSelected();
+        break;
+      case 'autohaul':
+        if (this.selected.type === 'rover') {
+          this.sim.setRoverAutoHaul(this.selected.id, arg === 1);
+        }
+        break;
+      case 'toggle':
+        if (this.selected.type === 'building') {
+          const b = this.sim.buildingById(this.selected.id);
+          if (b) this.sim.setBuildingEnabled(b.id, !b.enabled);
+        }
+        break;
+      case 'demolish':
+        if (this.selected.type === 'building') {
+          this.sim.demolish(this.selected.id);
+          this.selected = null;
+        }
+        break;
+      case 'shelter':
+        this.sim.orderColonist({ type: 'shelter' });
+        break;
+    }
+    this.syncUI(true);
   }
 
   private centerOnSelected(): void {
@@ -348,21 +461,25 @@ export class Game {
     const e =
       this.selected.type === 'rover'
         ? this.sim.roverById(this.selected.id)
-        : this.sim.buildingById(this.selected.id);
+        : this.selected.type === 'building'
+          ? this.sim.buildingById(this.selected.id)
+          : this.sim.colonist;
     if (e) this.rig.target.set(e.x, 4, e.z);
   }
 
-  private save(): void {
+  private save(quiet = false): void {
     if (!this.sim) return;
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify(this.sim.snapshot()));
-      this.hud.flashSave('Saved to browser (Ctrl+S anytime)');
-    } catch {
-      this.hud.flashSave('Save failed');
+      if (!quiet) this.hud.flashSave(`Saved · ${this.sim.clock.format()}`);
+    } catch (e) {
+      // Quota is the realistic failure here; say so rather than failing silently.
+      this.hud.flashSave('Save failed — browser storage full?');
+      console.error(e);
     }
   }
 
-  // ---------- per-frame ----------
+  // -------------------------------------------------------- per-frame ----
   private resize(): void {
     const w = window.innerWidth;
     const h = window.innerHeight;
@@ -371,36 +488,46 @@ export class Game {
     this.renderer?.resize(w, h);
   }
 
+  private lastT = 0;
+
   private loop(nowMs: number): void {
     requestAnimationFrame((t) => this.loop(t));
     if (!this.started || !this.renderer || !this.sim || !this.rig) return;
     const t = nowMs / 1000;
     let dt = t - this.lastT;
     this.lastT = t;
-    if (dt > 0.1) dt = 0.1;
+    if (dt > 0.1) dt = 0.1; // clamp after a stall rather than fast-forwarding
     if (dt < 0) dt = 0;
 
     const speed = SPEEDS[this.hud.speedIdx];
-    if (speed > 0) this.sim.step(dt * speed);
+    if (speed > 0 && !this.sim.gameOver) this.sim.step(dt * speed);
 
-    const events = this.sim.drainEvents();
-    for (const ev of events) this.hud.addLog(ev.severity, ev.text);
+    for (const ev of this.sim.drainEvents()) {
+      this.hud.addLog(ev.severity, ev.text, ev.stamp);
+    }
 
     this.renderer.sync(this.sim);
     this.rig.update();
 
     if (nowMs - this.lastAuto > AUTOSAVE_INTERVAL_S * 1000) {
       this.lastAuto = nowMs;
-      this.save();
+      this.save(true);
     }
 
     this.updateGhost();
     this.updateSelectionVisual();
     this.syncUI(false);
     this.renderer.render();
-  }
 
-  private lastT = 0;
+    if (this.sim.gameOver && !this.endShown) {
+      this.endShown = true;
+      this.save(true);
+      this.hud.showEnd(
+        'MISSION LOST',
+        `${this.sim.gameOver.reason} Sol ${this.sim.gameOver.sol}. Mars does not negotiate.`,
+      );
+    }
+  }
 
   private updateGhost(): void {
     if (!this.renderer || !this.sim) return;
@@ -413,8 +540,15 @@ export class Game {
       this.renderer.showGhost(null, 0, 0, false);
       return;
     }
-    const valid = this.sim.canPlace(this.pendingBuild, pt.x, pt.z) === null;
-    this.renderer.showGhost(this.pendingBuild, pt.x, pt.z, valid);
+    const err = this.sim.canPlace(this.pendingBuild, pt.x, pt.z);
+    this.renderer.showGhost(this.pendingBuild, pt.x, pt.z, err === null);
+    if (err) this.hud.hint(`<b>Cannot build here</b> — ${err}`);
+    else {
+      const def = BUILDINGS[this.pendingBuild];
+      this.hud.hint(
+        `Placing <b>${def.label}</b> — click to site it, Shift+click to place several, Esc to cancel.`,
+      );
+    }
   }
 
   private updateSelectionVisual(): void {
@@ -431,7 +565,7 @@ export class Game {
         return;
       }
       this.renderer.setSelection({ x: rv.x, z: rv.z, radius: ROVERS[rv.kind].radius });
-    } else {
+    } else if (this.selected.type === 'building') {
       const b = this.sim.buildingById(this.selected.id);
       if (!b) {
         this.selected = null;
@@ -439,32 +573,38 @@ export class Game {
         return;
       }
       this.renderer.setSelection({ x: b.x, z: b.z, radius: BUILDINGS[b.kind].radius });
+    } else {
+      const c = this.sim.colonist;
+      this.renderer.setSelection({ x: c.x, z: c.z, radius: 2 });
     }
   }
 
   private syncUI(force: boolean): void {
     if (!this.sim) return;
     const now = performance.now();
-    if (!force && now - this.lastInspector < 180) return;
+    // The HUD patches cached nodes, but there is no value in doing it at 144 Hz.
+    if (!force && now - this.lastInspector < 120) return;
     this.lastInspector = now;
-    this.hud.updateResources(this.sim);
+
+    this.hud.updateVitals(this.sim);
+    this.hud.updateAlerts(this.sim.alerts.list());
+    this.hud.updateAffordability(this.sim);
 
     if (this.selected) {
       if (this.selected.type === 'rover') {
         const r = this.sim.roverById(this.selected.id);
         if (r) this.hud.showRover(r, this.sim);
-      } else {
+        else this.selected = null;
+      } else if (this.selected.type === 'building') {
         const b = this.sim.buildingById(this.selected.id);
         if (b) this.hud.showBuilding(b, this.sim);
+        else this.selected = null;
+      } else {
+        this.hud.showColonist(this.sim.colonist, this.sim);
       }
-    } else if (!force || this.selected === null) {
-      this.hud.clearInspector();
     }
-    if (this.pendingBuild) {
-      const def = BUILDINGS[this.pendingBuild];
-      this.hud.hint(`Placing ${def.label} — click terrain to build, right-click or Esc to cancel.`);
-    } else if (force) {
-      this.hud.hint(null);
-    }
+    if (!this.selected) this.hud.clearInspector();
+
+    if (!this.pendingBuild && force) this.hud.hint(null);
   }
 }

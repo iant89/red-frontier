@@ -80,29 +80,34 @@ export class World {
   }
 
   private generateDeposits(params: WorldGenParams): void {
-    const total = 26;
-    const nearCount = Math.max(3, Math.round(total * params.nearDeposits));
+    const total = 30;
+    const nearCount = Math.max(5, Math.round(total * params.nearDeposits));
     const counts: Record<ResourceId, number> = {
       regolith: 0,
       iron: 0,
       silicon: 0,
       aluminum: 0,
-      water: 0,
+      ice: 0,
     };
     const weight: Record<ResourceId, number> = {
       regolith: 3,
       iron: 3,
       silicon: 2,
       aluminum: 1.6,
-      water: 1.4,
+      ice: 2.2,
     };
+
+    /**
+     * The first four deposits are guaranteed and near: without reachable
+     * regolith, iron, silica and — above all — ice, the life-support chain is
+     * unopenable and the seed is simply unwinnable.
+     */
+    const guaranteed: ResourceId[] = ['regolith', 'iron', 'ice', 'silicon'];
 
     for (let i = 0; i < total; i++) {
       const isNear = i < nearCount;
-      // guarantee starter regolith + iron near the landing pad
       let res: ResourceId;
-      if (i === 0) res = 'regolith';
-      else if (i === 1) res = 'iron';
+      if (i < guaranteed.length) res = guaranteed[i];
       else res = this.pickWeighted(weight);
       counts[res]++;
 
