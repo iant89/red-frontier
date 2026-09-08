@@ -8,11 +8,25 @@ import type {
   Simulation,
 } from '../sim/Simulation';
 import type { RoverKind, BuildingKind, ResourceId } from '../sim/defs';
-import { RESOURCES, ROVERS, BUILDINGS } from '../sim/defs';
+import { RESOURCES, ROVERS, BUILDINGS, ALL_FLUIDS } from '../sim/defs';
+import type { SunState } from '../sim/clock';
+import { sunDirection } from '../sim/clock';
+import type { Colonist } from '../sim/lifesupport';
+
+export type OverlayMode = 'none' | 'power' | 'life';
+
+/** Sky/light keyframes across a sol. The renderer reads the sim's sun only. */
+const SKY_NIGHT = new THREE.Color(0x07070f);
+const SKY_TWILIGHT = new THREE.Color(0x38203a);
+const SKY_DAY = new THREE.Color(0xc98a5e);
+const FOG_NIGHT = new THREE.Color(0x0a0a14);
+const FOG_DAY = new THREE.Color(0xc08050);
+const SUN_LOW = new THREE.Color(0xff8340);
+const SUN_HIGH = new THREE.Color(0xfff0d0);
 
 export interface PickTarget {
   object: THREE.Object3D;
-  type: 'rover' | 'building' | 'deposit';
+  type: 'rover' | 'building' | 'deposit' | 'colonist';
   id: number;
 }
 
@@ -30,6 +44,14 @@ export class GameRenderer {
   private depositRoot = new THREE.Group();
 
   private roverMeshes = new Map<number, THREE.Group>();
+  private colonistMesh: THREE.Group | null = null;
+  private overlayRoot = new THREE.Group();
+  private overlayMarks = new Map<number, THREE.Group>();
+  private overlayMode: OverlayMode = 'none';
+  private hemi!: THREE.HemisphereLight;
+  private fillLight!: THREE.DirectionalLight;
+  private skyMat!: THREE.MeshBasicMaterial;
+  private padLight!: THREE.PointLight;
   private buildingMeshes = new Map<number, { group: THREE.Group; body: THREE.Object3D; pad: THREE.Mesh; construction: THREE.Object3D }>();
   private depositMeshes = new Map<number, THREE.Group>();
 
@@ -65,6 +87,7 @@ export class GameRenderer {
     this.scene.add(this.roverRoot);
     this.scene.add(this.buildingRoot);
     this.scene.add(this.depositRoot);
+    this.scene.add(this.overlayRoot);
 
     this.selectionRing = this.makeRing(0xffffff, 1.4, 0.35);
     this.selectionRing.visible = false;
@@ -87,11 +110,11 @@ export class GameRenderer {
   }
 
   private buildEnvironment(): void {
-    this.scene.background = new THREE.Color(0x0c0a16);
-    this.scene.fog = new THREE.Fog(0x0d0a18, 420, 1900);
+    this.scene.background = SKY_DAY.clone();
+    this.scene.fog = new THREE.Fog(FOG_DAY.clone(), 380, 1700);
 
-    const hemi = new THREE.HemisphereLight(0xffe0b0, 0x441f0e, 0.75);
-    this.scene.add(hemi);
+    this.hemi = new THREE.HemisphereLight(0xffe0b0, 0x441f0e, 0.75);
+    this.scene.add(this.hemi);
 
     this.sun = new THREE.DirectionalLight(0xffe2b8, 1.7);
     this.sun.position.set(240, 380, -160);
@@ -103,25 +126,63 @@ export class GameRenderer {
     cam.top = 360;
     cam.bottom = -360;
     cam.near = 50;
-    cam.far = 1200;
+    cam.far = 1400;
     this.sun.shadow.bias = -0.0006;
     this.scene.add(this.sun);
     this.scene.add(this.sun.target);
     this.sun.target.position.set(0, 0, 0);
 
-    const fill = new THREE.DirectionalLight(0x6fa8ff, 0.35);
-    fill.position.set(-200, 120, 260);
-    this.scene.add(fill);
+    this.fillLight = new THREE.DirectionalLight(0x6fa8ff, 0.3);
+    this.fillLight.position.set(-200, 120, 260);
+    this.scene.add(this.fillLight);
 
-    // stars / martian twilight sphere (very dim)
+    // The landing pad keeps a work light burning after dark — a small anchor
+    // so the base never disappears entirely at night.
+    this.padLight = new THREE.PointLight(0xffcf8a, 0, 120, 2);
+    this.padLight.position.set(SPAWN_X, 14, SPAWN_Z);
+    this.scene.add(this.padLight);
+
     const skyGeo = new THREE.SphereGeometry(2200, 32, 16);
-    const skyMat = new THREE.MeshBasicMaterial({
-      color: 0x14101f,
+    this.skyMat = new THREE.MeshBasicMaterial({
+      color: SKY_DAY.clone(),
       side: THREE.BackSide,
+      fog: false,
     });
-    const sky = new THREE.Mesh(skyGeo, skyMat);
+    const sky = new THREE.Mesh(skyGeo, this.skyMat);
     sky.position.set(0, -600, 0);
     this.scene.add(sky);
+  }
+
+  /**
+   * Drive every light in the scene from the simulation's authoritative sun
+   * (TDD §12 — one source of truth for both solar output and rendering).
+   */
+  private applySun(sun: SunState): void {
+    const dir = sunDirection(sun);
+    const dist = 700;
+    this.sun.position.set(dir.x * dist, Math.max(24, dir.y * dist), dir.z * dist);
+    this.sun.target.position.set(0, 0, 0);
+
+    // Daylight strength, and a separate twilight factor for the colour ramp.
+    const day = Math.max(0, Math.min(1, sun.altitude * 2.2));
+    const twilight = Math.max(0, 1 - Math.abs(sun.altitude) * 3.4);
+
+    this.sun.intensity = 2.2 * sun.irradiance;
+    this.sun.color.copy(SUN_LOW).lerp(SUN_HIGH, Math.min(1, Math.max(0, sun.altitude * 2.6)));
+    this.sun.castShadow = sun.irradiance > 0.03;
+
+    const sky = SKY_NIGHT.clone().lerp(SKY_TWILIGHT, twilight).lerp(SKY_DAY, day);
+    this.skyMat.color.copy(sky);
+    (this.scene.background as THREE.Color).copy(sky);
+    const fog = this.scene.fog as THREE.Fog;
+    fog.color.copy(FOG_NIGHT.clone().lerp(FOG_DAY, Math.max(day, twilight * 0.55)));
+
+    this.hemi.intensity = 0.1 + 0.68 * day;
+    this.hemi.color.copy(SUN_LOW).lerp(SUN_HIGH, day);
+    this.fillLight.intensity = 0.06 + 0.26 * (1 - day);
+    this.padLight.intensity = 1.5 * (1 - day);
+
+    this.renderer.toneMappingExposure = 0.82 + 0.3 * day;
   }
 
   private buildTerrain(): THREE.Mesh {
@@ -198,9 +259,171 @@ export class GameRenderer {
 
   // ---------------- entity syncing ----------------
   sync(sim: Simulation): void {
+    this.clockT = sim.simTime;
+    // Panels face the sun's azimuth and tilt with its elevation.
+    const el = Math.max(0, sim.sun.elevationRad);
+    this.sunTilt = {
+      y: -sim.sun.azimuthRad,
+      z: -(Math.PI / 2 - el) * 0.55,
+    };
+    this.applySun(sim.sun);
     this.syncRovers(sim.rovers);
     this.syncBuildings(sim.buildings);
     this.syncDeposits(sim.world.deposits);
+    this.syncColonist(sim.colonist);
+    this.syncOverlay(sim);
+  }
+
+  // ---------------- colonist ----------------
+  private syncColonist(c: Colonist): void {
+    if (!this.colonistMesh) {
+      this.colonistMesh = this.makeColonistMesh(c.id);
+      this.scene.add(this.colonistMesh);
+    }
+    const g = this.colonistMesh;
+    const y = this.world.heightAt(c.x, c.z);
+    g.position.set(c.x, y, c.z);
+    g.rotation.y = -c.heading;
+    // Inside a pressurised volume the figure is hidden by the structure.
+    g.visible = !c.inside && !c.dead;
+  }
+
+  private makeColonistMesh(id: number): THREE.Group {
+    const g = new THREE.Group();
+    const suit = new THREE.MeshStandardMaterial({
+      color: 0xe9e5db,
+      roughness: 0.55,
+      metalness: 0.1,
+    });
+    const trim = new THREE.MeshStandardMaterial({
+      color: 0xe07b3a,
+      roughness: 0.5,
+      metalness: 0.2,
+    });
+    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.42, 0.72, 4, 10), suit);
+    torso.position.y = 1.25;
+    const head = new THREE.Mesh(
+      new THREE.SphereGeometry(0.32, 14, 12),
+      new THREE.MeshStandardMaterial({
+        color: 0x2a3a4a,
+        roughness: 0.15,
+        metalness: 0.5,
+        emissive: 0x14202c,
+      }),
+    );
+    head.position.y = 2.0;
+    const pack = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.66, 0.34), trim);
+    pack.position.set(0, 1.36, -0.42);
+    for (const side of [-1, 1]) {
+      const leg = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.5, 3, 7), suit);
+      leg.position.set(side * 0.2, 0.5, 0);
+      g.add(leg);
+      const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.14, 0.46, 3, 7), suit);
+      arm.position.set(side * 0.55, 1.32, 0);
+      g.add(arm);
+    }
+    // A helmet lamp so the figure reads at night.
+    const lamp = new THREE.PointLight(0xfff0cc, 1.1, 26, 2);
+    lamp.position.set(0, 2.1, 0.4);
+    g.add(torso, head, pack, lamp);
+    g.traverse((o) => {
+      if (o instanceof THREE.Mesh) o.castShadow = true;
+    });
+    g.userData.pickable = true;
+    g.userData.pickType = 'colonist';
+    g.userData.pickId = id;
+    g.scale.setScalar(1.35); // readable at strategic zoom
+    return g;
+  }
+
+  // ---------------- overlays ----------------
+  setOverlay(mode: OverlayMode): void {
+    this.overlayMode = mode;
+    this.overlayRoot.visible = mode !== 'none';
+    if (mode === 'none') {
+      for (const [, m] of this.overlayMarks) m.visible = false;
+    }
+  }
+
+  /**
+   * Floating markers above each building showing what it contributes to the
+   * selected network. Cheap, readable, and colour-independent (TDD §11 asks
+   * for colour-independent icons, so each mark carries a distinct shape too).
+   */
+  private syncOverlay(sim: Simulation): void {
+    if (this.overlayMode === 'none') return;
+    const seen = new Set<number>();
+    for (const b of sim.buildings) {
+      const def = BUILDINGS[b.kind];
+      const relevant =
+        this.overlayMode === 'power'
+          ? def.powerProduceKw > 0 || def.powerDrawKw > 0 || def.batteryKWh > 0
+          : !!def.process || !!def.fluidCapacity;
+      if (!relevant || b.state !== 'online') continue;
+      seen.add(b.id);
+
+      let mark = this.overlayMarks.get(b.id);
+      if (!mark) {
+        mark = new THREE.Group();
+        const ring = new THREE.Mesh(
+          new THREE.TorusGeometry(1, 0.16, 6, 22),
+          new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.85, depthTest: false }),
+        );
+        ring.rotation.x = -Math.PI / 2;
+        const beam = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.16, 0.16, 1, 6),
+          new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.4, depthTest: false }),
+        );
+        mark.add(ring, beam);
+        mark.renderOrder = 999;
+        this.overlayRoot.add(mark);
+        this.overlayMarks.set(b.id, mark);
+      }
+      mark.visible = true;
+
+      const y = this.world.heightAt(b.x, b.z);
+      const height = def.radius * 1.6 + 6;
+      mark.position.set(b.x, y + height, b.z);
+
+      const ring = mark.children[0] as THREE.Mesh;
+      const beam = mark.children[1] as THREE.Mesh;
+      const ringMat = ring.material as THREE.MeshBasicMaterial;
+      const beamMat = beam.material as THREE.MeshBasicMaterial;
+
+      let color = 0x888888;
+      let scale = 1;
+      if (this.overlayMode === 'power') {
+        if (b.genKw > 0.01) {
+          color = 0xffd479;
+          scale = 1 + (b.genKw / Math.max(1, def.powerProduceKw)) * 1.4;
+        } else if (def.batteryKWh > 0) {
+          color = 0x9f7fe0;
+          scale = 1.2;
+        } else if (b.loadKw > 0.01) {
+          color = 0x6fd3ff;
+          scale = 1 + (b.loadKw / Math.max(1, def.powerDrawKw)) * 1.1;
+        } else {
+          color = 0x555555;
+          scale = 0.7;
+        }
+        if (b.powerSat < 0.995) color = 0xd9553f;
+      } else {
+        const p = def.process;
+        if (p?.fluidOut?.water || def.fluidCapacity?.water) color = 0x4aa3e0;
+        if (p?.fluidOut?.oxygen || def.fluidCapacity?.oxygen) color = 0x7fd9c8;
+        if (p?.fluidOut?.food || def.fluidCapacity?.food) color = 0x8fce5a;
+        scale = p ? 0.7 + b.throughput * 1.6 : 1;
+        if (p && b.throughput < 0.02) color = 0xd9553f;
+      }
+      ringMat.color.setHex(color);
+      beamMat.color.setHex(color);
+      ring.scale.setScalar(scale * 1.6);
+      beam.scale.set(1, height, 1);
+      beam.position.y = -height / 2;
+    }
+    for (const [id, m] of this.overlayMarks) {
+      if (!seen.has(id)) m.visible = false;
+    }
   }
 
   private syncRovers(rovers: SRover[]): void {
@@ -258,7 +481,30 @@ export class GameRenderer {
       rec.group.userData.pickType = 'building';
       rec.group.userData.pickId = b.id;
       rec.pad.visible = true;
-      void def;
+
+      /**
+       * Runtime state is legible from the world itself, not only the HUD: a
+       * switched-off or unpowered building visibly dims, a running process
+       * pulses, and solar panels physically track the sun.
+       */
+      if (b.state === 'online') {
+        const running = b.enabled && b.powerSat > 0.02;
+        const dim = !b.enabled ? 0.34 : b.powerSat < 0.5 ? 0.6 : 1;
+        this.setGroupBrightness(rec.body, dim);
+
+        if (b.kind === 'solar') {
+          // Tilt the array toward the sun; park it flat after dark.
+          const tilt = this.sunTilt;
+          rec.body.rotation.z = tilt.z;
+          rec.body.rotation.y = tilt.y;
+        }
+        if (def.process && running && b.throughput > 0.02) {
+          const pulse = 1 + Math.sin(this.clockT * 3.2) * 0.02 * b.throughput;
+          rec.body.scale.setScalar(pulse);
+        } else {
+          rec.body.scale.setScalar(1);
+        }
+      }
     }
     for (const [id, rec] of this.buildingMeshes) {
       if (!seen.has(id)) {
@@ -266,6 +512,33 @@ export class GameRenderer {
         this.buildingMeshes.delete(id);
       }
     }
+  }
+
+  /** Cached per-frame values used while syncing buildings. */
+  private sunTilt = { y: 0, z: 0 };
+  private clockT = 0;
+
+  /**
+   * Scale a mesh tree's emissive/colour to convey "powered" vs "dark".
+   * Materials are cloned on first touch so shared definitions aren't mutated.
+   */
+  private setGroupBrightness(root: THREE.Object3D, factor: number): void {
+    root.traverse((o) => {
+      if (!(o instanceof THREE.Mesh)) return;
+      const mat = o.material as THREE.MeshStandardMaterial;
+      if (!mat || !mat.color) return;
+      if (!o.userData.baseColor) {
+        o.material = mat.clone();
+        (o.material as THREE.MeshStandardMaterial).userData = {};
+        o.userData.baseColor = (o.material as THREE.MeshStandardMaterial).color.clone();
+      }
+      const m = o.material as THREE.MeshStandardMaterial;
+      const base = o.userData.baseColor as THREE.Color;
+      if (o.userData.brightness !== factor) {
+        m.color.copy(base).multiplyScalar(factor);
+        o.userData.brightness = factor;
+      }
+    });
   }
 
   private syncDeposits(deposits: Deposit[]): void {
@@ -416,6 +689,130 @@ export class GameRenderer {
         duct.position.y = 4.4;
         g.add(box);
         g.add(duct);
+        break;
+      }
+      case 'extractor': {
+        // A squat kiln that bakes hauled ice, with a hopper and a vent stack.
+        const body = new THREE.Mesh(
+          new THREE.CylinderGeometry(3.4, 4.0, 4.2, 12),
+          mat(0x6d7d86, { rough: 0.45, metal: 0.55 }),
+        );
+        body.position.y = 2.1;
+        const hopper = new THREE.Mesh(
+          new THREE.CylinderGeometry(2.4, 1.2, 2.2, 8),
+          mat(0x4c5a62, { rough: 0.5, metal: 0.5 }),
+        );
+        hopper.position.set(0, 5.2, 0);
+        const stack = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.42, 0.5, 4.4, 8),
+          mat(0x8b9299, { metal: 0.7 }),
+        );
+        stack.position.set(2.6, 4.2, 1.4);
+        const band = new THREE.Mesh(
+          new THREE.TorusGeometry(3.5, 0.22, 6, 18),
+          mat(0x2f7fb0, { metal: 0.5, rough: 0.3 }),
+        );
+        band.rotation.x = Math.PI / 2;
+        band.position.y = 2.6;
+        g.add(body, hopper, stack, band);
+        break;
+      }
+      case 'oxygenator': {
+        // Electrolysis stacks: paired cylinders and a gas manifold.
+        const base = new THREE.Mesh(new THREE.BoxGeometry(7, 1.4, 5), mat(0x50565c, { metal: 0.5 }));
+        base.position.y = 0.7;
+        g.add(base);
+        for (const dx of [-1.9, 0, 1.9]) {
+          const cell = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.85, 0.85, 4.6, 12),
+            mat(0xd6dde0, { rough: 0.3, metal: 0.45 }),
+          );
+          cell.position.set(dx, 3.7, 0);
+          const cap = new THREE.Mesh(
+            new THREE.SphereGeometry(0.86, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+            mat(0x7fd9c8, { rough: 0.25, metal: 0.4 }),
+          );
+          cap.position.set(dx, 6.0, 0);
+          g.add(cell, cap);
+        }
+        const manifold = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.3, 0.3, 6.2, 8),
+          mat(0x8b9299, { metal: 0.7 }),
+        );
+        manifold.rotation.z = Math.PI / 2;
+        manifold.position.y = 6.6;
+        g.add(manifold);
+        break;
+      }
+      case 'greenhouse': {
+        // A glazed barrel vault — the only green thing on the planet.
+        const vault = new THREE.Mesh(
+          new THREE.CylinderGeometry(4.6, 4.6, 11, 16, 1, false, 0, Math.PI),
+          new THREE.MeshStandardMaterial({
+            color: 0xbfe6f5,
+            roughness: 0.12,
+            metalness: 0.1,
+            transparent: true,
+            opacity: 0.42,
+            side: THREE.DoubleSide,
+          }),
+        );
+        vault.rotation.z = Math.PI / 2;
+        vault.rotation.y = Math.PI / 2;
+        vault.position.y = 0.4;
+        const plinth = new THREE.Mesh(new THREE.BoxGeometry(11.4, 1, 9.6), mat(0x7d7466));
+        plinth.position.y = 0.5;
+        g.add(plinth, vault);
+        // Crop rows visible through the glass.
+        for (const dz of [-2.6, 0, 2.6]) {
+          const row = new THREE.Mesh(
+            new THREE.BoxGeometry(9.4, 0.9, 1.5),
+            mat(0x4f8f3a, { rough: 0.9, metal: 0 }),
+          );
+          row.position.set(0, 1.4, dz);
+          g.add(row);
+        }
+        const ribMat = mat(0xa8b0b6, { metal: 0.6 });
+        for (const dx of [-4.6, 0, 4.6]) {
+          const rib = new THREE.Mesh(new THREE.TorusGeometry(4.6, 0.16, 5, 14, Math.PI), ribMat);
+          rib.position.set(dx, 0.4, 0);
+          rib.rotation.y = Math.PI / 2;
+          g.add(rib);
+        }
+        break;
+      }
+      case 'rtg': {
+        // Radioisotope units on a finned heat-rejection rack.
+        const rack = new THREE.Mesh(new THREE.BoxGeometry(6.4, 0.9, 4.4), mat(0x3f4348, { metal: 0.6 }));
+        rack.position.y = 0.45;
+        g.add(rack);
+        for (const dx of [-1.7, 1.7]) {
+          const unit = new THREE.Mesh(
+            new THREE.CylinderGeometry(1.05, 1.05, 3.4, 10),
+            mat(0x2b2f33, { rough: 0.35, metal: 0.75 }),
+          );
+          unit.position.set(dx, 2.6, 0);
+          const glow = new THREE.Mesh(
+            new THREE.CylinderGeometry(1.09, 1.09, 0.5, 10),
+            new THREE.MeshStandardMaterial({
+              color: 0xff7a3a,
+              emissive: 0xff5a1a,
+              emissiveIntensity: 1.4,
+              roughness: 0.4,
+            }),
+          );
+          glow.position.set(dx, 2.6, 0);
+          g.add(unit, glow);
+          for (let i = 0; i < 6; i++) {
+            const fin = new THREE.Mesh(new THREE.BoxGeometry(0.12, 3.2, 2.0), mat(0x565b60, { metal: 0.7 }));
+            fin.position.set(dx, 2.6, 0);
+            fin.rotation.y = (i / 6) * Math.PI;
+            g.add(fin);
+          }
+        }
+        const warmth = new THREE.PointLight(0xff7a3a, 0.9, 34, 2);
+        warmth.position.set(0, 3, 0);
+        g.add(warmth);
         break;
       }
     }

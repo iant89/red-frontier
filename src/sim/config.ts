@@ -1,9 +1,28 @@
-/** Global constants tuning the simulation. Design targets — easy to rebalance. */
+/**
+ * Global constants tuning the simulation. Design targets — easy to rebalance.
+ *
+ * ## Two time bases (important)
+ *
+ * The sim advances in **game seconds** at a fixed 20 Hz step. Two different
+ * rates are expressed against that clock:
+ *
+ * - **Material flows** (mining kg/s, construction seconds) are authored in
+ *   *game seconds*, because they are paced for the player's attention span.
+ * - **Energy and life-support flows** (kW, kWh, kg of oxygen per sol) are
+ *   authored in *Mars time*, because those numbers should read like real
+ *   engineering figures. They are converted with {@link HOURS_PER_SEC} /
+ *   {@link SOLS_PER_SEC}.
+ *
+ * So a 24 kW solar array really does deliver 24 kWh per Mars hour, while a sol
+ * only takes four minutes of your life at 1× speed.
+ */
 
-export const SIM_TICK = 1 / 20; // 20 Hz fixed step (seconds)
+export const SIM_TICK = 1 / 20; // 20 Hz fixed step (game seconds)
 export const TICKS_PER_SEC = 20;
 
 export const SPEEDS = [0, 1, 2, 4] as const; // paused, 1x, 2x, 4x
+
+// ---------------------------------------------------------------- world ----
 
 // Playable region is [-WORLD_HALF, WORLD_HALF]^2 in world units.
 export const WORLD_HALF = 320;
@@ -12,15 +31,127 @@ export const SPAWN_X = 0;
 export const SPAWN_Z = 0;
 export const SPAWN_RADIUS = 26; // flat buildable clear zone around landing
 
-// Base stockpile capacity at the landing pad (kg).
-export const BASE_STORAGE_CAPACITY = 400;
+// ----------------------------------------------------------------- time ----
 
-// Rover battery floor (fraction) before it refuses further work and recharges.
+/** Real Mars sol: 24 h 39 m 35 s. */
+export const SOL_HOURS = 24.6597;
+
+/** How many game seconds one sol takes at 1× speed. */
+export const SOL_SECONDS = 240;
+
+/** Mars hours elapsed per game second — the energy accounting bridge. */
+export const HOURS_PER_SEC = SOL_HOURS / SOL_SECONDS;
+
+/** Sols elapsed per game second — the life-support accounting bridge. */
+export const SOLS_PER_SEC = 1 / SOL_SECONDS;
+
+/** Sol fraction at which the sun crosses the horizon going up / down. */
+export const SUNRISE_FRAC = 0.25;
+export const SUNSET_FRAC = 0.75;
+
+/** Mission starts mid-morning so the player gets a full day of light first. */
+export const START_SOL_FRAC = 0.34;
+
+// -------------------------------------------------------------- storage ----
+
+/**
+ * Bulk stockpile capacity of the landing pod, **per resource type** (kg).
+ *
+ * Storage is per-resource (TDD §5 `Storage(resourceType, amount, capacity)`)
+ * rather than one shared pool. That is a deliberate choice: with a shared pool
+ * a single rover-load of regolith can fill the colony and deadlock every other
+ * supply chain, which reads as a bug rather than a bottleneck. Per-resource
+ * silos keep storage a real constraint without ever making a seed unwinnable.
+ */
+export const BASE_STORAGE_PER_RESOURCE = 260;
+
+// ------------------------------------------------------------ landing pod ----
+
+/**
+ * The descent stage is not scenery: it is the colony's first power plant,
+ * shelter and warehouse. Its RTG is why you are alive on Sol 1, and its
+ * modest output is why you cannot stay that way.
+ */
+export const POD_POWER_KW = 14; // baseload RTG on the descent stage
+export const POD_BATTERY_KWH = 90;
+export const POD_LIFE_SUPPORT_KW = 2; // pod's own scrubbers & heaters (tier 0)
+export const POD_RADIUS = 8;
+
+// --------------------------------------------------------------- rovers ----
+
+/** Rover battery floor (fraction) before it refuses further work and recharges. */
 export const ROVER_CHARGE_THRESHOLD = 0.2;
 export const ROVER_DISABLED_THRESHOLD = 0.01;
-export const ROVER_CHARGE_RATE_KWH = 8; // kW draw from base charger
 
-// Solar output cap (kW) — used once power loop arrives; panels store it now.
-export const SOLAR_PANEL_KW = 10;
+/** Charger output per rover (kW). Draws from the colony power grid. */
+export const ROVER_CHARGE_RATE_KW = 20;
+
+/** Power priority tier that rover charging sits on (lowest). */
+export const ROVER_CHARGE_TIER = 3;
+
+// ---------------------------------------------------------------- power ----
+
+/** Priority tiers, highest priority first. Tier 0 is shed last. */
+export const POWER_TIERS = [0, 1, 2, 3] as const;
+export type PowerTier = (typeof POWER_TIERS)[number];
+
+export const POWER_TIER_LABELS: Record<PowerTier, string> = {
+  0: 'Life support',
+  1: 'Oxygen & water',
+  2: 'Industry',
+  3: 'Logistics',
+};
+
+/** Below this satisfaction a tier is considered browned out. */
+export const BROWNOUT_THRESHOLD = 0.995;
+
+// ---------------------------------------------------- solar & atmosphere ----
+
+/**
+ * Fraction of peak irradiance still reaching a panel when the sun is exactly on
+ * the horizon (Mars has a thin but dusty atmosphere).
+ */
+export const HORIZON_EXTINCTION = 0.08;
+
+/** Baseline atmospheric dust transmission (1 = perfectly clear). Weather hook. */
+export const BASE_DUST_TRANSMISSION = 1;
+
+// ------------------------------------------------------------- colonist ----
+
+/** Per-sol consumption of one human. */
+export const COLONIST_O2_PER_SOL = 0.84; // kg
+export const COLONIST_WATER_PER_SOL = 4.0; // kg
+export const COLONIST_FOOD_PER_SOL = 1.5; // kg
+
+/** Fraction of a colonist's water use recovered by habitat reclamation. */
+export const WATER_RECLAIM_FRACTION = 0.55;
+
+/** EVA suit oxygen reserve (kg) — how long the human survives outside. */
+export const SUIT_O2_CAPACITY = 0.42;
+
+/** Health lost per sol while a need is unmet. */
+export const HEALTH_LOSS_NO_O2 = 200;
+export const HEALTH_LOSS_NO_WATER = 16;
+export const HEALTH_LOSS_NO_FOOD = 6;
+
+/** Health regained per sol when every need is satisfied. */
+export const HEALTH_REGEN = 10;
+
+/** Colonist walking speed (world units / game second). */
+export const COLONIST_SPEED = 5.5;
+
+/** Construction output a suited human contributes (rover baseline = 1.0). */
+export const COLONIST_BUILD_POWER = 0.5;
+
+// ---------------------------------------------------------- persistence ----
 
 export const AUTOSAVE_INTERVAL_S = 45;
+
+/** Current save schema version. Bump whenever the snapshot shape changes. */
+export const SAVE_VERSION = 2;
+
+// -------------------------------------------------------------- history ----
+
+/** How many samples the HUD graphs retain, and how often the sim records one. */
+export const HISTORY_SAMPLES = 120;
+export const HISTORY_INTERVAL_S = 1;
