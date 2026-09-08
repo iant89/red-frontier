@@ -113,8 +113,82 @@ export const BROWNOUT_THRESHOLD = 0.995;
  */
 export const HORIZON_EXTINCTION = 0.08;
 
-/** Baseline atmospheric dust transmission (1 = perfectly clear). Weather hook. */
+/**
+ * Baseline atmospheric dust transmission on a clear sol (1 = perfectly clear).
+ * The weather system modulates transmission around this; TDD §11/§12's
+ * `dustTransmission` term lives in `sim/weather.ts`.
+ */
 export const BASE_DUST_TRANSMISSION = 1;
+
+// -------------------------------------------------------------- weather ----
+// Prototype 3 (GDD §7, §16): wind, airborne dust, storms, and the degradation
+// they cause. All rates are per game second unless stated; a sol is
+// SOL_SECONDS game seconds, so "per sol" figures divide it out.
+
+/** No storms may be scheduled before this many sols — you land in clear weather. */
+export const WEATHER_CALM_SOLS = 2.2;
+
+/** Weather is re-rolled on this cadence (game seconds ≈ 0.35 sol). */
+export const WEATHER_ROLL_INTERVAL_S = 84;
+
+/** Minimum quiet gap between the end of one storm and the next roll. */
+export const WEATHER_STORM_COOLDOWN_S = 96;
+
+/** Per-roll storm probabilities. Each is additionally gated by sol number. */
+export const STORM_CHANCES = {
+  devil: 0.1, // from sol 3
+  regional: 0.045, // from sol 4
+  severe: 0.012, // from sol 7
+  planetary: 0.006, // from sol 12, grows slowly with each sol after
+} as const;
+
+/** The sol each storm class becomes possible (devils first, planetary last). */
+export const STORM_UNLOCK_SOL = {
+  devil: 3,
+  regional: 4,
+  severe: 7,
+  planetary: 12,
+} as const;
+
+/**
+ * Lead time before a storm's winds arrive, during which the forecast is known.
+ * Long enough to charge batteries and recall crews; short enough to matter.
+ */
+export const STORM_WARN_LEAD_S = 60;
+
+/**
+ * Structural damage per game second: `intensity^1.5 × exposure × this`.
+ * Tuned so a regional storm bruises exposed arrays and a severe one can trip
+ * them offline — while a planetary event threatens everything except the pod.
+ */
+export const STORM_DAMAGE_K = 0.38;
+
+/** A building at or below this health is damaged: offline until repaired. */
+export const DAMAGED_HEALTH = 25;
+/** Repair work that brings a damaged building back to this health restarts it. */
+export const REPAIR_RESTART_HEALTH = 55;
+export const BUILDING_MAX_HEALTH = 100;
+
+/** Rover repair speed (health per game second). */
+export const ROVER_REPAIR_RATE = 4.2;
+/** Rover cleaning speed (cleanliness fraction per game second). */
+export const ROVER_CLEAN_RATE = 0.075;
+
+/** Cleanliness loss per sol for a panel under ambient dust `dust`. */
+export const PANEL_DIRT_PER_SOL = 0.85;
+
+/** Panels dirtier than this get an automatic cleaning dispatch. */
+export const AUTO_CLEAN_THRESHOLD = 0.7;
+
+/** Storm intensity at which rovers are recalled to shelter. */
+export const STORM_SHELTER_INTENSITY = 0.55;
+/** Storm intensity at which new EVAs are refused and outside crews recalled. */
+export const STORM_EVA_INTENSITY = 0.4;
+/** Rovers work at this fraction of rate while a storm is ramping past EVA level. */
+export const STORM_WORK_MUL = 0.6;
+
+/** Cleanliness never drops below this — dust dims, it never entombs. */
+export const CLEANLINESS_FLOOR = 0.15;
 
 // ------------------------------------------------------------- colonist ----
 
@@ -148,7 +222,7 @@ export const COLONIST_BUILD_POWER = 0.5;
 export const AUTOSAVE_INTERVAL_S = 45;
 
 /** Current save schema version. Bump whenever the snapshot shape changes. */
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 // -------------------------------------------------------------- history ----
 

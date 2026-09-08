@@ -41,6 +41,17 @@ import {
   HISTORY_INTERVAL_S,
   BASE_DUST_TRANSMISSION,
   SAVE_VERSION,
+  BUILDING_MAX_HEALTH,
+  DAMAGED_HEALTH,
+  REPAIR_RESTART_HEALTH,
+  ROVER_REPAIR_RATE,
+  ROVER_CLEAN_RATE,
+  PANEL_DIRT_PER_SOL,
+  AUTO_CLEAN_THRESHOLD,
+  STORM_SHELTER_INTENSITY,
+  STORM_EVA_INTENSITY,
+  STORM_WORK_MUL,
+  CLEANLINESS_FLOOR,
 } from './config';
 import type { PowerTier } from './config';
 import type {
@@ -64,6 +75,8 @@ import {
 } from './defs';
 import { SolClock } from './clock';
 import type { SunState } from './clock';
+import { Weather, stormLabel } from './weather';
+import type { StormKind } from './weather';
 import { resolvePower, idlePower, type PowerDemand, type PowerResult } from './power';
 import {
   makePools,
@@ -106,13 +119,17 @@ export interface Rover {
   autoTask: boolean;
   /** Player opt-out from automatic supply runs. */
   autoHaul: boolean;
+  /** Forced back to base by storm weather; released when the storm passes. */
+  sheltered: boolean;
 }
 
 export type RoverCommand =
   | { type: 'idle' }
   | { type: 'moveTo'; x: number; z: number }
   | { type: 'mine'; depositId: number }
-  | { type: 'construct'; buildingId: number };
+  | { type: 'construct'; buildingId: number }
+  | { type: 'clean'; buildingId: number }
+  | { type: 'repair'; buildingId: number };
 
 export type RoverGoal =
   | 'idle'
@@ -123,7 +140,9 @@ export type RoverGoal =
   | 'toSite'
   | 'build'
   | 'toCharge'
-  | 'charge';
+  | 'charge'
+  | 'toService'
+  | 'service';
 
 export type RoverPhase = 'idle' | 'moving' | 'working' | 'charging' | 'disabled';
 
@@ -152,6 +171,13 @@ export interface Building {
   loadKw: number;
   /** Why it isn't running, for the inspector. */
   idleReason: string;
+  // ---- Prototype 3: weather exposure --------------------------------------
+  /** Structural health 0..100. Storms chew it down; rovers repair it up. */
+  health: number;
+  /** Panel cleanliness 0..1 — dust on the glass, solar output pays for it. */
+  cleanliness: number;
+  /** Tripped offline by damage; a rover repair brings it back online. */
+  damaged: boolean;
 }
 
 export type { Colonist } from './lifesupport';
@@ -195,6 +221,7 @@ function lerpAngle(a: number, b: number, t: number): number {
 /** Human-readable state for the inspector. */
 export function roverStatusText(r: Rover): string {
   if (r.phase === 'disabled') return 'Disabled — out of power';
+  if (r.sheltered) return 'Sheltering from storm';
   switch (r.goal) {
     case 'idle':
       return r.phase === 'charging' ? 'Charging' : 'Idle';
@@ -213,6 +240,9 @@ export function roverStatusText(r: Rover): string {
       return 'Returning to charge';
     case 'charge':
       return 'Charging';
+    case 'toService':
+    case 'service':
+      return r.command.type === 'repair' ? 'Repairing' : 'Cleaning panels';
     default:
       return r.phase;
   }
@@ -257,8 +287,16 @@ export class Simulation {
   /** Set once the mission has ended, with the reason. */
   gameOver: { reason: string; sol: number } | null = null;
 
-  /** Atmospheric dust transmission, 1 = clear. Weather (P3) will drive this. */
+  /**
+   * Atmospheric dust transmission, 1 = clear. Driven by the weather system
+   * every tick; solar generation, greenhouse light and the renderer all read
+   * it (TDD §12's single authoritative environment).
+   */
   dustTransmission = BASE_DUST_TRANSMISSION;
+
+  /** Wind, dust and storms (Prototype 3). */
+  weather = new Weather(0);
+  private stormAnnounced = false;
 
   constructor(params: { seed: number; nearDeposits?: number }) {
     this.seed = params.seed;
@@ -266,6 +304,7 @@ export class Simulation {
       seed: params.seed,
       nearDeposits: params.nearDeposits ?? 0.2,
     });
+    this.weather = new Weather(params.seed ^ 0x77e711e);
     this.colonist = makeColonist(
       1,
       'Cmdr. Vega',
@@ -310,6 +349,7 @@ export class Simulation {
       chargeSat: 1,
       autoTask: false,
       autoHaul: true,
+      sheltered: false,
     });
   }
 
@@ -324,7 +364,7 @@ export class Simulation {
     let cap = BASE_STORAGE_PER_RESOURCE;
     const fluid = { ...POD_FLUID_CAPACITY };
     for (const b of this.buildings) {
-      if (b.state !== 'online') continue;
+      if (!this.runnable(b)) continue;
       const def = BUILDINGS[b.kind];
       cap += def.storagePerResourceKg;
       if (def.fluidCapacity) {
@@ -384,7 +424,7 @@ export class Simulation {
   batteryCapacity(): number {
     let cap = POD_BATTERY_KWH;
     for (const b of this.buildings) {
-      if (b.state === 'online' && b.enabled) cap += BUILDINGS[b.kind].batteryKWh;
+      if (this.runnable(b) && b.enabled) cap += BUILDINGS[b.kind].batteryKWh;
     }
     return cap;
   }
@@ -412,7 +452,7 @@ export class Simulation {
 
   onlineWarehouses(): Building[] {
     return this.buildings.filter(
-      (b) => b.state === 'online' && BUILDINGS[b.kind].storagePerResourceKg > 0,
+      (b) => this.runnable(b) && BUILDINGS[b.kind].storagePerResourceKg > 0,
     );
   }
 
@@ -422,7 +462,7 @@ export class Simulation {
       { id: 0, x: SPAWN_X, z: SPAWN_Z, radius: POD_RADIUS, recycles: false },
     ];
     for (const b of this.buildings) {
-      if (b.state !== 'online') continue;
+      if (!this.runnable(b)) continue;
       const def = BUILDINGS[b.kind];
       if (!def.pressurized) continue;
       out.push({
@@ -478,7 +518,7 @@ export class Simulation {
   nearCharger(x: number, z: number): boolean {
     if (Math.hypot(SPAWN_X - x, SPAWN_Z - z) < POD_RADIUS + 6) return true;
     for (const b of this.buildings) {
-      if (b.state !== 'online' || !b.enabled) continue;
+      if (!this.runnable(b) || !b.enabled) continue;
       if (!BUILDINGS[b.kind].providesCharge) continue;
       if (Math.hypot(b.x - x, b.z - z) < BUILDINGS[b.kind].radius + 5) return true;
     }
@@ -489,7 +529,7 @@ export class Simulation {
     let best = { x: SPAWN_X, z: SPAWN_Z };
     let bestD = Math.hypot(SPAWN_X - x, SPAWN_Z - z);
     for (const b of this.buildings) {
-      if (b.state !== 'online' || !b.enabled) continue;
+      if (!this.runnable(b) || !b.enabled) continue;
       if (!BUILDINGS[b.kind].providesCharge) continue;
       const d = Math.hypot(b.x - x, b.z - z);
       if (d < bestD) {
@@ -608,6 +648,100 @@ export class Simulation {
     this.recomputeCapacities();
   }
 
+  /**
+   * Send a rover to clean a building's exposed surfaces. Fails (with a log
+   * line) if there is nothing to clean or the storm makes it unsafe.
+   */
+  issueClean(roverId: number, buildingId: number): boolean {
+    const r = this.roverById(roverId);
+    const b = this.buildingById(buildingId);
+    if (!r || r.phase === 'disabled' || !b || b.state !== 'online') return false;
+    if (BUILDINGS[b.kind].generation !== 'solar') {
+      this.event('info', `${BUILDINGS[b.kind].label} has no panels to clean.`);
+      return false;
+    }
+    if (b.cleanliness > 0.995) {
+      this.event('info', `The ${BUILDINGS[b.kind].label} array is already clean.`);
+      return false;
+    }
+    if (this.weather.shelterRovers()) {
+      this.event('warn', 'Too dangerous to work outside — wait for the storm to pass.');
+      return false;
+    }
+    r.autoTask = false;
+    r.command = { type: 'clean', buildingId };
+    r.recharge = false;
+    return true;
+  }
+
+  /** Send a rover to repair a damaged (or battered) building. */
+  issueRepair(roverId: number, buildingId: number): boolean {
+    const r = this.roverById(roverId);
+    const b = this.buildingById(buildingId);
+    if (!r || r.phase === 'disabled' || !b) return false;
+    if (b.state !== 'online' || b.health >= BUILDING_MAX_HEALTH - 0.5) {
+      this.event('info', `${b ? BUILDINGS[b.kind].label : 'That building'} needs no repairs.`);
+      return false;
+    }
+    if (this.weather.shelterRovers()) {
+      this.event('warn', 'Too dangerous to work outside — wait for the storm to pass.');
+      return false;
+    }
+    r.autoTask = false;
+    r.command = { type: 'repair', buildingId };
+    r.recharge = false;
+    return true;
+  }
+
+  /**
+   * Convenience dispatch used by the building inspector: pick the nearest idle
+   * rover and send it to service this building (repair first, then clean).
+   */
+  dispatchMaintenance(buildingId: number): boolean {
+    const b = this.buildingById(buildingId);
+    if (!b || b.state !== 'online') return false;
+    const needsRepair = b.damaged || b.health < BUILDING_MAX_HEALTH - 0.5;
+    const needsClean = BUILDINGS[b.kind].generation === 'solar' && b.cleanliness < 0.995;
+    if (!needsRepair && !needsClean) return false;
+    const crew = this.rovers
+      .filter(
+        (r) =>
+          r.phase !== 'disabled' &&
+          !r.recharge &&
+          !r.sheltered &&
+          r.command.type === 'idle',
+      )
+      .sort(
+        (a, c) =>
+          Math.hypot(a.x - b.x, a.z - b.z) - Math.hypot(c.x - b.x, c.z - b.z) || a.id - c.id,
+      );
+    const rover = crew[0];
+    if (!rover) {
+      this.event('warn', 'No free rover — one has to be idle to dispatch.');
+      return false;
+    }
+    const ok = needsRepair
+      ? this.issueRepair(rover.id, b.id)
+      : this.issueClean(rover.id, b.id);
+    if (ok) {
+      const job = needsRepair ? 'repair' : 'clean';
+      this.event('info', `${rover.label} dispatched to ${job} the ${BUILDINGS[b.kind].label}.`);
+    }
+    return ok;
+  }
+
+  /**
+   * What maintenance a building currently needs, if any — the single source of
+   * truth the HUD and the tap-to-order gesture both read.
+   */
+  needsMaintenance(buildingId: number): 'repair' | 'clean' | null {
+    const b = this.buildingById(buildingId);
+    if (!b || b.state !== 'online') return null;
+    if (b.health < BUILDING_MAX_HEALTH - 0.5) return 'repair';
+    if (BUILDINGS[b.kind].generation === 'solar' && b.cleanliness < 0.995) return 'clean';
+    return null;
+  }
+
   orderColonist(order: ColonistOrder): void {
     const c = this.colonist;
     if (c.dead) return;
@@ -627,6 +761,11 @@ export class Simulation {
           'warn',
           `Too far for an EVA — ${c.name}'s suit holds about ${Math.round(reach)} m of round trip.`,
         );
+        return;
+      }
+      // A dust storm is the other hard no: visibility gone, grit in the seals.
+      if (this.weather.blocksEVA()) {
+        this.event('warn', 'EVA refused — the storm is too severe to go outside.');
         return;
       }
       c.gx = order.x;
@@ -682,6 +821,9 @@ export class Simulation {
       genKw: 0,
       loadKw: 0,
       idleReason: '',
+      health: BUILDING_MAX_HEALTH,
+      cleanliness: 1,
+      damaged: false,
     };
     this.buildings.push(b);
     this.event('info', `${def.label} sited — assigning a builder.`);
@@ -691,30 +833,34 @@ export class Simulation {
   // -------------------------------------------------------- main loop ----
 
   /**
-   * Total game time handed to the sim, and how much of it has been consumed as
-   * whole ticks. Deriving the tick count from these two totals — rather than
-   * accumulating a remainder — means floating-point error cannot compound:
-   * 60 seconds delivered in 3 600 ragged browser frames runs exactly as many
-   * ticks as 60 seconds delivered in one call. Determinism §4 depends on it.
+   * Delivered-time remainder, always held in [0, SIM_TICK). Each call fires the
+   * whole ticks it completes and subtracts *exactly* that much, so the
+   * accumulator telescopes: 60 seconds delivered in 3 600 ragged browser
+   * frames runs exactly as many ticks as 60 seconds delivered in one call, and
+   * the error in the remainder can never compound the way a naive
+   * "ticks owed = floor(total / step)" comparison does once `total` grows into
+   * the tens of thousands (a restored colony used to drift by one tick against
+   * the original for exactly that reason).
    */
-  private elapsed = 0;
+  private remainder = 0;
   private ticksRun = 0;
 
   /** Advance simulation by `frameDt` game seconds (fixed substeps applied). */
   step(frameDt: number): number {
     if (frameDt <= 0 || !Number.isFinite(frameDt)) return 0;
-    this.elapsed += frameDt;
+    this.remainder += frameDt;
 
-    // The epsilon absorbs representation error so that a total which is
+    // The epsilon absorbs representation error so that a delivery which is
     // mathematically a whole number of ticks always yields that many ticks.
-    const due = Math.floor(this.elapsed / SIM_TICK + 1e-9);
-    let owed = due - this.ticksRun;
+    let owed = Math.floor(this.remainder / SIM_TICK + 1e-9);
 
     // Bound catch-up so a backgrounded tab can't produce a multi-second freeze.
     const maxTicks = 400;
     if (owed > maxTicks) {
-      this.ticksRun = due - maxTicks;
       owed = maxTicks;
+      this.remainder = 0; // drop the backlog rather than fast-forwarding time
+    } else {
+      this.remainder -= owed * SIM_TICK;
     }
 
     let ticks = 0;
@@ -737,7 +883,8 @@ export class Simulation {
       this.event('info', `A new sol begins. Sol ${this.clock.sol + 1}.`);
     }
 
-    // 2. weather — reserved for Prototype 3.
+    // 2. weather (TDD §4's tick order puts it right after the clock)
+    this.tickWeather();
 
     // 3 & 4. power network, then production scaled by what it delivered.
     this.tickPower();
@@ -748,6 +895,7 @@ export class Simulation {
     // 6/7/8. logistics, jobs, movement, construction
     this.tickSiteLogistics();
     this.assignBuilders();
+    this.assignMaintenance();
     this.assignSupplyRuns();
     for (const r of this.rovers) {
       if (r.phase === 'disabled') continue;
@@ -764,6 +912,102 @@ export class Simulation {
     this.recordHistory();
   }
 
+  // ------------------------------------------------------------ weather ----
+
+  /**
+   * Advance the weather, then let it work on the colony: solar panels gather
+   * dust, wind chews on exposed structures, and storms interrupt work.
+   */
+  private tickWeather(): void {
+    const wx = this.weather;
+    wx.tick(SIM_TICK, this.simTime, this.clock.sol);
+    this.dustTransmission = wx.solarTransmission;
+
+    // ---- forecast announcements ------------------------------------------
+    const fc = wx.forecast();
+    if (fc) {
+      const mins = Math.max(1, Math.round((fc.arrivesIn / 60)));
+      this.alerts.raise(
+        'storm-inbound',
+        fc.kind === 'severe' || fc.kind === 'planetary' ? 'crit' : 'warn',
+        `${stormLabel(fc.kind)} forecast`,
+        `Winds arrive in about ${mins} min. Charge batteries, shelter the crews, clean the arrays.`,
+        this.simTime,
+        this.clock.format(),
+      );
+    }
+
+    // ---- storm arrival / passing ------------------------------------------
+    if (wx.current() && !this.stormAnnounced) {
+      this.stormAnnounced = true;
+      this.alerts.clear('storm-inbound', this.simTime, this.clock.format());
+      const active = wx.current()!;
+      const sev: Severity =
+        active.kind === 'severe' || active.kind === 'planetary'
+          ? 'crit'
+          : active.kind === 'devil'
+            ? 'info'
+            : 'warn';
+      this.event(
+        sev,
+        `${stormLabel(active.kind)} on site — solar output falling, crews recalled.`,
+      );
+    }
+    if (!wx.current() && this.stormAnnounced) {
+      this.stormAnnounced = false;
+      this.event('ok', 'The storm has passed. Dust is settling; solar recovers as the air clears.');
+    }
+
+    // ---- dust settles on the panels ---------------------------------------
+    // Ambient dust grinds in slowly; a storm sandblasts the array.
+    const sols = SIM_TICK * SOLS_PER_SEC;
+    const dirt = wx.dust * PANEL_DIRT_PER_SOL * sols;
+    for (const b of this.buildings) {
+      if (b.state !== 'online') continue;
+      const def = BUILDINGS[b.kind];
+      if (def.generation !== 'solar') continue;
+      if (b.cleanliness > CLEANLINESS_FLOOR) {
+        b.cleanliness = Math.max(CLEANLINESS_FLOOR, b.cleanliness - dirt);
+      }
+    }
+
+    // ---- wind damage --------------------------------------------------------
+    const rate = wx.damageRate();
+    if (rate > 0) {
+      for (const b of this.buildings) {
+        if (b.state !== 'online' || b.damaged) continue;
+        const def = BUILDINGS[b.kind];
+        const before = b.health;
+        b.health = Math.max(0, b.health - rate * def.exposure * SIM_TICK);
+        if (b.health <= DAMAGED_HEALTH && before > DAMAGED_HEALTH) {
+          this.tripDamaged(b);
+        }
+      }
+    }
+  }
+
+  /** Storm damage has tripped a building offline until it is repaired. */
+  private tripDamaged(b: Building): void {
+    b.damaged = true;
+    const def = BUILDINGS[b.kind];
+    this.event('crit', `${def.label} damaged by the storm — offline until repaired.`);
+    this.recomputeCapacities();
+    // Any builder pointed at it can do nothing; release the crew.
+    for (const r of this.rovers) {
+      if (r.command.type === 'construct' && r.command.buildingId === b.id) {
+        r.command = { type: 'idle' };
+        r.goal = 'idle';
+        r.phase = 'idle';
+        b.workerId = null;
+      }
+    }
+  }
+
+  /** Whether a building is online *and* structurally sound enough to run. */
+  private runnable(b: Building): boolean {
+    return b.state === 'online' && !b.damaged;
+  }
+
   // ------------------------------------------------------------ power ----
 
   /**
@@ -778,12 +1022,17 @@ export class Simulation {
     let genKw = POD_POWER_KW;
     for (const b of this.buildings) {
       b.genKw = 0;
-      if (b.state !== 'online' || !b.enabled) continue;
+      if (b.state !== 'online' || !b.enabled || b.damaged) continue;
       const def = BUILDINGS[b.kind];
       if (!def.generation || def.powerProduceKw <= 0) continue;
+      /**
+       * TDD §11/§12's solar chain: irradiance x atmospheric dust x panel
+       * cleanliness. The RTG doesn't care what the sky is doing — that is the
+       * point of it.
+       */
       const out =
         def.generation === 'solar'
-          ? def.powerProduceKw * sun.irradiance * this.dustTransmission
+          ? def.powerProduceKw * sun.irradiance * this.dustTransmission * b.cleanliness
           : def.powerProduceKw;
       b.genKw = out;
       genKw += out;
@@ -804,6 +1053,11 @@ export class Simulation {
         continue;
       }
       const def = BUILDINGS[b.kind];
+      if (b.damaged) {
+        b.powerSat = 1;
+        b.idleReason = 'Damaged — needs repair';
+        continue;
+      }
       if (!b.enabled) {
         b.powerSat = 1;
         b.idleReason = 'Switched off';
@@ -842,7 +1096,7 @@ export class Simulation {
 
     // ---- apply ------------------------------------------------------------
     for (const b of this.buildings) {
-      if (b.state !== 'online' || !b.enabled) continue;
+      if (b.state !== 'online' || !b.enabled || b.damaged) continue;
       const def = BUILDINGS[b.kind];
       const sat = result.satisfaction.get(b.id) ?? 1;
       b.powerSat = sat;
@@ -907,7 +1161,9 @@ export class Simulation {
     if (p.needsLight) {
       // Crops slow to a crawl in the dark rather than stopping dead — grow
       // lamps keep a trickle going, which is what the power draw is for.
-      const light = 0.15 + 0.85 * clamp(this.clock.sun.irradiance, 0, 1);
+      // The panels' own dust film does not matter here (the crops are inside),
+      // but the sky's ambient dust absolutely does.
+      const light = 0.15 + 0.85 * clamp(this.clock.sun.irradiance * this.dustTransmission, 0, 1);
       factor = Math.min(factor, light);
     }
     return clamp(factor, 0, 1);
@@ -915,6 +1171,7 @@ export class Simulation {
 
   /** Why a process with power is still not running. */
   private processBlockReason(b: Building): string {
+    if (b.damaged) return 'Damaged — needs repair';
     const def = BUILDINGS[b.kind];
     const p = def.process;
     if (!p) return '';
@@ -1043,6 +1300,12 @@ export class Simulation {
     if (suitCritical && c.order.type !== 'shelter') {
       c.order = { type: 'shelter' };
       this.event('crit', `${c.name}'s suit reserve is critical — aborting EVA.`);
+    }
+
+    // A storm rolling in does the same: nobody is outside in a severe storm.
+    if (!c.inside && this.weather.blocksEVA() && c.order.type !== 'shelter') {
+      c.order = { type: 'shelter' };
+      this.event('crit', `${c.name} recalled — the storm is too severe to stay outside.`);
     }
 
     let tx = c.x;
@@ -1264,6 +1527,17 @@ export class Simulation {
       if (idle.length === 0) return;
     }
 
+    /**
+     * Same idea, storm edition: a damaged structure or a buried solar array
+     * outranks a routine haul. Hold one rover back so assignMaintenance has
+     * someone to send, instead of the fleet grinding every panel into the
+     * dirt while it chases ice.
+     */
+    if (this.maintenancePending()) {
+      idle = idle.slice(1);
+      if (idle.length === 0) return;
+    }
+
     // What is the build queue short of, in priority order?
     const shortfall = emptyAmounts();
     for (const b of this.buildings) {
@@ -1320,9 +1594,27 @@ export class Simulation {
         }
       }
       if (!picked || !pickedRes) continue;
-      // Don't send a rover across the planet on a whim.
-      const reach = ROVERS[rover.kind].maxBatteryKWh * 8;
-      if (Math.hypot(picked.x - rover.x, picked.z - rover.z) > reach) continue;
+      /**
+       * Can this rover physically get there, dig a worthwhile load, *and get
+       * home*? A naive range heuristic (battery x constant) happily dispatched
+       * both rovers to a seam beyond round-trip range and stranded the entire
+       * fleet — found by the weather suite. Energy maths instead of vibes:
+       * travel is (2d/speed) seconds of move power, and the low-battery
+       * reserve that aborts the dig must still cover the ride home.
+       */
+      const rd = ROVERS[rover.kind];
+      const dist = Math.hypot(picked.x - rover.x, picked.z - rover.z);
+      const oneWayKWh = (dist / rd.cruiseSpeed) * rd.movePowerKw * HOURS_PER_SEC;
+      const roundTripKWh = oneWayKWh * 2;
+      const loadTimeS = 60 / (RESOURCES[pickedRes].mineRateKg * rd.mineSpeedMul);
+      const digKWh = rd.workPowerKw * HOURS_PER_SEC * loadTimeS;
+      // The reserve must cover the ride home from the deposit, whichever of
+      // the fixed floor or the dynamic floor is higher.
+      const reserveKWh = Math.max(
+        rd.maxBatteryKWh * ROVER_CHARGE_THRESHOLD,
+        oneWayKWh * 1.15,
+      );
+      if (roundTripKWh + digKWh > rover.battery - reserveKWh) continue;
       rover.command = { type: 'mine', depositId: picked.id };
       rover.autoTask = true;
       shortfall[pickedRes] -= ROVERS[rover.kind].capacityKg;
@@ -1337,11 +1629,42 @@ export class Simulation {
   private updateRover(r: Rover): void {
     const def = ROVERS[r.kind];
 
+    // ---- storm recall (TDD §8: "IF storm warning → return to shelter") ----
+    // The rover's own command is preserved underneath; when the storm passes
+    // it simply picks the job back up.
+    const mustShelter = this.weather.shelterRovers() && !this.nearCharger(r.x, r.z);
+    if (mustShelter && !r.sheltered) {
+      r.sheltered = true;
+      this.event('warn', `${r.label} is running for shelter — the storm is on it.`);
+    } else if (!this.weather.shelterRovers() && r.sheltered) {
+      r.sheltered = false;
+      r.recharge = false; // release the shelter-charge and resume the job
+    }
+    if (r.sheltered) {
+      r.recharge = true; // reuse the return-to-charge behaviour as the recall path
+      this.doRecharge(r);
+      return;
+    }
+
     if (!r.recharge && r.command.type !== 'idle') {
-      const low =
-        r.battery <= def.maxBatteryKWh * ROVER_CHARGE_THRESHOLD &&
-        r.goal !== 'charge' &&
-        r.goal !== 'toCharge';
+      /**
+       * The low-battery floor is not a fixed fraction for field work: a rover
+       * far from base must turn around while it still holds the power to get
+       * home. A fixed 20 % reserve is 16 kWh on a mining rover — but the ride
+       * back from a distant seam can cost 19, which is how rovers used to dig
+       * themselves into stranded, battery-flat graves.
+       */
+      const homePt = this.nearestChargerPoint(r.x, r.z);
+      const homeCost =
+        (Math.hypot(homePt.x - r.x, homePt.z - r.z) / def.cruiseSpeed) *
+        def.movePowerKw *
+        HOURS_PER_SEC *
+        1.15;
+      const floor = Math.max(
+        def.maxBatteryKWh * ROVER_CHARGE_THRESHOLD,
+        Math.min(homeCost, def.maxBatteryKWh * 0.9),
+      );
+      const low = r.battery <= floor && r.goal !== 'charge' && r.goal !== 'toCharge';
       if (low) {
         r.recharge = true;
         if (!r.lowBatteryNotified) {
@@ -1392,6 +1715,18 @@ export class Simulation {
           break;
         }
         this.doBuild(r, b);
+        break;
+      }
+      case 'clean':
+      case 'repair': {
+        const b = this.buildingById(cmd.buildingId);
+        if (!b || b.state !== 'online') {
+          r.command = { type: 'idle' };
+          r.goal = 'idle';
+          r.phase = 'idle';
+          break;
+        }
+        this.doService(r, b, cmd.type);
         break;
       }
     }
@@ -1445,10 +1780,18 @@ export class Simulation {
 
   private doRecharge(r: Rover): void {
     const def = ROVERS[r.kind];
-    if (r.battery >= def.maxBatteryKWh * 0.98) {
+    if (r.battery >= def.maxBatteryKWh * 0.98 && !r.sheltered) {
       r.recharge = false;
       r.phase = 'idle';
       r.goal = 'idle';
+      return;
+    }
+    if (r.sheltered && this.nearCharger(r.x, r.z)) {
+      // Storm shelter: parked and plugged in until the sky clears, however
+      // full the battery is.
+      r.goal = 'charge';
+      r.phase = 'charging';
+      r.statusText = 'Sheltering from storm';
       return;
     }
     if (this.nearCharger(r.x, r.z)) {
@@ -1509,6 +1852,10 @@ export class Simulation {
         } else r.goal = 'idle';
         break;
       }
+      case 'toService':
+        r.goal = 'service';
+        r.phase = 'working';
+        break;
       case 'toDepot':
         this.tryUnload(r);
         break;
@@ -1558,7 +1905,10 @@ export class Simulation {
     r.goal = 'mine';
     r.phase = 'working';
     r.statusText = 'Mining';
-    const rate = RESOURCES[dep.resource].mineRateKg * def.mineSpeedMul;
+    const rate =
+      RESOURCES[dep.resource].mineRateKg *
+      def.mineSpeedMul *
+      this.weather.workMultiplier();
     const gained = Math.min(rate * SIM_TICK, dep.amount, def.capacityKg - cargoMass(r));
     if (gained > 0) {
       dep.amount -= gained;
@@ -1625,6 +1975,133 @@ export class Simulation {
     r.statusText = roverStatusText(r);
   }
 
+  // ------------------------------------------------- cleaning & repair ----
+  /**
+   * Storm-era maintenance (GDD §5's CLEAN and REPAIR tasks). Cleaning scrubs
+   * dust off a solar array; repair restores structural health and re-commissions
+   * a building the storm tripped offline. Both are deliberately slow rover
+   * work — the recovery should cost the player something, not a click.
+   */
+  private doService(r: Rover, b: Building, kind: 'clean' | 'repair'): void {
+    const def = BUILDINGS[b.kind];
+    const dist = Math.hypot(b.x - r.x, b.z - r.z);
+    const siteReach = def.radius + 4;
+    const hours = SIM_TICK * HOURS_PER_SEC;
+    if (dist > siteReach) {
+      r.gid = b.id;
+      if (r.goal !== 'toService' || r.phase === 'idle') {
+        this.setTravel(r, b.x, b.z, 'toService');
+      }
+      return;
+    }
+    r.gid = b.id;
+    r.goal = 'service';
+    r.phase = 'working';
+    r.statusText = kind === 'repair' ? 'Repairing' : 'Cleaning panels';
+
+    if (kind === 'repair') {
+      b.health = Math.min(BUILDING_MAX_HEALTH, b.health + ROVER_REPAIR_RATE * SIM_TICK);
+      if (b.damaged && b.health >= REPAIR_RESTART_HEALTH) {
+        b.damaged = false;
+        this.event('ok', `${def.label} repaired and back online.`);
+        this.recomputeCapacities();
+      }
+    } else {
+      b.cleanliness = Math.min(1, b.cleanliness + ROVER_CLEAN_RATE * SIM_TICK);
+    }
+    r.battery = Math.max(0, r.battery - ROVERS[r.kind].workPowerKw * hours * 0.5);
+    if (r.battery <= 0) this.disable(r);
+
+    const done =
+      kind === 'repair'
+        ? b.health >= BUILDING_MAX_HEALTH - 0.5
+        : b.cleanliness >= 0.999;
+    if (done) {
+      this.event(
+        'ok',
+        kind === 'repair'
+          ? `${r.label} finished repairing the ${def.label}.`
+          : `${r.label} cleaned the ${def.label} array — output restored.`,
+      );
+      r.command = { type: 'idle' };
+      r.goal = 'idle';
+      r.phase = 'idle';
+    }
+  }
+
+  /** True when a rover is already en route to (or working on) this building. */
+  private servicingRover(buildingId: number): boolean {
+    return this.rovers.some(
+      (r) =>
+        (r.command.type === 'repair' || r.command.type === 'clean') &&
+        r.command.buildingId === buildingId,
+    );
+  }
+
+  /** True when a repair or cleaning job is waiting for a free rover. */
+  private maintenancePending(): boolean {
+    for (const b of this.buildings) {
+      if (b.state !== 'online' || this.servicingRover(b.id)) continue;
+      if (b.damaged) return true;
+      if (
+        BUILDINGS[b.kind].generation === 'solar' &&
+        b.cleanliness < AUTO_CLEAN_THRESHOLD
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Automation for the storm economy: idle rovers repair damaged structures
+   * first (survival-critical, TDD §8's ordering), then scrub the dirtiest
+   * array once it drops past the cleanliness threshold. As with hauling, this
+   * only ever fills genuine idle time — explicit player orders always win.
+   */
+  private assignMaintenance(): void {
+    if (this.weather.shelterRovers()) return; // everyone should be heading in
+
+    const jobs: Array<{ b: Building; kind: 'clean' | 'repair' }> = [];
+    for (const b of this.buildings) {
+      if (b.state !== 'online') continue;
+      if (b.damaged) jobs.push({ b, kind: 'repair' });
+    }
+    jobs.sort((a, c) => a.b.health - c.b.health || a.b.id - c.b.id);
+    const dirty = this.buildings
+      .filter(
+        (b) =>
+          b.state === 'online' &&
+          !b.damaged &&
+          BUILDINGS[b.kind].generation === 'solar' &&
+          b.cleanliness < AUTO_CLEAN_THRESHOLD,
+      )
+      .sort((a, c) => a.cleanliness - c.cleanliness || a.id - c.id);
+    for (const b of dirty) jobs.push({ b, kind: 'clean' });
+    if (jobs.length === 0) return;
+
+    const pool = this.rovers.filter(
+      (r) =>
+        r.phase !== 'disabled' &&
+        !r.recharge &&
+        !r.sheltered &&
+        r.command.type === 'idle',
+    );
+    if (pool.length === 0) return;
+
+    for (const { b, kind } of jobs) {
+      if (this.servicingRover(b.id)) continue;
+      // Repairs ignore the auto-haul opt-out (they are too important to skip);
+      // routine cleaning respects it like any other automatic chore.
+      const idx = pool.findIndex((r) => kind === 'repair' || r.autoHaul);
+      if (idx < 0) return;
+      const rover = pool[idx];
+      pool.splice(idx, 1);
+      rover.autoTask = true;
+      rover.command = { type: kind, buildingId: b.id };
+    }
+  }
+
   // ------------------------------------------------------ construction ----
   private doBuild(r: Rover, b: Building): void {
     const dist = Math.hypot(b.x - r.x, b.z - r.z);
@@ -1667,7 +2144,7 @@ export class Simulation {
       }
     }
 
-    const work = ROVERS[r.kind].buildPower * mul;
+    const work = ROVERS[r.kind].buildPower * mul * this.weather.workMultiplier();
     const before = b.progress;
     b.progress = Math.min(1, b.progress + (work * SIM_TICK) / b.buildTime);
     r.battery = Math.max(0, r.battery - ROVERS[r.kind].workPowerKw * hours * 0.6);
@@ -1898,6 +2375,70 @@ export class Simulation {
     } else {
       A.clear('storage-full', t, stamp);
     }
+
+    // ---- weather ------------------------------------------------------------
+    const wx = this.weather;
+    const active = wx.current();
+    if (active) {
+      const sev: Severity =
+        active.kind === 'severe' || active.kind === 'planetary'
+          ? 'crit'
+          : active.kind === 'devil'
+            ? 'info'
+            : 'warn';
+      const drop = Math.round((1 - this.dustTransmission) * 100);
+      A.raise(
+        'storm-active',
+        sev,
+        stormLabel(active.kind),
+        `Solar −${drop}% from dust · visibility ${Math.round(wx.visibility * 100)}% · winds ${Math.round(wx.windSpeed)} m/s.`,
+        t,
+        stamp,
+      );
+    } else {
+      A.clear('storm-active', t, stamp, 'Storm passed — skies are settling.');
+    }
+
+    // ---- storm damage & dirty panels ---------------------------------------
+    const hurt = this.buildings.filter((b) => b.damaged);
+    if (hurt.length > 0) {
+      A.raise(
+        'building-damaged',
+        'crit',
+        hurt.length === 1 ? `${BUILDINGS[hurt[0].kind].label} damaged` : `${hurt.length} structures damaged`,
+        hurt.length === 1
+          ? 'Offline until a rover repairs it.'
+          : `${hurt.map((b) => BUILDINGS[b.kind].label).join(', ')} — dispatch rovers to repair.`,
+        t,
+        stamp,
+        hurt[0].id,
+      );
+    } else {
+      A.clear('building-damaged', t, stamp, 'All structures repaired.');
+    }
+
+    const panels = this.buildings.filter(
+      (b) => this.runnable(b) && BUILDINGS[b.kind].generation === 'solar',
+    );
+    if (panels.length > 0) {
+      const worst = Math.min(...panels.map((b) => b.cleanliness));
+      const dirty = panels.filter((b) => b.cleanliness < 0.6).length;
+      if (worst < 0.6) {
+        A.raise(
+          'panels-dirty',
+          'warn',
+          'Solar arrays dusted',
+          `Output down ${Math.round((1 - worst) * 100)}% on the dirtiest array${dirty > 1 ? ` (${dirty} arrays need cleaning)` : ''} — send a rover to clean.`,
+          t,
+          stamp,
+          panels.sort((a, b) => a.cleanliness - b.cleanliness)[0].id,
+        );
+      } else {
+        A.clear('panels-dirty', t, stamp, 'Arrays are clean again.');
+      }
+    } else {
+      A.clear('panels-dirty', t, stamp);
+    }
   }
 
   // ----------------------------------------------------------- history ----
@@ -2010,6 +2551,7 @@ export class Simulation {
       version: SAVE_VERSION,
       seed: this.seed,
       simTime: this.simTime,
+      ticksRun: this.ticksRun,
       clock: this.clock.snapshot(),
       storage: { ...this.storage },
       fluids: { ...this.pools.amounts },
@@ -2048,6 +2590,7 @@ export class Simulation {
         cargo: { ...r.cargo },
         command: { ...r.command },
         autoHaul: r.autoHaul,
+        sheltered: r.sheltered,
       })),
       buildings: this.buildings.map((b) => ({
         id: b.id,
@@ -2062,7 +2605,11 @@ export class Simulation {
         buildTime: b.buildTime,
         workerId: b.workerId,
         enabled: b.enabled,
+        health: b.health,
+        cleanliness: b.cleanliness,
+        damaged: b.damaged,
       })),
+      weather: this.weather.snapshot(),
       alerts: this.alerts.snapshot(),
     };
   }
@@ -2075,7 +2622,17 @@ export class Simulation {
     }
     this.seed = data.seed;
     this.simTime = data.simTime || 0;
+    // The tick counter is authoritative; the delivery remainder restarts at
+    // zero (where it sits within a frame either way, and it never changes how
+    // many ticks a given total of delivered time produces).
+    this.ticksRun = data.ticksRun ?? Math.floor(this.simTime / SIM_TICK + 1e-9);
+    this.remainder = 0;
     this.clock.restore(data.clock);
+    this.weather = new Weather(this.seed ^ 0x77e711e);
+    this.weather.time = this.simTime;
+    if (data.weather) this.weather.restore(data.weather);
+    this.dustTransmission = this.weather.solarTransmission;
+    this.stormAnnounced = !!this.weather.current();
     this.storage = { ...emptyAmounts(), ...(data.storage ?? {}) };
     this.gameOver = data.gameOver ?? null;
 
@@ -2112,6 +2669,7 @@ export class Simulation {
       chargeSat: 0,
       autoTask: false,
       autoHaul: r.autoHaul !== false,
+      sheltered: !!r.sheltered,
     }));
 
     this.buildings = (data.buildings ?? []).map((b: any) => ({
@@ -2132,6 +2690,9 @@ export class Simulation {
       genKw: 0,
       loadKw: 0,
       idleReason: '',
+      health: b.health ?? BUILDING_MAX_HEALTH,
+      cleanliness: b.cleanliness ?? 1,
+      damaged: !!b.damaged,
     }));
 
     this.recomputeCapacities();

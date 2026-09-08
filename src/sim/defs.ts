@@ -253,6 +253,12 @@ export interface BuildingDef {
   pressurized?: boolean;
   /** Recharges rover batteries when they park nearby. */
   providesCharge?: boolean;
+  /**
+   * Storm exposure 0..1 — how much wind-blown dust and pressure this design
+   * takes (GDD §4: buildings are machines with wear and failure modes). An
+   * open solar array is fully exposed; a nose-down RTG barely notices a storm.
+   */
+  exposure: number;
   buildableBy: RoverKind[];
   /** Palette ordering / hotkey slot. */
   order: number;
@@ -287,6 +293,7 @@ export const BUILDINGS: Record<BuildingKind, BuildingDef> = {
     tier: 0,
     pressurized: true,
     providesCharge: true,
+    exposure: 0.35,
     buildableBy: ['utility', 'mining'],
     order: 5,
   },
@@ -309,6 +316,7 @@ export const BUILDINGS: Record<BuildingKind, BuildingDef> = {
     batteryKWh: 0,
     storagePerResourceKg: 0,
     tier: 3,
+    exposure: 1.0,
     buildableBy: ['utility', 'mining'],
     order: 1,
   },
@@ -330,6 +338,7 @@ export const BUILDINGS: Record<BuildingKind, BuildingDef> = {
     batteryKWh: 200,
     storagePerResourceKg: 0,
     tier: 3,
+    exposure: 0.45,
     buildableBy: ['utility', 'mining'],
     order: 2,
   },
@@ -352,6 +361,7 @@ export const BUILDINGS: Record<BuildingKind, BuildingDef> = {
     batteryKWh: 0,
     storagePerResourceKg: 0,
     tier: 3,
+    exposure: 0.15,
     buildableBy: ['utility', 'mining'],
     order: 9,
   },
@@ -371,6 +381,7 @@ export const BUILDINGS: Record<BuildingKind, BuildingDef> = {
     batteryKWh: 0,
     storagePerResourceKg: 600,
     tier: 2,
+    exposure: 0.5,
     buildableBy: ['utility', 'mining'],
     order: 0,
   },
@@ -398,6 +409,7 @@ export const BUILDINGS: Record<BuildingKind, BuildingDef> = {
       fluidOut: { water: 1.15 },
       summary: '1.4 kg ice → 1.15 kg water per hour',
     },
+    exposure: 0.6,
     buildableBy: ['utility', 'mining'],
     order: 3,
   },
@@ -426,6 +438,7 @@ export const BUILDINGS: Record<BuildingKind, BuildingDef> = {
       fluidOut: { oxygen: 0.125 },
       summary: '0.14 kg water → 0.125 kg O₂ per hour',
     },
+    exposure: 0.6,
     buildableBy: ['utility', 'mining'],
     order: 4,
   },
@@ -456,6 +469,7 @@ export const BUILDINGS: Record<BuildingKind, BuildingDef> = {
       needsLight: true,
       summary: '0.42 kg water + light → 0.17 kg food per hour (~2 kg/sol)',
     },
+    exposure: 0.7,
     buildableBy: ['utility', 'mining'],
     order: 6,
   },
@@ -476,6 +490,7 @@ export const BUILDINGS: Record<BuildingKind, BuildingDef> = {
     batteryKWh: 0,
     storagePerResourceKg: 120,
     tier: 2,
+    exposure: 0.5,
     buildableBy: ['utility', 'mining'],
     order: 7,
   },

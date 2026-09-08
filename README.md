@@ -4,10 +4,12 @@
 > Mars · 2066 — Real-Time Strategy · Survival · Automation · Exploration
 
 A browser-first Mars survival RTS. This repository currently contains the
-**Prototype 2 vertical slice**: everything from Prototype 1 (terrain, orbit
-camera, autonomous rovers, mining, staged construction) plus the three systems
-that turn it into a survival game — a **power grid**, the **Mars sol**, and the
-**water → oxygen → food** life-support chain keeping one human alive.
+**Prototype 3 vertical slice**: everything from Prototypes 1–2 (terrain, orbit
+camera, autonomous rovers, mining, staged construction, the power grid, the
+Mars sol, and the water → oxygen → food life-support chain keeping one human
+alive) plus **weather** — wind, dust that buries your panels, forecastable
+storms that dim the sun and batter exposed hardware, and the rovers that clean
+and repair it all again.
 
 Design & technical specifications live in [`docs/design/GDD.md`](docs/design/GDD.md)
 and [`docs/design/TDD.md`](docs/design/TDD.md).
@@ -61,9 +63,14 @@ Watch the *empty in…* estimates on the left panel; they are the real clock.
 | Blueprints 1–9 | `1`…`9` | — |
 | Save | `Ctrl/Cmd+S` | auto every 45 s |
 
-Select a rover, then tap a deposit to mine it or the ground to move. Select your
-colonist and right-click to send them on an EVA — the suit carries a fixed
-oxygen reserve, so the sim refuses walks it knows they cannot survive.
+Select a rover, then tap a deposit to mine it, the ground to move, or a
+battered/buried structure to clean or repair it. Select your colonist and
+right-click to send them on an EVA — the suit carries a fixed oxygen reserve,
+so the sim refuses walks it knows they cannot survive (and refuses all of them
+in a storm).
+
+When the forecast turns ugly: charge the batteries, shelter the crews, clean
+the arrays — and remember the RTG does not care what the sky is doing.
 
 ## What is simulated
 
@@ -123,6 +130,7 @@ src/
     power.ts        pure power-grid resolver
     lifesupport.ts  fluid pools, colonist needs, health
     alerts.ts       alert bus (conditions) + event log (occurrences)
+    weather.ts      wind, dust, storm scheduler + envelopes
     World.ts        seeded terrain + deposits
     Simulation.ts   entities, tick order, construction, persistence
   render/           three.js renderer (terrain, entities, day/night, overlays)
@@ -138,10 +146,12 @@ scripts/            esbuild test runner
   imports; rendering and UI only read it (`renderer.sync(sim)` per frame).
   Moving it onto a Worker (TDD §16) remains a contained change.
 - **Determinism is enforced, not hoped for.** Seeded PRNG, integer tick counter,
-  stable iteration order. Tick counts are derived from *total elapsed time*
-  rather than an accumulated remainder, so 60 s delivered in 3 600 ragged
-  browser frames runs exactly as many ticks as 60 s delivered in one call —
-  there is a test for precisely this.
+  stable iteration order. The tick accumulator holds its remainder in
+  `[0, step)` and telescopes, so 60 s delivered in 3 600 ragged browser frames
+  runs exactly as many ticks as 60 s delivered in one call — there is a test
+  for precisely this. Weather runs on its own seeded stream and a pure
+  storm envelope, so two colonies with the same seed live through the same
+  skies (also tested, through a save/restore).
 - **Data drives content.** Resources, fluids, blueprints, processes, power
   tiers and balance all live in `defs.ts`/`config.ts`, outside game logic.
 - **Storage is per-resource,** not one shared pool. A shared pool lets a single
@@ -152,26 +162,29 @@ scripts/            esbuild test runner
 
 ### Testing
 
-`npm run test:sim` runs 55 checks across two suites, covering TDD §21's
+`npm run test:sim` runs 69 checks across two suites, covering TDD §21's
 categories:
 
-- **Unit** — power allocation, tier shedding, energy conservation, the sun model.
+- **Unit** — power allocation, tier shedding, energy conservation, the sun
+  model, dust transmission and visibility.
 - **Integration** — ice → water → oxygen actually produces oxygen; a full colony
   reaches a sustainable steady state with a net-positive food loop; batteries
-  charge by day and drain by night; switching a building off drops grid demand.
+  charge by day and drain by night; switching a building off drops grid demand;
+  storms cut solar, bury arrays, damage structures, shelter crews, refuse EVAs,
+  and recover; the full cascade (storm → solar collapse → battery strain →
+  repair and recovery) runs end to end.
 - **Determinism** — identical seeds and identical elapsed time produce identical
-  state hashes regardless of frame pacing.
+  state hashes regardless of frame pacing; weather is identical across replays
+  and across a save/restore.
 - **Persistence** — snapshot/restore round-trips exactly, a reloaded colony
   continues identically, and bad saves are rejected.
-- **HUD** — every panel exists and patches live under jsdom; callbacks fire.
+- **HUD** — every panel exists and patches live under jsdom; callbacks fire;
+  the weather panel and the maintenance inspector track the sim.
 
 The renderer needs a GPU and is not covered headlessly.
 
 ## Next milestones (per GDD §16 / TDD §25)
 
 1. **Move the sim to a Web Worker** (TDD T1–T2 hardening).
-2. **Prototype 3 — weather.** Dust accumulation on panels, wind, and storms that
-   cut solar and damage exposed equipment. The `dustTransmission` hook and the
-   maintenance-shaped gaps in the building model are already in place for it.
-3. **Prototype 4+** — research, procedural exploration, supply drops, and more
-   colonists.
+2. **Prototype 4+** — research, procedural exploration, supply drops, rover
+   recovery missions, and more colonists.

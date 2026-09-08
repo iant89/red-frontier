@@ -372,6 +372,121 @@ body {
 }
 
 /* power tiers */
+/* ---------------------------------------------------------- weather */
+#wx-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wx-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.wx-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(120, 190, 140, 0.16);
+  color: #9fd8ae;
+  border: 1px solid rgba(120, 190, 140, 0.35);
+}
+
+.wx-badge.warn {
+  background: rgba(240, 180, 80, 0.16);
+  color: #f0c078;
+  border-color: rgba(240, 180, 80, 0.4);
+}
+
+.wx-badge.crit {
+  background: rgba(220, 80, 60, 0.18);
+  color: #f0907e;
+  border-color: rgba(220, 80, 60, 0.45);
+  animation: wx-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes wx-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.wx-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+}
+
+.wx-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.wx-cell .k {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--dim, #8a7f70);
+}
+
+.wx-wind {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.wx-arrow {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-left: 4.5px solid transparent;
+  border-right: 4.5px solid transparent;
+  border-bottom: 9px solid #d8b088;
+  transition: transform 0.4s ease;
+}
+
+.wx-bar {
+  display: block;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.wx-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: #c49a6c;
+  transition: width 0.4s ease;
+}
+
+.wx-bar i#wx-vis-bar {
+  background: #8fb8d8;
+}
+
+.wx-status {
+  font-size: 11px;
+  line-height: 1.35;
+  color: #b8ab97;
+}
+
+.wx-status.warn {
+  color: #f0c078;
+}
+
+.wx-status.bad {
+  color: #f0907e;
+}
+
 .tiers {
   display: flex;
   flex-direction: column;

@@ -1,9 +1,9 @@
 {
   "name": "red-frontier",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
-  "description": "Red Frontier - browser Mars survival RTS (Prototype 2: power, day/night, life support)",
+  "description": "Red Frontier - browser Mars survival RTS (Prototype 3: weather, dust, storms and degradation)",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",

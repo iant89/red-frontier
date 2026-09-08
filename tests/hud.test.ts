@@ -91,6 +91,13 @@ test('every panel the HUD patches actually exists in the DOM', () => {
     'crew-suit-bar',
     'start-overlay',
     'end-overlay',
+    'wx-block',
+    'wx-badge',
+    'wx-wind',
+    'wx-arrow',
+    'wx-dust-bar',
+    'wx-vis-bar',
+    'wx-status',
   ]) {
     assert.ok(doc.getElementById(id), `#${id} is missing`);
   }
@@ -131,6 +138,33 @@ test('power tier rows render one per priority tier', () => {
   assert.equal(rows.length, 4);
 });
 
+console.log('\nWeather');
+
+test('the weather panel reflects the sim state', () => {
+  sim.weather.dust = 0.5;
+  sim.weather.visibility = 0.4;
+  sim.weather.windSpeed = 33;
+  hud.updateVitals(sim);
+  assert.match(doc.getElementById('wx-wind')!.textContent!, /33 m\/s/);
+  assert.equal(doc.getElementById('wx-dust-bar')!.style.width, '50%');
+  assert.equal(doc.getElementById('wx-vis-bar')!.style.width, '40%');
+  assert.match(doc.getElementById('wx-status')!.textContent!, /sunlight through the dust/);
+  assert.match(doc.getElementById('wx-badge')!.textContent!, /Clear/);
+});
+
+test('an active storm names itself in the badge and status line', () => {
+  const wx: any = sim.weather;
+  wx.debugScheduleStorm('regional', sim.simTime, 0);
+  for (let i = 0; i < 20 * 20; i++) sim.step(1 / 20); // 20 s: storm ramped up
+  hud.updateVitals(sim);
+  assert.match(doc.getElementById('wx-badge')!.textContent!, /Regional dust storm/);
+  assert.match(doc.getElementById('wx-status')!.textContent!, /passing in/);
+  // clean up so later tests run in calm weather
+  (wx as any).active = null;
+  wx.stormIntensity = 0;
+  wx.storm = 'calm';
+});
+
 console.log('\nInspectors');
 
 test('the rover inspector renders and rebinds on selection change', () => {
@@ -153,6 +187,25 @@ test('the building inspector renders a placed site', () => {
   hud.showBuilding(b!, sim);
   assert.match(doc.getElementById('inspector')!.textContent!, /Solar Array/);
 });
+
+test('a dirty solar array shows its dust and a dispatch button that fires', () => {
+  const b = sim.buildings.find((x) => x.kind === 'solar');
+  assert.ok(b, 'the earlier tests placed a solar array');
+  (b as any).state = 'online';
+  (b as any).cleanliness = 0.5;
+  hud.showBuilding(b!, sim);
+  const text = doc.getElementById('inspector')!.textContent!;
+  assert.match(text, /Panel dust/);
+  assert.match(text, /50% clean/);
+  const svc = doc.getElementById('b-service') as any;
+  assert.ok(svc, 'the dispatch button should exist');
+  assert.equal(svc.style.display, '', 'the dispatch button should be visible');
+  assert.match(svc.textContent, /Clean panels/);
+  calls.length = 0;
+  svc.dispatchEvent(new dom.window.Event('pointerdown', { bubbles: true }));
+  assert.ok(calls.includes('action:service:'), `got ${JSON.stringify(calls)}`);
+});
+
 
 test('the colonist inspector renders', () => {
   hud.showColonist(sim.colonist, sim);
@@ -196,10 +249,11 @@ test('the start button reports the chosen seed', () => {
   );
 });
 
-test('overlay cycling advances none → power → life → none', () => {
+test('overlay cycling advances none → power → life → weather → none', () => {
   hud.setOverlay('none');
   assert.equal(hud.cycleOverlay(), 'power');
   assert.equal(hud.cycleOverlay(), 'life');
+  assert.equal(hud.cycleOverlay(), 'weather');
   assert.equal(hud.cycleOverlay(), 'none');
 });
 
