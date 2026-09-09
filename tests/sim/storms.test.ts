@@ -13,7 +13,7 @@ import { SOL_SECONDS } from '../../src/sim/config';
 import { nearDeposit, run, buildAndWait } from '../fixtures/sim';
 import { group, test, finish } from '../harness';
 
-group('Weather & storms');
+group('Storm impacts');
 
 test('a storm cuts solar output at the same time of sol', () => {
   const clear = new Simulation({ seed: 11, nearDeposits: 0.2 });

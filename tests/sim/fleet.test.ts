@@ -69,7 +69,7 @@ test('after charging, the rover rolls back out to its mining job', () => {
   );
 });
 
-group('Prototype 4 — rover logistics');
+group('Wear, recovery & automation rules');
 
 test('a flat rover strands, and another rover can jump-start it', () => {
   const sim = new Simulation({ seed: 63, nearDeposits: 0.2 });

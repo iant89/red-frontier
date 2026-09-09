@@ -14,7 +14,7 @@ import { SOL_SECONDS } from '../../src/sim/config';
 import { nearDeposit, run, build, buildAndWait } from '../fixtures/sim';
 import { group, test, finish } from '../harness';
 
-group('Prototype 4 — rover logistics');
+group('Task queue & routes');
 
 test('a queued task runs after the current one; a plain order replaces the queue', () => {
   const sim = new Simulation({ seed: 61, nearDeposits: 0.2 });

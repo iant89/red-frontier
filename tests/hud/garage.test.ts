@@ -15,7 +15,7 @@ const { dom, doc, calls, hud, sim, place } = await mountHud();
 const garage = place('garage');
 garage.state = 'online';
 
-group('Prototype 4 HUD');
+group('The garage in the HUD');
 
 test('a garage shows its assembly line with one button per rover kind', () => {
   hud.showBuilding(garage, sim);

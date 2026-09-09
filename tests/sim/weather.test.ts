@@ -13,7 +13,7 @@ import { SOL_SECONDS } from '../../src/sim/config';
 import { run } from '../fixtures/sim';
 import { group, test, finish } from '../harness';
 
-group('Weather & storms');
+group('Weather model');
 
 test('clear-sky transmission is near 1 and falls as dust fills the air', () => {
   const wx = new Weather(7);

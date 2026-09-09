@@ -11,7 +11,7 @@ import { Simulation } from '../../src/sim/Simulation';
 import { nearDeposit, run } from '../fixtures/sim';
 import { group, test, finish } from '../harness';
 
-group('Determinism & persistence');
+group('Identical inputs, identical state');
 
 test('same seed and same commands produce identical state', () => {
   const a = new Simulation({ seed: 42, nearDeposits: 0.18 });

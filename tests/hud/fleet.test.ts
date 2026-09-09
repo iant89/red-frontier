@@ -12,7 +12,7 @@ import { group, test, finish } from '../harness';
 
 const { dom, doc, calls, hud, sim } = await mountHud();
 
-group('Prototype 4 HUD');
+group('Rover orders in the HUD');
 
 test('the rover inspector shows the task queue and a queued WAIT label', () => {
   const rv = sim.rovers[0];

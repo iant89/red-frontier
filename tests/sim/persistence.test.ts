@@ -12,7 +12,7 @@ import { Weather } from '../../src/sim/weather';
 import { nearDeposit, run, buildAndWait } from '../fixtures/sim';
 import { group, test, finish } from '../harness';
 
-group('Determinism & persistence');
+group('Saves & round-trips');
 
 test('snapshot / restore round-trips exactly', () => {
   const sim = new Simulation({ seed: 99, nearDeposits: 0.18 });
@@ -57,7 +57,7 @@ test('restore tolerates missing optional fields', () => {
   assert.ok(copy.colonist, 'a colonist should still exist');
 });
 
-group('Weather & storms');
+group('Weather across a save');
 
 test('the storm survives a save / restore round-trip and continues identically', () => {
   const sim = new Simulation({ seed: 37, nearDeposits: 0.2 });
@@ -91,7 +91,7 @@ test('the storm survives a save / restore round-trip and continues identically',
   assert.ok(!copy.gameOver && !sim.gameOver, 'both colonies should ride it out');
 });
 
-group('Prototype 4 — rover logistics');
+group('Rover state across a save');
 
 test('v3 saves migrate to v4: queues, condition, rules and assembly slots appear', () => {
   const sim = new Simulation({ seed: 67, nearDeposits: 0.2 });

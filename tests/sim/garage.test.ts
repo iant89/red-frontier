@@ -12,7 +12,7 @@ import { SOL_SECONDS } from '../../src/sim/config';
 import { run, buildAndWait } from '../fixtures/sim';
 import { group, test, finish } from '../harness';
 
-group('Prototype 4 — rover logistics');
+group('The rover garage');
 
 test('a garage services drivetrains, fast-charges, and assembles rovers', () => {
   const sim = new Simulation({ seed: 65, nearDeposits: 0.2 });

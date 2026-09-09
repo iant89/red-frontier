@@ -13,7 +13,7 @@ import type { BuildingKind } from '../../src/sim/defs';
 import { run, buildAndWait } from '../fixtures/sim';
 import { group, test, finish } from '../harness';
 
-group('Life support chain');
+group('Long-run stability');
 
 test('a full colony survives 20 sols of live operation', () => {
   const sim = new Simulation({ seed: 42, nearDeposits: 0.2 });
@@ -25,7 +25,7 @@ test('a full colony survives 20 sols of live operation', () => {
   buildAndWait(sim, 'battery');
   // Twenty sols of days, nights, storms, hauling and wear — with the asserts
   // kept to what live operation can promise: survival and health. Whether the
-  // food loop itself closes is measured deterministically below, not sampled
+  // food loop itself closes is measured deterministically in sim/colony, not sampled
   // from the middle of the logistics lottery.
   run(sim, 20);
 

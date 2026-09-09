@@ -13,7 +13,7 @@ import { ROVERS } from '../../src/sim/defs';
 import { run, buildAndWait } from '../fixtures/sim';
 import { group, test, finish } from '../harness';
 
-group('Life support chain');
+group('Production chains');
 
 test('the ice → water → oxygen chain actually produces oxygen', () => {
   const sim = new Simulation({ seed: 42, nearDeposits: 0.2 });

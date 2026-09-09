@@ -82,7 +82,7 @@ test('a critically low suit aborts the EVA automatically', () => {
   assert.equal(sim.colonist.order.type, 'shelter', 'the sim should abort the EVA');
 });
 
-group('Grid behaviour in a live colony');
+group('The landing pod');
 
 test('the pod alone keeps the colonist breathing on Sol 1', () => {
   const sim = new Simulation({ seed: 21 });
