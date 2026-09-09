@@ -67,6 +67,11 @@ export class GameRenderer {
   ghostGroup: THREE.Group;
   private ghostBody: THREE.Mesh;
 
+  /** The selected rover's queued route: a polyline plus waypoint diamonds. */
+  private routeLine: THREE.Line | null = null;
+  private routeMarks = new Map<number, THREE.Mesh>();
+  private routeGroup = new THREE.Group();
+
   private dustField: THREE.Points | null = null;
   private dustPositions: Float32Array | null = null;
   private lastSimT = 0;
@@ -118,6 +123,7 @@ export class GameRenderer {
       }),
     );
     this.ghostGroup.add(this.ghostBody);
+    this.scene.add(this.routeGroup);
     this.buildSpawnPad();
     this.buildDustField();
   }
@@ -546,6 +552,18 @@ export class GameRenderer {
       g.position.set(r.x, y + 0.4, r.z);
       g.rotation.y = -r.heading;
       g.userData.battery = r.battery / ROVERS[r.kind].maxBatteryKWh;
+
+      // A battery-flat rover dims and pulses a red beacon — "come get me".
+      const stranded = r.phase === 'disabled';
+      const beacon = g.getObjectByName('beacon') as THREE.Mesh | undefined;
+      if (beacon) {
+        beacon.visible = stranded;
+        if (stranded) {
+          const pulse = 0.5 + 0.5 * Math.sin(this.clockT * 6);
+          (beacon.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.5 + 1.9 * pulse;
+        }
+      }
+      this.setGroupBrightness(g, stranded ? 0.55 : 1);
     }
     for (const [id, g] of this.roverMeshes) {
       if (!seen.has(id)) {
@@ -900,6 +918,51 @@ export class GameRenderer {
         }
         break;
       }
+      case 'garage': {
+        // A Quonset-style vehicle bay: half-barrel roof, end walls, a charge
+        // post with a glowing wand, and a hardstand apron out front.
+        const arch = new THREE.Mesh(
+          new THREE.CylinderGeometry(4.6, 4.6, 9.5, 18, 1, false, 0, Math.PI),
+          mat(0x8d99a3, { rough: 0.45, metal: 0.55 }),
+        );
+        arch.rotation.z = Math.PI / 2;
+        arch.rotation.y = Math.PI / 2;
+        arch.position.y = 0.2;
+        for (const dx of [-4.75, 4.75]) {
+          const wall = new THREE.Mesh(
+            new THREE.CircleGeometry(4.6, 18, 0, Math.PI),
+            mat(0x6d7883, { rough: 0.6, metal: 0.4 }),
+          );
+          wall.position.set(dx, 0.2, 0);
+          wall.rotation.y = dx > 0 ? -Math.PI / 2 : Math.PI / 2;
+          g.add(wall);
+        }
+        const apron = new THREE.Mesh(
+          new THREE.BoxGeometry(9.5, 0.3, 5),
+          mat(0x4a4a52, { rough: 0.9 }),
+        );
+        apron.position.set(0, 0.15, 4.2);
+        const post = new THREE.Mesh(
+          new THREE.BoxGeometry(0.5, 3.4, 0.5),
+          mat(0x3f4348, { metal: 0.6 }),
+        );
+        post.position.set(5.6, 1.7, 3.4);
+        const wand = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.16, 0.16, 1.6, 8),
+          new THREE.MeshStandardMaterial({
+            color: 0x7fd9c8,
+            emissive: 0x2fae9c,
+            emissiveIntensity: 1.1,
+            roughness: 0.4,
+          }),
+        );
+        wand.rotation.z = Math.PI / 2.4;
+        wand.position.set(5.2, 3.1, 3.4);
+        const glow = new THREE.PointLight(0x7fd9c8, 0.8, 18, 2);
+        glow.position.set(5.2, 3.2, 3.4);
+        g.add(arch, apron, post, wand, glow);
+        break;
+      }
       case 'rtg': {
         // Radioisotope units on a finned heat-rejection rack.
         const rack = new THREE.Mesh(new THREE.BoxGeometry(6.4, 0.9, 4.4), mat(0x3f4348, { metal: 0.6 }));
@@ -950,20 +1013,22 @@ export class GameRenderer {
   private makeRoverMesh(kind: RoverKind, id: number): THREE.Group {
     const def = ROVERS[kind];
     const g = new THREE.Group();
+    // A cargo rover is simply a bigger truck: longer, wider, six wheels.
+    const L = kind === 'cargo' ? 4.6 : 3.2;
+    const W = kind === 'cargo' ? 2.6 : 2.0;
     const body = new THREE.Mesh(
-      new THREE.BoxGeometry(3.2, 1.1, 2.0),
+      new THREE.BoxGeometry(L, 1.1, W),
       new THREE.MeshStandardMaterial({ color: def.bodyColor, roughness: 0.5, metalness: 0.35 }),
     );
     body.position.y = 1.15;
     body.castShadow = true;
     const cab = new THREE.Mesh(
-      new THREE.BoxGeometry(1.4, 0.9, 1.1),
+      new THREE.BoxGeometry(1.4, 0.9, W * 0.55),
       new THREE.MeshStandardMaterial({ color: 0xe8e6da, roughness: 0.35, metalness: 0.1 }),
     );
-    cab.position.set(0.9, 2.0, 0);
-    const basePl = new THREE.BoxGeometry(3.6, 0.5, 2.4);
+    cab.position.set(L / 2 - 0.7, 2.0, 0);
     const chassis = new THREE.Mesh(
-      basePl,
+      new THREE.BoxGeometry(L + 0.4, 0.5, W + 0.4),
       new THREE.MeshStandardMaterial({ color: def.accentColor, roughness: 0.7 }),
     );
     chassis.position.y = 0.55;
@@ -971,22 +1036,20 @@ export class GameRenderer {
     const wheelGeo = new THREE.CylinderGeometry(0.55, 0.55, 0.5, 12);
     const wheelMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9 });
     wheelGeo.rotateZ(Math.PI / 2);
-    for (const [wx, wz] of [
-      [-1.3, 1.05],
-      [1.3, 1.05],
-      [-1.3, -1.05],
-      [1.3, -1.05],
-    ]) {
-      const w = new THREE.Mesh(wheelGeo, wheelMat);
-      w.position.set(wx, 0.55, wz);
-      g.add(w);
+    const wheelXs = kind === 'cargo' ? [-L / 2 + 0.5, 0, L / 2 - 0.5] : [-1.3, 1.3];
+    for (const wx of wheelXs) {
+      for (const wz of [W / 2 + 0.05, -W / 2 - 0.05]) {
+        const w = new THREE.Mesh(wheelGeo, wheelMat);
+        w.position.set(wx, 0.55, wz);
+        g.add(w);
+      }
     }
     // front marker + antenna
     const ant = new THREE.Mesh(
       new THREE.CylinderGeometry(0.04, 0.04, 1.1, 6),
       new THREE.MeshStandardMaterial({ color: 0xdddddd }),
     );
-    ant.position.set(-1.2, 2.6, 0);
+    ant.position.set(-L / 2 + 0.4, 2.6, 0);
     const light = new THREE.Mesh(
       new THREE.SphereGeometry(0.18, 8, 8),
       new THREE.MeshStandardMaterial({
@@ -995,12 +1058,27 @@ export class GameRenderer {
         emissiveIntensity: 0.7,
       }),
     );
-    light.position.set(1.7, 1.6, 0);
+    light.position.set(L / 2 + 0.5, 1.6, 0);
     g.add(body);
     g.add(chassis);
     g.add(cab);
     g.add(ant);
     g.add(light);
+
+    // Stranded beacon — hidden until the sim says the battery is flat (P4).
+    const beacon = new THREE.Mesh(
+      new THREE.SphereGeometry(0.17, 8, 8),
+      new THREE.MeshStandardMaterial({
+        color: 0xff4030,
+        emissive: 0xff2010,
+        emissiveIntensity: 1.4,
+        roughness: 0.4,
+      }),
+    );
+    beacon.name = 'beacon';
+    beacon.position.set(-L / 2 + 0.4, 3.25, 0);
+    beacon.visible = false;
+    g.add(beacon);
 
     if (kind === 'mining') {
       const arm = new THREE.Mesh(
@@ -1018,6 +1096,17 @@ export class GameRenderer {
       g.add(arm);
       g.add(bit);
     }
+    if (kind === 'cargo') {
+      // Container flats on the bed — it reads as a hauler at a glance.
+      for (const dz of [-W / 4, W / 4]) {
+        const box = new THREE.Mesh(
+          new THREE.BoxGeometry(L * 0.5, 1.3, W * 0.42),
+          new THREE.MeshStandardMaterial({ color: 0x8f9aa4, roughness: 0.65, metalness: 0.3 }),
+        );
+        box.position.set(-L * 0.2, 2.3, dz);
+        g.add(box);
+      }
+    }
     g.userData.pickable = true;
     g.userData.pickType = 'rover';
     g.userData.pickId = id;
@@ -1034,6 +1123,62 @@ export class GameRenderer {
     this.selectionRing.position.set(entity.x, y + 0.2, entity.z);
     this.selectionRing.scale.set(entity.radius, 1, entity.radius);
     this.selectionRing.visible = true;
+  }
+
+  /**
+   * Draw the selected rover's route (P4): a ground-hugging polyline through
+   * its task destinations, with a diamond at each waypoint. `null` hides it.
+   * Pure presentation — the Game layer decides what the points are.
+   */
+  showRoute(points: Array<{ x: number; z: number }> | null): void {
+    if (!points || points.length < 2) {
+      if (this.routeLine) this.routeLine.visible = false;
+      for (const [, m] of this.routeMarks) m.visible = false;
+      return;
+    }
+    if (!this.routeLine) {
+      const mat = new THREE.LineBasicMaterial({
+        color: 0x6fd3ff,
+        transparent: true,
+        opacity: 0.85,
+        depthTest: false,
+      });
+      this.routeLine = new THREE.Line(new THREE.BufferGeometry(), mat);
+      this.routeLine.renderOrder = 998;
+      this.routeGroup.add(this.routeLine);
+    }
+    const pts = points.map((p) => {
+      const y = this.world.heightAt(p.x, p.z);
+      return new THREE.Vector3(p.x, y + 1.2, p.z);
+    });
+    this.routeLine.geometry.setFromPoints(pts);
+    this.routeLine.visible = true;
+
+    // Waypoint diamonds (skip 0 — the rover itself is ringed by the selection).
+    for (let i = 1; i < points.length; i++) {
+      let mark = this.routeMarks.get(i);
+      if (!mark) {
+        mark = new THREE.Mesh(
+          new THREE.OctahedronGeometry(1.1),
+          new THREE.MeshBasicMaterial({
+            color: 0x6fd3ff,
+            transparent: true,
+            opacity: 0.9,
+            depthTest: false,
+          }),
+        );
+        mark.renderOrder = 999;
+        this.routeGroup.add(mark);
+        this.routeMarks.set(i, mark);
+      }
+      const p = points[i];
+      mark.position.set(p.x, this.world.heightAt(p.x, p.z) + 1.2, p.z);
+      mark.visible = true;
+      mark.rotation.y = this.clockT * 1.5;
+    }
+    for (const [i, m] of this.routeMarks) {
+      if (i >= points.length) m.visible = false;
+    }
   }
 
   showGhost(kind: BuildingKind | null, x: number, z: number, valid: boolean): void {

@@ -8,15 +8,16 @@
  */
 
 import { Simulation } from '../sim/Simulation';
+import type { Rover } from '../sim/Simulation';
 import { GameRenderer } from '../render/Renderer';
 import type { OverlayMode } from '../render/Renderer';
 import { CameraRig } from './CameraRig';
 import { HUD } from '../ui/HUD';
-import type { BuildingKind } from '../sim/defs';
+import type { BuildingKind, RoverKind } from '../sim/defs';
 import { BUILDINGS, BUILDING_ORDER, ROVERS } from '../sim/defs';
 import { SPEEDS, AUTOSAVE_INTERVAL_S, SAVE_VERSION } from '../sim/config';
 
-const SAVE_KEY = 'red-frontier-save-v3';
+const SAVE_KEY = 'red-frontier-save-v4';
 const TAP_TRAVEL = 8; // px before a press becomes a camera drag
 const DRAG_START = 5; // px before a press counts as a drag at all
 const LONG_PRESS_MS = 480;
@@ -352,7 +353,7 @@ export class Game {
     const pt = this.renderer.raycastTerrain(x, y);
     if (!pt) return;
     if (this.selected?.type === 'rover') {
-      this.sim.issueMove(this.selected.id, pt.x, pt.z);
+      this.sim.issueMove(this.selected.id, pt.x, pt.z, this.shiftHeld);
     } else if (this.selected?.type === 'colonist') {
       this.sim.orderColonist({ type: 'moveTo', x: pt.x, z: pt.z });
     }
@@ -367,7 +368,16 @@ export class Game {
     const pick = this.renderer.pickTargetAt(x, y);
     if (pick) {
       if (pick.type === 'rover') {
-        this.selected = { type: 'rover', id: pick.id };
+        // With a rover selected, tapping a stranded one dispatches a rescue —
+        // the same grammar as deposit → mine (P4's RECOVER task).
+        const rv =
+          this.selected?.type === 'rover' ? this.sim.roverById(this.selected.id) : undefined;
+        const target = this.sim.roverById(pick.id);
+        if (rv && target && target.id !== rv.id && target.phase === 'disabled') {
+          this.sim.issueRecover(rv.id, target.id, this.shiftHeld);
+        } else {
+          this.selected = { type: 'rover', id: pick.id };
+        }
       } else if (pick.type === 'building') {
         // With a rover selected, tapping a battered or buried structure sends
         // the rover to service it — the same grammar as deposit → mine.
@@ -375,8 +385,8 @@ export class Game {
           this.selected?.type === 'rover' ? this.sim.roverById(this.selected.id) : undefined;
         const job = this.sim.needsMaintenance(pick.id);
         if (rv && job) {
-          if (job === 'repair') this.sim.issueRepair(rv.id, pick.id);
-          else this.sim.issueClean(rv.id, pick.id);
+          if (job === 'repair') this.sim.issueRepair(rv.id, pick.id, this.shiftHeld);
+          else this.sim.issueClean(rv.id, pick.id, this.shiftHeld);
         } else {
           this.selected = { type: 'building', id: pick.id };
         }
@@ -384,7 +394,7 @@ export class Game {
         this.selected = { type: 'colonist', id: pick.id };
       } else if (pick.type === 'deposit') {
         if (this.selected?.type === 'rover') {
-          this.sim.issueMine(this.selected.id, pick.id);
+          this.sim.issueMine(this.selected.id, pick.id, this.shiftHeld);
         } else {
           const d = this.sim.world.deposits.find((dp) => dp.id === pick.id);
           this.hud.addLog(
@@ -400,7 +410,9 @@ export class Game {
     }
     const pt = this.renderer.raycastTerrain(x, y);
     if (!pt) return;
-    if (this.selected?.type === 'rover') this.sim.issueMove(this.selected.id, pt.x, pt.z);
+    if (this.selected?.type === 'rover') {
+      this.sim.issueMove(this.selected.id, pt.x, pt.z, this.shiftHeld);
+    }
   }
 
   private setPendingBuild(kind: BuildingKind | null): void {
@@ -439,12 +451,38 @@ export class Game {
       case 'stop':
         if (this.selected.type === 'rover') this.sim.stopRover(this.selected.id);
         break;
+      case 'wait':
+        if (this.selected.type === 'rover')
+          this.sim.issueWait(this.selected.id, Number(arg) || 60, true);
+        break;
       case 'recenter':
         this.centerOnSelected();
         break;
-      case 'autohaul':
+      case 'repeathaul':
         if (this.selected.type === 'rover') {
-          this.sim.setRoverAutoHaul(this.selected.id, arg === 1);
+          const rv = this.sim.roverById(this.selected.id);
+          this.sim.setRepeatRoute(this.selected.id, !(rv?.command.type === 'mine' && rv.command.repeat));
+        }
+        break;
+      case 'rule-haul':
+      case 'rule-svc':
+      case 'rule-storm':
+      case 'rule-rescue':
+        if (this.selected.type === 'rover') {
+          const rule =
+            a === 'rule-haul'
+              ? 'autoHaul'
+              : a === 'rule-svc'
+                ? 'autoService'
+                : a === 'rule-storm'
+                  ? 'stormShelter'
+                  : 'autoRescue';
+          this.sim.setRoverRule(this.selected.id, rule, arg === 1);
+        }
+        break;
+      case 'rule-charge':
+        if (this.selected.type === 'rover' && typeof arg === 'number') {
+          this.sim.setChargeFloor(this.selected.id, arg);
         }
         break;
       case 'toggle':
@@ -465,6 +503,11 @@ export class Game {
       case 'service':
         if (this.selected.type === 'building') {
           this.sim.dispatchMaintenance(this.selected.id);
+        }
+        break;
+      case 'assemble':
+        if (this.selected.type === 'building' && typeof arg === 'string') {
+          this.sim.assembleRover(this.selected.id, arg as RoverKind);
         }
         break;
     }
@@ -570,6 +613,7 @@ export class Game {
     if (!this.renderer || !this.sim) return;
     if (!this.selected) {
       this.renderer.setSelection(null);
+      this.renderer.showRoute(null);
       return;
     }
     if (this.selected.type === 'rover') {
@@ -577,21 +621,54 @@ export class Game {
       if (!rv) {
         this.selected = null;
         this.renderer.setSelection(null);
+        this.renderer.showRoute(null);
         return;
       }
       this.renderer.setSelection({ x: rv.x, z: rv.z, radius: ROVERS[rv.kind].radius });
+      this.renderer.showRoute(this.routePoints(rv));
     } else if (this.selected.type === 'building') {
       const b = this.sim.buildingById(this.selected.id);
       if (!b) {
         this.selected = null;
         this.renderer.setSelection(null);
+        this.renderer.showRoute(null);
         return;
       }
       this.renderer.setSelection({ x: b.x, z: b.z, radius: BUILDINGS[b.kind].radius });
+      this.renderer.showRoute(null);
     } else {
       const c = this.sim.colonist;
       this.renderer.setSelection({ x: c.x, z: c.z, radius: 2 });
+      this.renderer.showRoute(null);
     }
+  }
+
+  /**
+   * The selected rover's route, as world points: where it is now, where the
+   * active task is headed, then every queued task's destination. The renderer
+   * just draws the polyline (it never interprets tasks).
+   */
+  private routePoints(rv: Rover): Array<{ x: number; z: number }> | null {
+    if (!this.sim) return null;
+    const pts: Array<{ x: number; z: number }> = [{ x: rv.x, z: rv.z }];
+    for (const t of [rv.command, ...rv.pending]) {
+      let p: { x: number; z: number } | null = null;
+      if (t.type === 'moveTo') p = { x: t.x, z: t.z };
+      else if (t.type === 'mine') {
+        const d = this.sim.world.deposits.find((dp) => dp.id === t.depositId);
+        if (d) p = { x: d.x, z: d.z };
+      } else if (t.type === 'construct' || t.type === 'clean' || t.type === 'repair') {
+        const b = this.sim.buildingById(t.buildingId);
+        if (b) p = { x: b.x, z: b.z };
+      } else if (t.type === 'recover') {
+        const s = this.sim.roverById(t.roverId);
+        if (s) p = { x: s.x, z: s.z };
+      }
+      if (p && Math.hypot(p.x - pts[pts.length - 1].x, p.z - pts[pts.length - 1].z) > 1) {
+        pts.push(p);
+      }
+    }
+    return pts.length > 1 ? pts : null;
   }
 
   private syncUI(force: boolean): void {

@@ -20,7 +20,7 @@ import {
   FLUIDS,
   ROVERS,
 } from '../sim/defs';
-import type { Building, Rover, Simulation, Colonist } from '../sim/Simulation';
+import type { Building, Rover, Simulation, Colonist, RoverTask } from '../sim/Simulation';
 import { roverStatusText, colonistStatusText } from '../sim/Simulation';
 import { stormLabel } from '../sim/weather';
 import {
@@ -44,6 +44,35 @@ export interface HUDCallbacks {
 
 const fmtKg = (n: number) =>
   n >= 10000 ? `${(n / 1000).toFixed(1)} t` : `${Math.round(n)} kg`;
+
+/** One line describing a queued rover task (route list + tooltips). */
+function taskLabel(sim: Simulation, t: RoverTask): string {
+  switch (t.type) {
+    case 'moveTo':
+      return `Move to ${Math.round(t.x)}, ${Math.round(t.z)}`;
+    case 'mine': {
+      const d = sim.world.deposits.find((dp) => dp.id === t.depositId);
+      const name = d && d.amount > 0 ? RESOURCES[d.resource].label : 'a worked-out seam';
+      return `Mine ${name}${t.repeat ? ' — route ⟳' : ''}`;
+    }
+    case 'construct': {
+      const b = sim.buildingById(t.buildingId);
+      return `Build ${b ? BUILDINGS[b.kind].label : 'a site'}`;
+    }
+    case 'clean':
+      return 'Clean solar array';
+    case 'repair':
+      return 'Repair structure';
+    case 'recover': {
+      const s = sim.roverById(t.roverId);
+      return `Jump-start ${s ? s.label : 'a stranded rover'}`;
+    }
+    case 'wait':
+      return `Wait ${Math.max(0, Math.ceil(t.seconds))} s`;
+    default:
+      return 'Idle';
+  }
+}
 
 /** "1.4 sols", "12 h", "42 min" — whichever reads best at this magnitude. */
 function fmtDuration(sols: number): string {
@@ -193,8 +222,9 @@ export class HUD {
         <h1>RED FRONTIER</h1>
         <div class="tag">
           One human. A handful of machines. An entire planet that doesn’t want you there.<br/>
-          <b>Prototype 3</b> — power grids, the Mars sol, the water → oxygen → food chain that keeps a person alive,
-          and the wind, dust and storms that test all of it.
+          <b>Prototype 4</b> — the rover slice: task queues and repeating haul routes, the Rover Garage
+          (fast charge, field service, new rovers off the assembly line), drivetrain wear, and
+          jump-start rescue for stranded machines — on top of the full survival, power and weather sim.
         </div>
         <div class="actions">
           <label>World seed
@@ -657,8 +687,10 @@ export class HUD {
     this.el('inspector').innerHTML = `
       <div class="empty">
         Select a <b>rover</b>, a <b>building</b>, or your <b>colonist</b>.<br/><br/>
-        With a rover selected, tap a deposit to mine it or the ground to move.
-        Idle rovers automatically fetch whatever your build queue is short of.
+        With a rover selected, tap a deposit to mine it or the ground to move —
+        <b>Shift</b>+tap queues the order, and any mine order can become a
+        repeating haul route. Tap a stranded rover to send yours out with
+        jumper cables. Idle rovers work for the colony on their own.
       </div>`;
   }
 
@@ -676,24 +708,45 @@ export class HUD {
         <div class="stat"><span class="k">Status</span><span class="v" id="i-status">—</span></div>
         <div class="stat"><span class="k">Battery</span><span class="v" id="i-bat">—</span></div>
         <div class="bar-wrap"><div class="bar-fill cyan" id="i-batbar"></div></div>
+        <div class="stat"><span class="k">Condition</span><span class="v" id="i-cond">—</span></div>
+        <div class="bar-wrap"><div class="bar-fill green" id="i-condbar"></div></div>
         <div class="stat"><span class="k">Cargo</span><span class="v" id="i-cargo">—</span></div>
         <div class="bar-wrap"><div class="bar-fill green" id="i-cargobar"></div></div>
         <div class="chips" id="i-chips"></div>
-        <label class="toggle" id="i-auto-wrap">
-          <input type="checkbox" id="i-auto" /> <span>Auto-haul when idle</span>
-        </label>
+        <div class="sub sm">Route <span class="dim">(Shift+order to queue)</span></div>
+        <div class="route-list" id="i-route"></div>
+        <button class="btn wide" id="i-repeat" data-act="repeathaul" style="display:none">⟳ Repeat haul route</button>
+        <div class="sub sm">Automation</div>
+        <label class="toggle"><input type="checkbox" id="r-haul" /> <span>Auto-haul when idle</span></label>
+        <label class="toggle"><input type="checkbox" id="r-svc" /> <span>Auto maintenance (repair & clean)</span></label>
+        <label class="toggle"><input type="checkbox" id="r-storm" /> <span>Shelter in storms</span></label>
+        <label class="toggle"><input type="checkbox" id="r-rescue" /> <span>Auto-rescue stranded rovers</span></label>
+        <label class="slider-row">Charge below <b id="r-chargev">20%</b>
+          <input type="range" id="r-charge" min="10" max="60" step="5" /></label>
         <div class="action-grid">
           <button class="btn" data-act="stop">Stop</button>
+          <button class="btn" data-act="wait" data-arg="60" title="Hold position for a minute — usually queued between jobs.">Wait 1m</button>
           <button class="btn" data-act="recenter">Focus</button>
         </div>`;
       insp.querySelectorAll('[data-act]').forEach((b) =>
         b.addEventListener('pointerdown', (e) => {
           e.stopPropagation();
-          this.cb.onAction((b as HTMLElement).dataset.act!);
+          const el = b as HTMLElement;
+          this.cb.onAction(el.dataset.act!, el.dataset.arg);
         }),
       );
-      const auto = insp.querySelector('#i-auto') as HTMLInputElement;
-      auto.addEventListener('change', () => this.cb.onAction('autohaul', auto.checked ? 1 : 0));
+      const rule = (id: string, action: string) => {
+        const box = insp.querySelector(`#${id}`) as HTMLInputElement;
+        box.addEventListener('change', () => this.cb.onAction(action, box.checked ? 1 : 0));
+      };
+      rule('r-haul', 'rule-haul');
+      rule('r-svc', 'rule-svc');
+      rule('r-storm', 'rule-storm');
+      rule('r-rescue', 'rule-rescue');
+      const slider = insp.querySelector('#r-charge') as HTMLInputElement;
+      slider.addEventListener('input', () =>
+        this.cb.onAction('rule-charge', Number(slider.value)),
+      );
     }
 
     const q = (id: string) => insp.querySelector(`#${id}`) as HTMLElement;
@@ -703,6 +756,10 @@ export class HUD {
     const bb = q('i-batbar');
     bb.style.width = `${Math.max(0, Math.min(100, bpct))}%`;
     bb.className = `bar-fill ${bpct < 20 ? 'red' : bpct < 45 ? 'amber' : 'cyan'}`;
+    q('i-cond').textContent = `${Math.round(r.condition)}%`;
+    const cbar = q('i-condbar');
+    cbar.style.width = `${Math.max(0, Math.min(100, r.condition))}%`;
+    cbar.className = `bar-fill ${r.condition < 35 ? 'red' : r.condition < 70 ? 'amber' : 'green'}`;
     q('i-cargo').textContent = `${Math.round(mass)} / ${def.capacityKg} kg`;
     q('i-cargobar').style.width = `${Math.min(100, (mass / def.capacityKg) * 100)}%`;
     q('i-chips').innerHTML =
@@ -712,8 +769,48 @@ export class HUD {
             `<span class="chip"><i style="background:#${RESOURCES[res].color.toString(16).padStart(6, '0')}"></i>${RESOURCES[res].short} ${Math.round(r.cargo[res])}</span>`,
         )
         .join('') || '<span class="dim">Cargo bay empty</span>';
-    const auto = insp.querySelector('#i-auto') as HTMLInputElement;
-    if (auto && auto.checked !== r.autoHaul) auto.checked = r.autoHaul;
+
+    // ---- the task queue ---------------------------------------------------
+    const tasks: RoverTask[] = [r.command, ...r.pending].filter((t) => t.type !== 'idle');
+    q('i-route').innerHTML = tasks.length
+      ? tasks
+          .slice(0, 5)
+          .map(
+            (t, i) =>
+              `<div class="route-item${i === 0 ? ' active' : ''}"><span class="ri-n">${i + 1}</span><span class="ri-t">${taskLabel(sim, t)}</span></div>`,
+          )
+          .join('') +
+          (tasks.length > 5
+            ? `<div class="route-item dim">+${tasks.length - 5} more…</div>`
+            : '')
+      : '<div class="route-item dim">No tasks queued — idle rovers work for the colony.</div>';
+
+    const rep = q('i-repeat') as HTMLButtonElement;
+    if (r.command.type === 'mine') {
+      rep.style.display = '';
+      rep.textContent = r.command.repeat
+        ? '⟳ Route on — tap to end after this trip'
+        : '⟳ Set as repeating haul route';
+      rep.classList.toggle('active', !!r.command.repeat);
+    } else {
+      rep.style.display = 'none';
+    }
+
+    // ---- the automation rules --------------------------------------------
+    const sync = (id: string, on: boolean) => {
+      const box = insp.querySelector(`#${id}`) as HTMLInputElement;
+      if (box && box.checked !== on) box.checked = on;
+    };
+    sync('r-haul', r.rules.autoHaul);
+    sync('r-svc', r.rules.autoService);
+    sync('r-storm', r.rules.stormShelter);
+    sync('r-rescue', r.rules.autoRescue);
+    const slider = insp.querySelector('#r-charge') as HTMLInputElement;
+    if (slider && Number(slider.value) !== r.rules.chargeFloorPct) {
+      slider.value = String(r.rules.chargeFloorPct);
+    }
+    const cv = insp.querySelector('#r-chargev') as HTMLElement;
+    if (cv) cv.textContent = `${r.rules.chargeFloorPct}%`;
   }
 
   showBuilding(b: Building, sim: Simulation): void {
@@ -731,6 +828,17 @@ export class HUD {
           <div class="bar-wrap"><div class="bar-fill amber" id="b-progress"></div></div>
         </div>
         <div id="b-body"></div>
+        <div id="b-garage" style="display:none">
+          <div class="sub sm">Assembly line</div>
+          <div class="stat"><span class="k">Building</span><span class="v" id="b-asm-label">—</span></div>
+          <div class="bar-wrap" id="b-asm-wrap"><div class="bar-fill cyan" id="b-asm-bar" style="width:0%"></div></div>
+          <div class="action-grid three" id="b-asm-btns">
+            <button class="btn" data-act="assemble" data-arg="utility" id="asm-utility" title="Utility Rover — fast, agile, builds well.">Utility</button>
+            <button class="btn" data-act="assemble" data-arg="mining" id="asm-mining" title="Mining Rover — heavy drill, 1.5 t hopper.">Mining</button>
+            <button class="btn" data-act="assemble" data-arg="cargo" id="asm-cargo" title="Cargo Rover — 3 t, 120 kWh, built for the long haul.">Cargo</button>
+          </div>
+          <div class="note dim" id="b-asm-note"></div>
+        </div>
         <div class="action-grid" id="b-actions">
           <button class="btn" data-act="service" id="b-service">Clean panels</button>
           <button class="btn" data-act="toggle" id="b-toggle">Switch off</button>
@@ -739,7 +847,8 @@ export class HUD {
       insp.querySelectorAll('[data-act]').forEach((n) =>
         n.addEventListener('pointerdown', (e) => {
           e.stopPropagation();
-          this.cb.onAction((n as HTMLElement).dataset.act!);
+          const el = n as HTMLElement;
+          this.cb.onAction(el.dataset.act!, el.dataset.arg);
         }),
       );
     }
@@ -837,6 +946,45 @@ export class HUD {
       }
     }
     q('b-body').innerHTML = rows.join('');
+
+    // ---- rover garage: the assembly line (P4) ------------------------------
+    const garage = q('b-garage');
+    if (b.kind === 'garage' && b.state === 'online' && b.enabled) {
+      garage.style.display = '';
+      const lbl = q('b-asm-label');
+      const bar = q('b-asm-bar');
+      const wrap = q('b-asm-wrap');
+      const btns = q('b-asm-btns');
+      if (b.assembly) {
+        const rdef = ROVERS[b.assembly.kind];
+        lbl.textContent = `${rdef.label} — ${Math.round(b.assembly.progress * 100)}%`;
+        lbl.className = 'v good';
+        bar.style.width = `${Math.min(100, b.assembly.progress * 100)}%`;
+        wrap.style.display = '';
+        btns.style.display = 'none';
+        q('b-asm-note').innerHTML =
+          'The line draws garage power — a brownout slows the build.';
+      } else {
+        lbl.textContent = 'Idle';
+        lbl.className = 'v dim';
+        wrap.style.display = 'none';
+        btns.style.display = '';
+        for (const kind of ['utility', 'mining', 'cargo'] as const) {
+          const btn = q(`asm-${kind}`) as HTMLButtonElement;
+          const rdef = ROVERS[kind];
+          const afford = ALL_RESOURCES.every((res) => sim.storage[res] >= rdef.cost[res]);
+          btn.classList.toggle('unaffordable', !afford);
+          const cost = ALL_RESOURCES.filter((res) => rdef.cost[res] > 0)
+            .map((res) => `${Math.round(rdef.cost[res])} ${RESOURCES[res].short}`)
+            .join(' · ');
+          btn.innerHTML = `${rdef.label.split(' ')[0]}<span class="cost">${cost}</span>`;
+        }
+        q('b-asm-note').innerHTML =
+          'Also: 40 kW fast charge bay · services parked rovers back to 100% condition.';
+      }
+    } else {
+      garage.style.display = 'none';
+    }
 
     const toggle = q('b-toggle') as HTMLButtonElement;
     toggle.style.display = b.state === 'online' ? '' : 'none';
@@ -948,6 +1096,8 @@ function iconFor(k: BuildingKind): string {
       return '🫁';
     case 'greenhouse':
       return '🌱';
+    case 'garage':
+      return '🛻';
     case 'rtg':
       return '☢';
   }

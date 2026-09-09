@@ -212,7 +212,93 @@ test('the colonist inspector renders', () => {
   assert.match(doc.getElementById('inspector')!.textContent!, /Vega/);
 });
 
-test('clearing the inspector restores the hint text', () => {
+console.log('\nPrototype 4 HUD');
+
+test('the rover inspector shows the task queue and a queued WAIT label', () => {
+  const rv = sim.rovers[0];
+  hud.showRover(rv, sim);
+  sim.issueMove(rv.id, 40, 0);
+  sim.issueWait(rv.id, 30, true);
+  hud.showRover(rv, sim);
+  const items = doc.querySelectorAll('#i-route .route-item');
+  assert.ok(items.length >= 2, `queue should list tasks, got ${items.length}`);
+  assert.match(items[0]!.textContent!, /Move/);
+  assert.match(items[1]!.textContent!, /Wait/);
+});
+
+test('a mining rover offers the repeat-haul toggle, and it fires', () => {
+  const rv = sim.rovers[0];
+  sim.stopRover(rv.id);
+  const ice = sim.world.deposits.find((d) => d.resource === 'ice')!;
+  sim.issueMine(rv.id, ice.id);
+  hud.showRover(rv, sim);
+  const rep = doc.getElementById('i-repeat') as any;
+  assert.ok(rep, 'the repeat button should exist for a mining rover');
+  assert.equal(rep.style.display, '', 'and be visible');
+  calls.length = 0;
+  rep.dispatchEvent(new dom.window.Event('pointerdown', { bubbles: true }));
+  assert.ok(calls.includes('action:repeathaul:'), `got ${JSON.stringify(calls)}`);
+});
+
+test('rule checkboxes and the charge slider fire actions', () => {
+  const rv = sim.rovers[1];
+  hud.showRover(rv, sim);
+  const haul = doc.getElementById('r-haul') as any;
+  assert.equal(haul.checked, true, 'auto-haul is on by default');
+  haul.checked = false;
+  calls.length = 0;
+  haul.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+  assert.ok(calls.includes('action:rule-haul:0'), `got ${JSON.stringify(calls)}`);
+
+  const slider = doc.getElementById('r-charge') as any;
+  slider.value = '45';
+  calls.length = 0;
+  slider.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+  assert.ok(calls.includes('action:rule-charge:45'), `got ${JSON.stringify(calls)}`);
+});
+
+test('the wait button queues a hold via the wait action', () => {
+  const rv = sim.rovers[1];
+  hud.showRover(rv, sim);
+  const btn = doc.querySelector('[data-act="wait"]') as any;
+  assert.ok(btn, 'the wait button should exist');
+  calls.length = 0;
+  btn.dispatchEvent(new dom.window.Event('pointerdown', { bubbles: true }));
+  assert.ok(calls.includes('action:wait:60'), `got ${JSON.stringify(calls)}`);
+});
+
+test('a garage shows its assembly line with one button per rover kind', () => {
+  const b = sim.placeBuilding('garage', -60, -60) ?? sim.placeBuilding('garage', 60, -60);
+  assert.ok(b, 'needed a placeable spot for the garage');
+  (b as any).state = 'online';
+  hud.showBuilding(b!, sim);
+  const garageBlock = doc.getElementById('b-garage')!;
+  assert.equal(garageBlock.style.display, '', 'the assembly block should be visible');
+  for (const kind of ['utility', 'mining', 'cargo']) {
+    const btn = doc.getElementById(`asm-${kind}`) as any;
+    assert.ok(btn, `assembly button for ${kind} should exist`);
+    const pretty = kind === 'utility' ? 'Utility' : kind === 'mining' ? 'Mining' : 'Cargo';
+    assert.match(btn.textContent, new RegExp(pretty));
+  }
+  calls.length = 0;
+  doc
+    .getElementById('asm-cargo')!
+    .dispatchEvent(new dom.window.Event('pointerdown', { bubbles: true }));
+  assert.ok(calls.includes('action:assemble:cargo'), `got ${JSON.stringify(calls)}`);
+});
+
+test('a busy assembly line hides the buttons and shows progress', () => {
+  const b = sim.buildings.find((x) => x.kind === 'garage');
+  assert.ok(b, 'the earlier test placed a garage');
+  (b as any).assembly = { kind: 'mining', progress: 0.4 };
+  hud.showBuilding(b!, sim);
+  assert.equal(
+    (doc.getElementById('b-asm-btns') as any).style.display,
+    'none',
+    'buttons should hide while building',
+  );
+  assert.match(doc.getElementById('b-asm-label')!.textContent!, /Mining Rover — 40%/);
+});test('clearing the inspector restores the hint text', () => {
   hud.clearInspector();
   assert.match(doc.getElementById('inspector')!.textContent!, /Select a/);
 });
