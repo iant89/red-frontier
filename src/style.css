@@ -1247,3 +1247,105 @@ body {
     letter-spacing: 6px;
   }
 }
+
+/* ---------------------------------------------- Prototype 4: rover UI --- */
+
+#inspector .sub.sm {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--ui-text-faint);
+  margin: 10px 0 4px;
+}
+
+#inspector .sub.sm .dim,
+.dim {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.route-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11.5px;
+}
+
+.route-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 7px;
+  border: 1px solid var(--ui-border);
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--ui-text-dim);
+  line-height: 1.3;
+}
+
+.route-item.active {
+  border-color: var(--cyan);
+  color: var(--ui-text);
+}
+
+.route-item .ri-n {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 50%;
+  background: var(--ui-bg-solid);
+  border: 1px solid var(--ui-border-lit);
+  color: var(--ui-text-dim);
+}
+
+.route-item.active .ri-n {
+  background: var(--cyan);
+  border-color: var(--cyan);
+  color: #10202a;
+}
+
+.btn.wide {
+  width: 100%;
+  margin-top: 7px;
+}
+
+.action-grid.three {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+.action-grid .btn .cost {
+  display: block;
+  font-size: 9.5px;
+  color: var(--ui-text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.action-grid .btn.unaffordable {
+  opacity: 0.42;
+}
+
+.slider-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11.5px;
+  color: var(--ui-text-dim);
+  margin: 9px 0 3px;
+  cursor: default;
+}
+
+.slider-row b {
+  color: var(--ui-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.slider-row input[type='range'] {
+  width: 100%;
+  accent-color: var(--cyan);
+  pointer-events: auto;
+}

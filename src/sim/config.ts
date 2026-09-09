@@ -85,9 +85,34 @@ export const ROVER_DISABLED_THRESHOLD = 0.01;
 
 /** Charger output per rover (kW). Draws from the colony power grid. */
 export const ROVER_CHARGE_RATE_KW = 20;
+/** A Rover Garage charges at this rate instead (kW). */
+export const GARAGE_CHARGE_RATE_KW = 40;
 
 /** Power priority tier that rover charging sits on (lowest). */
 export const ROVER_CHARGE_TIER = 3;
+
+// ------------------------------------------- Prototype 4: wear & recovery ----
+
+/**
+ * Drivetrain condition. Rovers are stranded-not-destroyed machines: work and
+ * storms grind their condition down, low condition halves their work rate, and
+ * a garage services them back to health. Condition never disables a rover —
+ * soft failure, per GDD §13.
+ */
+export const ROVER_CONDITION_SLOW = 45; // below this, work rate ramps down
+export const ROVER_CONDITION_ALERT = 35; // below this, the HUD nags
+export const ROVER_WEAR_WORK_S = 0.02; // condition lost per second of tool work
+export const ROVER_WEAR_MOVE_S = 0.006; // condition lost per second of driving
+export const ROVER_WEAR_STORM_S = 0.12; // condition lost per second, full storm
+export const GARAGE_SERVICE_RATE = 1.5; // condition restored per second parked
+
+/** Jump-start transfer rate while a rescuer is hooked up (kWh per second). */
+export const RECOVER_TRANSFER_KW = 12;
+/** A rescue that cannot deliver at least this much is refused outright (kWh). */
+export const RECOVER_MIN_GIVE_KWH = 4;
+
+/** Route pause: a repeat route waits at the depot until the silo has this much room (kg). */
+export const ROUTE_RESUME_ROOM_KG = 60;
 
 // ---------------------------------------------------------------- power ----
 
@@ -222,7 +247,7 @@ export const COLONIST_BUILD_POWER = 0.5;
 export const AUTOSAVE_INTERVAL_S = 45;
 
 /** Current save schema version. Bump whenever the snapshot shape changes. */
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 // -------------------------------------------------------------- history ----
 

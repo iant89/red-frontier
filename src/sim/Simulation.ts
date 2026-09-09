@@ -23,6 +23,7 @@ import {
   BASE_STORAGE_PER_RESOURCE,
   ROVER_CHARGE_THRESHOLD,
   ROVER_CHARGE_RATE_KW,
+  GARAGE_CHARGE_RATE_KW,
   ROVER_CHARGE_TIER,
   HOURS_PER_SEC,
   SOLS_PER_SEC,
@@ -52,6 +53,15 @@ import {
   STORM_EVA_INTENSITY,
   STORM_WORK_MUL,
   CLEANLINESS_FLOOR,
+  ROVER_CONDITION_SLOW,
+  ROVER_CONDITION_ALERT,
+  ROVER_WEAR_WORK_S,
+  ROVER_WEAR_MOVE_S,
+  ROVER_WEAR_STORM_S,
+  GARAGE_SERVICE_RATE,
+  RECOVER_TRANSFER_KW,
+  RECOVER_MIN_GIVE_KWH,
+  ROUTE_RESUME_ROOM_KG,
 } from './config';
 import type { PowerTier } from './config';
 import type {
@@ -94,6 +104,53 @@ import { AlertBus, type Severity } from './alerts';
 
 // --------------------------------------------------------------- types ----
 
+/**
+ * A rover task (GDD §5: first-class, queueable, repeatable). `command` is the
+ * task currently being executed; `pending` holds the rest of the queue. A
+ * `mine` task with `repeat` set is a *haul route*: mine → depot → seam, over
+ * and over, until the seam runs dry or the player stops it.
+ */
+export type RoverTask =
+  | { type: 'idle' }
+  | { type: 'moveTo'; x: number; z: number }
+  | { type: 'mine'; depositId: number; repeat?: boolean }
+  | { type: 'construct'; buildingId: number }
+  | { type: 'clean'; buildingId: number }
+  | { type: 'repair'; buildingId: number }
+  | { type: 'recover'; roverId: number; give?: number; given?: number }
+  | { type: 'wait'; seconds: number };
+
+/** Kept as an alias so older call sites read naturally. */
+export type RoverCommand = RoverTask;
+
+/**
+ * Player-authored automation (GDD §5: "IF battery < 20% → return to charger…"
+ * and friends). The behaviours themselves are simulation rules; these switches
+ * and thresholds are the player's levers over them, per rover.
+ */
+export interface RoverRules {
+  /** Head home to charge below this battery fraction (percent). */
+  chargeFloorPct: number;
+  /** Fetch what the build queue is short of when idle. */
+  autoHaul: boolean;
+  /** Volunteer for automatic repair / panel-cleaning dispatches. */
+  autoService: boolean;
+  /** Recall to a charger when a storm crosses the shelter threshold. */
+  stormShelter: boolean;
+  /** Volunteer to jump-start stranded rovers. */
+  autoRescue: boolean;
+}
+
+export function defaultRoverRules(): RoverRules {
+  return {
+    chargeFloorPct: Math.round(ROVER_CHARGE_THRESHOLD * 100),
+    autoHaul: true,
+    autoService: true,
+    stormShelter: true,
+    autoRescue: true,
+  };
+}
+
 export interface Rover {
   id: number;
   kind: RoverKind;
@@ -105,7 +162,10 @@ export interface Rover {
   battery: number; // kWh
   cargo: ResourceAmounts;
   phase: RoverPhase;
-  command: RoverCommand;
+  /** The task at the head of the queue (what the rover is doing now). */
+  command: RoverTask;
+  /** The rest of the queue — executed in order as tasks complete. */
+  pending: RoverTask[];
   goal: RoverGoal;
   gx: number;
   gz: number;
@@ -117,19 +177,17 @@ export interface Rover {
   chargeSat: number;
   /** True when the sim assigned this task, not the player. */
   autoTask: boolean;
-  /** Player opt-out from automatic supply runs. */
-  autoHaul: boolean;
+  /** Drivetrain condition 0..100. Low condition slows work; garages fix it. */
+  condition: number;
+  /** The player's automation levers for this rover. */
+  rules: RoverRules;
+  /** A repeat route is parked at the depot waiting for silo space. */
+  routePaused: boolean;
+  /** "Still holds cargo" warned once per stuck episode, not per tick. */
+  blockNotified: boolean;
   /** Forced back to base by storm weather; released when the storm passes. */
   sheltered: boolean;
 }
-
-export type RoverCommand =
-  | { type: 'idle' }
-  | { type: 'moveTo'; x: number; z: number }
-  | { type: 'mine'; depositId: number }
-  | { type: 'construct'; buildingId: number }
-  | { type: 'clean'; buildingId: number }
-  | { type: 'repair'; buildingId: number };
 
 export type RoverGoal =
   | 'idle'
@@ -142,7 +200,9 @@ export type RoverGoal =
   | 'toCharge'
   | 'charge'
   | 'toService'
-  | 'service';
+  | 'service'
+  | 'toRecover'
+  | 'recover';
 
 export type RoverPhase = 'idle' | 'moving' | 'working' | 'charging' | 'disabled';
 
@@ -178,6 +238,9 @@ export interface Building {
   cleanliness: number;
   /** Tripped offline by damage; a rover repair brings it back online. */
   damaged: boolean;
+  // ---- Prototype 4: rover garage ------------------------------------------
+  /** What the assembly line is building right now, if anything. */
+  assembly: { kind: RoverKind; progress: number } | null;
 }
 
 export type { Colonist } from './lifesupport';
@@ -222,13 +285,15 @@ function lerpAngle(a: number, b: number, t: number): number {
 export function roverStatusText(r: Rover): string {
   if (r.phase === 'disabled') return 'Disabled — out of power';
   if (r.sheltered) return 'Sheltering from storm';
+  if (r.routePaused) return 'Route paused — silo full';
+  if (r.command.type === 'wait') return `Waiting (${Math.max(0, Math.ceil(r.command.seconds))} s)`;
   switch (r.goal) {
     case 'idle':
       return r.phase === 'charging' ? 'Charging' : 'Idle';
     case 'move':
       return 'Moving';
     case 'mine':
-      return 'Mining';
+      return r.command.type === 'mine' && r.command.repeat ? 'Hauling route' : 'Mining';
     case 'toDepot':
     case 'unload':
       return 'Hauling to storage';
@@ -243,6 +308,10 @@ export function roverStatusText(r: Rover): string {
     case 'toService':
     case 'service':
       return r.command.type === 'repair' ? 'Repairing' : 'Cleaning panels';
+    case 'toRecover':
+      return 'Responding to stranded rover';
+    case 'recover':
+      return 'Jump-starting a stranded rover';
     default:
       return r.phase;
   }
@@ -319,15 +388,14 @@ export class Simulation {
 
   // ------------------------------------------------------------ setup ----
   private spawnStart(): void {
-    this.spawnRover('mining', 9, 0, Math.PI);
-    this.spawnRover('utility', -9, 4, Math.PI);
+    this.spawnRoverAt('mining', SPAWN_X + 9, SPAWN_Z, Math.PI);
+    this.spawnRoverAt('utility', SPAWN_X - 9, SPAWN_Z + 4, Math.PI);
   }
 
-  private spawnRover(kind: RoverKind, ox: number, oz: number, heading: number): void {
+  /** Spawn a rover of `kind` at world position. Used at start and by the garage line. */
+  private spawnRoverAt(kind: RoverKind, x: number, z: number, heading: number): Rover {
     const def = ROVERS[kind];
-    const x = SPAWN_X + ox;
-    const z = SPAWN_Z + oz;
-    this.rovers.push({
+    const r: Rover = {
       id: this.allocId(),
       kind,
       label: def.label,
@@ -339,6 +407,7 @@ export class Simulation {
       cargo: emptyAmounts(),
       phase: 'idle',
       command: { type: 'idle' },
+      pending: [],
       goal: 'idle',
       gx: x,
       gz: z,
@@ -348,9 +417,14 @@ export class Simulation {
       statusText: 'Idle',
       chargeSat: 1,
       autoTask: false,
-      autoHaul: true,
+      condition: 100,
+      rules: defaultRoverRules(),
+      routePaused: false,
+      blockNotified: false,
       sheltered: false,
-    });
+    };
+    this.rovers.push(r);
+    return r;
   }
 
   private allocId(): number {
@@ -540,16 +614,134 @@ export class Simulation {
     return best;
   }
 
-  // -------------------------------------------------- player commands ----
-  issueMove(roverId: number, x: number, z: number): void {
-    const r = this.roverById(roverId);
-    if (!r || r.phase === 'disabled') return;
-    r.autoTask = false;
-    r.command = { type: 'moveTo', x, z };
-    r.recharge = false;
+  // --------------------------------------- P4 logistics & wear helpers ----
+
+  /** Energy (kWh) a rover of `def` burns driving between two points. */
+  private travelKWh(
+    x1: number,
+    z1: number,
+    x2: number,
+    z2: number,
+    def: { cruiseSpeed: number; movePowerKw: number },
+  ): number {
+    return (Math.hypot(x2 - x1, z2 - z1) / def.cruiseSpeed) * def.movePowerKw * HOURS_PER_SEC;
   }
 
-  issueMine(roverId: number, depositId: number): void {
+  /** Charger output at a position — garages charge twice as fast (GDD §4). */
+  private chargeRateKwAt(x: number, z: number): number {
+    for (const b of this.buildings) {
+      if (b.kind !== 'garage' || !this.runnable(b) || !b.enabled) continue;
+      if (Math.hypot(b.x - x, b.z - z) < BUILDINGS.garage.radius + 5) return GARAGE_CHARGE_RATE_KW;
+    }
+    return ROVER_CHARGE_RATE_KW;
+  }
+
+  /**
+   * How hard a worn rover can still work, 0.5..1 (GDD §5: rovers fail *soft*).
+   * Above `ROVER_CONDITION_SLOW` it's business as usual; at zero condition the
+   * drivetrain still turns at half rate — stranded-not-destroyed, always.
+   */
+  private roverWorkMul(r: Rover): number {
+    return 0.5 + 0.5 * clamp(r.condition / ROVER_CONDITION_SLOW, 0, 1);
+  }
+
+  /**
+   * Claim a deposit for a rover (TDD §8: reservations stop two rovers being
+   * scheduled onto one seam). Auto tasks never steal; a player order may bump
+   * an auto reservation, cancelling that rover's run so it re-plans.
+   */
+  private claimDeposit(r: Rover, depositId: number, force = false): void {
+    const dep = this.world.deposits.find((d) => d.id === depositId);
+    if (!dep) return;
+    const holder = dep.reservedBy;
+    if (holder == null || holder === r.id) {
+      dep.reservedBy = r.id;
+      return;
+    }
+    if (!force) return;
+    const other = this.roverById(holder);
+    if (other && other.autoTask && other.command.type === 'mine' && other.command.depositId === depositId) {
+      this.finishTask(other);
+      this.event('info', `${other.label} re-planned — ${r.label} took over that seam.`);
+    }
+    dep.reservedBy = r.id;
+  }
+
+  private releaseDeposit(r: Rover, depositId: number): void {
+    const dep = this.world.deposits.find((d) => d.id === depositId);
+    if (dep && dep.reservedBy === r.id) dep.reservedBy = null;
+  }
+
+  /** Drop everything this rover's active task holds a claim on. */
+  private releaseReservations(r: Rover): void {
+    if (r.command.type === 'mine') this.releaseDeposit(r, r.command.depositId);
+  }
+
+  /** True when some rover is already executing a RECOVER for this one. */
+  private rescueTargeted(roverId: number): boolean {
+    return this.rovers.some(
+      (r) => r.command.type === 'recover' && r.command.roverId === roverId,
+    );
+  }
+
+  // -------------------------------------------------- player commands ----
+
+  /**
+   * Hand a rover a task. A plain order replaces everything the rover was doing
+   * (explicit player intent always wins, TDD §8); a *queued* order (Shift) is
+   * appended behind the player tasks already on its queue. Ordering over an
+   * automatic task always replaces it — automation only ever fills idle time.
+   */
+  private giveTask(r: Rover, task: RoverTask, queued: boolean): void {
+    const busy = r.command.type !== 'idle' || r.pending.length > 0;
+    if (queued && busy && !r.autoTask) {
+      r.pending.push(task);
+      return;
+    }
+    this.releaseReservations(r);
+    r.pending = [];
+    r.command = task;
+    r.autoTask = false;
+    r.recharge = false;
+    r.routePaused = false;
+    r.blockNotified = false;
+  }
+
+  /** The scheduler's counterpart to {@link giveTask} — always replaces. */
+  private autoAssign(r: Rover, task: RoverTask): void {
+    this.releaseReservations(r);
+    r.pending = [];
+    r.command = task;
+    r.autoTask = true;
+    r.routePaused = false;
+  }
+
+  /**
+   * Complete the active task: release what it held, promote the next queued
+   * task (if any), and drop back to idle + automation.
+   */
+  private finishTask(r: Rover): void {
+    if (r.command.type === 'mine') this.releaseDeposit(r, r.command.depositId);
+    const next = r.pending.shift();
+    if (next) {
+      r.command = next;
+    } else {
+      r.command = { type: 'idle' };
+      if (cargoMass(r) <= 0.01) r.autoTask = false;
+    }
+    r.goal = 'idle';
+    r.phase = 'idle';
+    r.routePaused = false;
+    r.blockNotified = false;
+  }
+
+  issueMove(roverId: number, x: number, z: number, queued = false): void {
+    const r = this.roverById(roverId);
+    if (!r || r.phase === 'disabled') return;
+    this.giveTask(r, { type: 'moveTo', x, z }, queued);
+  }
+
+  issueMine(roverId: number, depositId: number, queued = false): void {
     const r = this.roverById(roverId);
     if (!r || r.phase === 'disabled') return;
     const dep = this.world.deposits.find((d) => d.id === depositId);
@@ -557,12 +749,19 @@ export class Simulation {
       this.event('info', 'Deposit is depleted.');
       return;
     }
-    r.autoTask = false;
-    r.command = { type: 'mine', depositId };
-    r.recharge = false;
+    this.giveTask(r, { type: 'mine', depositId }, queued);
+    // A player order outranks any auto-run holding the seam.
+    this.claimDeposit(r, depositId, true);
   }
 
-  issueConstruct(roverId: number, buildingId: number): void {
+  /** Hold position for a while (GDD §5 WAIT — usually queued between jobs). */
+  issueWait(roverId: number, seconds: number, queued = false): void {
+    const r = this.roverById(roverId);
+    if (!r || r.phase === 'disabled') return;
+    this.giveTask(r, { type: 'wait', seconds: Math.max(0, seconds) }, queued);
+  }
+
+  issueConstruct(roverId: number, buildingId: number, queued = false): void {
     const r = this.roverById(roverId);
     if (!r || r.phase === 'disabled') return;
     const b = this.buildingById(buildingId);
@@ -571,29 +770,114 @@ export class Simulation {
       this.event('warn', `${r.label} can't build a ${BUILDINGS[b.kind].label}.`);
       return;
     }
-    r.autoTask = false;
-    r.command = { type: 'construct', buildingId };
-    r.recharge = false;
+    this.giveTask(r, { type: 'construct', buildingId }, queued);
   }
 
   stopRover(roverId: number): void {
     const r = this.roverById(roverId);
     if (!r) return;
+    this.releaseReservations(r);
     r.command = { type: 'idle' };
+    r.pending = [];
     r.recharge = false;
     r.autoTask = false;
+    r.goal = 'idle';
+    r.phase = 'idle';
+    r.routePaused = false;
   }
 
-  /** Toggle whether this rover accepts automatic supply runs. */
-  setRoverAutoHaul(roverId: number, on: boolean): void {
+  /** Convert the active mining task into a repeating haul route (or back). */
+  setRepeatRoute(roverId: number, on: boolean): void {
     const r = this.roverById(roverId);
     if (!r) return;
-    r.autoHaul = on;
-    if (!on && r.autoTask) {
-      r.command = { type: 'idle' };
-      r.autoTask = false;
+    if (r.command.type !== 'mine') {
+      this.event('info', `${r.label} isn't working a seam — select a deposit to route it.`);
+      return;
     }
-    this.event('info', `${r.label} auto-haul ${on ? 'enabled' : 'disabled'}.`);
+    r.command.repeat = on || undefined;
+    // Taking ownership of a route pulls the rover out of the auto pool.
+    if (on) r.autoTask = false;
+    this.event(
+      on ? 'ok' : 'info',
+      on
+        ? `${r.label} set on a haul route — it will loop the seam until it's dry.`
+        : `${r.label}'s haul route ended; this trip finishes the job.`,
+    );
+  }
+
+  /** Flip one of the player-authored automation rules (GDD §5). */
+  setRoverRule(
+    roverId: number,
+    rule: 'autoHaul' | 'autoService' | 'stormShelter' | 'autoRescue',
+    on: boolean,
+  ): void {
+    const r = this.roverById(roverId);
+    if (!r) return;
+    r.rules[rule] = on;
+    if (!on && rule === 'autoHaul' && r.autoTask) {
+      this.finishTask(r);
+    }
+    const names: Record<string, string> = {
+      autoHaul: 'auto-haul',
+      autoService: 'auto-maintenance',
+      stormShelter: 'storm sheltering',
+      autoRescue: 'auto-rescue',
+    };
+    this.event('info', `${r.label} ${names[rule]} ${on ? 'enabled' : 'disabled'}.`);
+  }
+
+  /** Set the rover's return-to-charge battery floor (percent, 10–60). */
+  setChargeFloor(roverId: number, pct: number): void {
+    const r = this.roverById(roverId);
+    if (!r) return;
+    r.rules.chargeFloorPct = Math.max(10, Math.min(60, Math.round(pct)));
+  }
+
+  /**
+   * Start assembling a rover on a garage's line. Materials leave storage up
+   * front; the build itself runs on garage power and pauses in a brownout.
+   */
+  assembleRover(buildingId: number, kind: RoverKind): boolean {
+    const b = this.buildingById(buildingId);
+    if (!b || b.kind !== 'garage' || !this.runnable(b) || !b.enabled) {
+      this.event('warn', 'Rovers are assembled at an online Rover Garage.');
+      return false;
+    }
+    if (b.assembly) {
+      this.event('info', `The garage line is already building a ${ROVERS[b.assembly.kind].label}.`);
+      return false;
+    }
+    const def = ROVERS[kind];
+    if (!this.hasMaterials(def.cost)) {
+      this.event('warn', `Not enough materials for a ${def.label} — needs ${this.missingList(def.cost)}.`);
+      return false;
+    }
+    this.consumeMaterials(def.cost);
+    b.assembly = { kind, progress: 0 };
+    this.event(
+      'info',
+      `${def.label} assembly started — about ${Math.round(def.buildTime)} s on the line.`,
+    );
+    return true;
+  }
+
+  /** Send a rover out to jump-start a stranded one (TDD §8's RECOVER task). */
+  issueRecover(roverId: number, strandedId: number, queued = false): boolean {
+    const r = this.roverById(roverId);
+    const s = this.roverById(strandedId);
+    if (!r || r.phase === 'disabled' || !s) return false;
+    if (r.id === s.id) return false;
+    if (s.phase !== 'disabled') {
+      this.event('info', `${s.label} is running fine — no rescue needed.`);
+      return false;
+    }
+    if (this.weather.shelterRovers()) {
+      this.event('warn', 'Too dangerous to work outside — wait for the storm to pass.');
+      return false;
+    }
+    this.giveTask(r, { type: 'recover', roverId: strandedId }, queued);
+    this.event('info', `${r.label} dispatched to jump-start ${s.label}.`);
+    return true;
   }
 
   /** Turn a building on or off (load shedding by hand). */
@@ -639,9 +923,7 @@ export class Simulation {
     }
     for (const r of this.rovers) {
       if (r.command.type === 'construct' && r.command.buildingId === b.id) {
-        r.command = { type: 'idle' };
-        r.goal = 'idle';
-        r.phase = 'idle';
+        this.finishTask(r);
       }
     }
     this.buildings.splice(idx, 1);
@@ -652,7 +934,7 @@ export class Simulation {
    * Send a rover to clean a building's exposed surfaces. Fails (with a log
    * line) if there is nothing to clean or the storm makes it unsafe.
    */
-  issueClean(roverId: number, buildingId: number): boolean {
+  issueClean(roverId: number, buildingId: number, queued = false): boolean {
     const r = this.roverById(roverId);
     const b = this.buildingById(buildingId);
     if (!r || r.phase === 'disabled' || !b || b.state !== 'online') return false;
@@ -668,14 +950,12 @@ export class Simulation {
       this.event('warn', 'Too dangerous to work outside — wait for the storm to pass.');
       return false;
     }
-    r.autoTask = false;
-    r.command = { type: 'clean', buildingId };
-    r.recharge = false;
+    this.giveTask(r, { type: 'clean', buildingId }, queued);
     return true;
   }
 
   /** Send a rover to repair a damaged (or battered) building. */
-  issueRepair(roverId: number, buildingId: number): boolean {
+  issueRepair(roverId: number, buildingId: number, queued = false): boolean {
     const r = this.roverById(roverId);
     const b = this.buildingById(buildingId);
     if (!r || r.phase === 'disabled' || !b) return false;
@@ -687,9 +967,7 @@ export class Simulation {
       this.event('warn', 'Too dangerous to work outside — wait for the storm to pass.');
       return false;
     }
-    r.autoTask = false;
-    r.command = { type: 'repair', buildingId };
-    r.recharge = false;
+    this.giveTask(r, { type: 'repair', buildingId }, queued);
     return true;
   }
 
@@ -824,6 +1102,7 @@ export class Simulation {
       health: BUILDING_MAX_HEALTH,
       cleanliness: 1,
       damaged: false,
+      assembly: null,
     };
     this.buildings.push(b);
     this.event('info', `${def.label} sited — assigning a builder.`);
@@ -888,6 +1167,7 @@ export class Simulation {
 
     // 3 & 4. power network, then production scaled by what it delivered.
     this.tickPower();
+    this.tickGarages();
 
     // 5. life support & the human
     this.tickLifeSupport();
@@ -896,6 +1176,7 @@ export class Simulation {
     this.tickSiteLogistics();
     this.assignBuilders();
     this.assignMaintenance();
+    this.assignRescues();
     this.assignSupplyRuns();
     for (const r of this.rovers) {
       if (r.phase === 'disabled') continue;
@@ -995,9 +1276,7 @@ export class Simulation {
     // Any builder pointed at it can do nothing; release the crew.
     for (const r of this.rovers) {
       if (r.command.type === 'construct' && r.command.buildingId === b.id) {
-        r.command = { type: 'idle' };
-        r.goal = 'idle';
-        r.phase = 'idle';
+        this.finishTask(r);
         b.workerId = null;
       }
     }
@@ -1083,7 +1362,7 @@ export class Simulation {
         continue;
       }
       const needKWh = def.maxBatteryKWh - r.battery;
-      const kw = Math.min(ROVER_CHARGE_RATE_KW, hours > 0 ? needKWh / hours : 0);
+      const kw = Math.min(this.chargeRateKwAt(r.x, r.z), hours > 0 ? needKWh / hours : 0);
       if (kw > 0) demands.push({ id: r.id, tier: ROVER_CHARGE_TIER, kw });
     }
 
@@ -1118,8 +1397,41 @@ export class Simulation {
       if (sat === undefined) continue;
       r.chargeSat = sat;
       const needKWh = def.maxBatteryKWh - r.battery;
-      const kw = Math.min(ROVER_CHARGE_RATE_KW, hours > 0 ? needKWh / hours : 0);
+      const kw = Math.min(this.chargeRateKwAt(r.x, r.z), hours > 0 ? needKWh / hours : 0);
       r.battery = Math.min(def.maxBatteryKWh, r.battery + kw * sat * hours);
+    }
+  }
+
+  /**
+   * Rover garages (P4): service the drivetrains of anything parked in the bay
+   * and advance the assembly line. Both scale with the power the garage
+   * actually received — a brownout slows the line to a crawl.
+   */
+  private tickGarages(): void {
+    for (const b of this.buildings) {
+      if (b.kind !== 'garage' || !this.runnable(b) || !b.enabled) continue;
+      const reach = BUILDINGS.garage.radius + 5;
+      const service = GARAGE_SERVICE_RATE * SIM_TICK * (0.3 + 0.7 * b.powerSat);
+      for (const r of this.rovers) {
+        if (r.phase === 'disabled' || r.condition >= 100) continue;
+        if (Math.hypot(b.x - r.x, b.z - r.z) <= reach) {
+          r.condition = Math.min(100, r.condition + service);
+        }
+      }
+      if (b.assembly) {
+        const def = ROVERS[b.assembly.kind];
+        b.assembly.progress += (SIM_TICK * b.powerSat) / def.buildTime;
+        if (b.assembly.progress >= 1) {
+          const kind = b.assembly.kind;
+          b.assembly = null;
+          // Roll out beside the bay, facing in — deterministic per garage.
+          const ang = ((b.id * 2.3999) % (Math.PI * 2)) + this.simTime * 0.05;
+          const ox = Math.cos(ang) * (BUILDINGS.garage.radius + 4.5);
+          const oz = Math.sin(ang) * (BUILDINGS.garage.radius + 4.5);
+          this.spawnRoverAt(kind, b.x + ox, b.z + oz, Math.atan2(-ox, -oz));
+          this.event('ok', `${def.label} rolled out of the garage — charged and ready for orders.`);
+        }
+      }
     }
   }
 
@@ -1487,8 +1799,7 @@ export class Simulation {
         );
       const worker = capable[0];
       if (!worker) continue;
-      worker.command = { type: 'construct', buildingId: b.id };
-      worker.autoTask = true;
+      this.autoAssign(worker, { type: 'construct', buildingId: b.id });
       b.workerId = worker.id;
     }
   }
@@ -1576,24 +1887,42 @@ export class Simulation {
 
     for (const rover of idle) {
       // Only send rovers that can carry a useful load.
-      if (rover.autoHaul === false) continue;
+      if (!rover.rules.autoHaul) continue;
       let picked: Deposit | null = null;
       let pickedRes: ResourceId | null = null;
       let bestScore = Infinity;
+      // Fallback: a seam another auto-rover is already working. Reservations
+      // steer the fleet apart; they must never idle a capable rover — sharing
+      // a seam is always physically possible.
+      let shared: Deposit | null = null;
+      let sharedRes: ResourceId | null = null;
+      let sharedScore = Infinity;
       for (const res of wanted) {
         for (const d of this.world.deposits) {
           if (d.resource !== res || d.amount <= 0) continue;
           // Prefer close deposits, and rate the scarcest resource highest.
           const dist = Math.hypot(d.x - rover.x, d.z - rover.z);
           const score = dist / (1 + shortfall[res] / 100);
-          if (score < bestScore) {
+          // TDD §8 reservations: prefer a seam nobody else is working — but
+          // only a worked-out scrap heap is *held* against a second rover; a
+          // rich seam can host whoever's nearby.
+          const held =
+            d.reservedBy != null &&
+            d.reservedBy !== rover.id &&
+            d.amount <= ROVERS[rover.kind].capacityKg * 2.5;
+          if (held) {
+            if (score < sharedScore) {
+              sharedScore = score;
+              shared = d;
+              sharedRes = res;
+            }
+          } else if (score < bestScore) {
             bestScore = score;
             picked = d;
             pickedRes = res;
           }
         }
       }
-      if (!picked || !pickedRes) continue;
       /**
        * Can this rover physically get there, dig a worthwhile load, *and get
        * home*? A naive range heuristic (battery x constant) happily dispatched
@@ -1603,23 +1932,41 @@ export class Simulation {
        * reserve that aborts the dig must still cover the ride home.
        */
       const rd = ROVERS[rover.kind];
-      const dist = Math.hypot(picked.x - rover.x, picked.z - rover.z);
-      const oneWayKWh = (dist / rd.cruiseSpeed) * rd.movePowerKw * HOURS_PER_SEC;
-      const roundTripKWh = oneWayKWh * 2;
-      const loadTimeS = 60 / (RESOURCES[pickedRes].mineRateKg * rd.mineSpeedMul);
-      const digKWh = rd.workPowerKw * HOURS_PER_SEC * loadTimeS;
-      // The reserve must cover the ride home from the deposit, whichever of
-      // the fixed floor or the dynamic floor is higher.
-      const reserveKWh = Math.max(
-        rd.maxBatteryKWh * ROVER_CHARGE_THRESHOLD,
-        oneWayKWh * 1.15,
-      );
-      if (roundTripKWh + digKWh > rover.battery - reserveKWh) continue;
-      rover.command = { type: 'mine', depositId: picked.id };
-      rover.autoTask = true;
-      shortfall[pickedRes] -= ROVERS[rover.kind].capacityKg;
-      if (shortfall[pickedRes] <= 1) {
-        const i = wanted.indexOf(pickedRes);
+      const canMakeRun = (dep: Deposit, res: ResourceId): boolean => {
+        const dist = Math.hypot(dep.x - rover.x, dep.z - rover.z);
+        const oneWayKWh = (dist / rd.cruiseSpeed) * rd.movePowerKw * HOURS_PER_SEC;
+        const roundTripKWh = oneWayKWh * 2;
+        const loadTimeS = 60 / (RESOURCES[res].mineRateKg * rd.mineSpeedMul);
+        const digKWh = rd.workPowerKw * HOURS_PER_SEC * loadTimeS;
+        // The reserve must cover the ride home from the deposit, whichever of
+        // the fixed floor or the dynamic floor is higher.
+        const reserveKWh = Math.max(
+          rd.maxBatteryKWh * (rover.rules.chargeFloorPct / 100),
+          oneWayKWh * 1.15,
+        );
+        return roundTripKWh + digKWh <= rover.battery - reserveKWh;
+      };
+      // Prefer an unclaimed seam; if that one is out of energy range, a
+      // shared seam beats idling the rover.
+      let target: Deposit | null = null;
+      let targetRes: ResourceId | null = null;
+      if (picked && pickedRes && !canMakeRun(picked, pickedRes)) {
+        picked = null;
+        pickedRes = null;
+      }
+      if (picked && pickedRes) {
+        target = picked;
+        targetRes = pickedRes;
+      } else if (shared && sharedRes && canMakeRun(shared, sharedRes)) {
+        target = shared;
+        targetRes = sharedRes;
+      }
+      if (!target || !targetRes) continue;
+      this.autoAssign(rover, { type: 'mine', depositId: target.id });
+      this.claimDeposit(rover, target.id);
+      shortfall[targetRes] -= rd.capacityKg;
+      if (shortfall[targetRes] <= 1) {
+        const i = wanted.indexOf(targetRes);
         if (i >= 0) wanted.splice(i, 1);
       }
     }
@@ -1631,12 +1978,14 @@ export class Simulation {
 
     // ---- storm recall (TDD §8: "IF storm warning → return to shelter") ----
     // The rover's own command is preserved underneath; when the storm passes
-    // it simply picks the job back up.
-    const mustShelter = this.weather.shelterRovers() && !this.nearCharger(r.x, r.z);
+    // it simply picks the job back up. The player may turn the rule off — a
+    // daredevil rover keeps working at storm rate and pays for it in wear.
+    const storm = this.weather.shelterRovers();
+    const mustShelter = r.rules.stormShelter && storm && !this.nearCharger(r.x, r.z);
     if (mustShelter && !r.sheltered) {
       r.sheltered = true;
       this.event('warn', `${r.label} is running for shelter — the storm is on it.`);
-    } else if (!this.weather.shelterRovers() && r.sheltered) {
+    } else if (!storm && r.sheltered) {
       r.sheltered = false;
       r.recharge = false; // release the shelter-charge and resume the job
     }
@@ -1646,24 +1995,35 @@ export class Simulation {
       return;
     }
 
-    if (!r.recharge && r.command.type !== 'idle') {
-      /**
-       * The low-battery floor is not a fixed fraction for field work: a rover
-       * far from base must turn around while it still holds the power to get
-       * home. A fixed 20 % reserve is 16 kWh on a mining rover — but the ride
-       * back from a distant seam can cost 19, which is how rovers used to dig
-       * themselves into stranded, battery-flat graves.
-       */
-      const homePt = this.nearestChargerPoint(r.x, r.z);
-      const homeCost =
-        (Math.hypot(homePt.x - r.x, homePt.z - r.z) / def.cruiseSpeed) *
-        def.movePowerKw *
-        HOURS_PER_SEC *
-        1.15;
-      const floor = Math.max(
-        def.maxBatteryKWh * ROVER_CHARGE_THRESHOLD,
-        Math.min(homeCost, def.maxBatteryKWh * 0.9),
+    // ---- grit in the actuator seals ---------------------------------------
+    // Anyone outside in a blowing storm — daredevils with the shelter rule
+    // off, or rovers caught in transit — grinds condition away.
+    if (this.weather.stormIntensity > 0.4 && !this.nearCharger(r.x, r.z)) {
+      r.condition = Math.max(
+        0,
+        r.condition - ROVER_WEAR_STORM_S * this.weather.stormIntensity * SIM_TICK,
       );
+    }
+
+    /**
+     * The low-battery floor is not a fixed fraction for field work: a rover
+     * far from base must turn around while it still holds the power to get
+     * home. A fixed 20 % reserve is 16 kWh on a mining rover — but the ride
+     * back from a distant seam can cost 19, which is how rovers used to dig
+     * themselves into stranded, battery-flat graves. The player chooses the
+     * fraction (GDD §5's first automation rule); the ride-home maths clamps
+     * it from below. An *idle* rover below its floor heads in too — the rule
+     * is about the battery, not the to-do list.
+     */
+    const floorPct = r.rules.chargeFloorPct / 100;
+    const homePt = this.nearestChargerPoint(r.x, r.z);
+    const homeCost = this.travelKWh(r.x, r.z, homePt.x, homePt.z, def) * 1.15;
+    const floor = Math.max(
+      def.maxBatteryKWh * floorPct,
+      Math.min(homeCost, def.maxBatteryKWh * 0.9),
+    );
+    const idle = r.command.type === 'idle' && r.pending.length === 0;
+    if (!r.recharge && (!idle || r.battery <= floor)) {
       const low = r.battery <= floor && r.goal !== 'charge' && r.goal !== 'toCharge';
       if (low) {
         r.recharge = true;
@@ -1671,7 +2031,7 @@ export class Simulation {
           r.lowBatteryNotified = true;
           this.event('warn', `${r.label} is low on power — returning to charge.`);
         }
-      } else if (r.battery > def.maxBatteryKWh * (ROVER_CHARGE_THRESHOLD + 0.25)) {
+      } else if (r.battery > def.maxBatteryKWh * (floorPct + 0.25)) {
         r.lowBatteryNotified = false;
       }
     }
@@ -1695,9 +2055,7 @@ export class Simulation {
           if (cargoMass(r) > 0.01) {
             this.beginUnload(r);
           } else {
-            r.command = { type: 'idle' };
-            r.goal = 'idle';
-            r.phase = 'idle';
+            this.finishTask(r);
             this.event('info', `${r.label}: deposit exhausted.`);
           }
           break;
@@ -1708,10 +2066,8 @@ export class Simulation {
       case 'construct': {
         const b = this.buildingById(cmd.buildingId);
         if (!b || b.state === 'online') {
-          r.command = { type: 'idle' };
-          r.goal = 'idle';
-          r.phase = 'idle';
           if (b) b.workerId = null;
+          this.finishTask(r);
           break;
         }
         this.doBuild(r, b);
@@ -1721,12 +2077,22 @@ export class Simulation {
       case 'repair': {
         const b = this.buildingById(cmd.buildingId);
         if (!b || b.state !== 'online') {
-          r.command = { type: 'idle' };
-          r.goal = 'idle';
-          r.phase = 'idle';
+          this.finishTask(r);
           break;
         }
         this.doService(r, b, cmd.type);
+        break;
+      }
+      case 'recover': {
+        this.doRecover(r, cmd);
+        break;
+      }
+      case 'wait': {
+        r.goal = 'idle';
+        r.phase = 'idle';
+        r.statusText = roverStatusText(r);
+        cmd.seconds -= SIM_TICK;
+        if (cmd.seconds <= 0) this.finishTask(r);
         break;
       }
     }
@@ -1737,9 +2103,7 @@ export class Simulation {
     if (dist > ARRIVE_EPS) {
       this.setTravel(r, x, z, 'move');
     } else {
-      r.command = { type: 'idle' };
-      r.goal = 'idle';
-      r.phase = 'idle';
+      this.finishTask(r);
       r.statusText = 'Idle';
     }
   }
@@ -1834,6 +2198,7 @@ export class Simulation {
     r.heading = lerpAngle(r.heading, Math.atan2(ux, uz), 0.18);
     r.y = this.world.heightAt(r.x, r.z);
     r.battery = Math.max(0, r.battery - def.movePowerKw * hours);
+    r.condition = Math.max(0, r.condition - ROVER_WEAR_MOVE_S * SIM_TICK);
     if (r.battery <= 0) this.disable(r);
   }
 
@@ -1875,14 +2240,32 @@ export class Simulation {
   private disable(r: Rover): void {
     r.phase = 'disabled';
     r.goal = 'idle';
+    r.routePaused = false;
     r.statusText = 'Disabled — out of power';
-    this.event('crit', `${r.label} is stranded — battery flat.`);
+    this.releaseReservations(r);
+    this.event('crit', `${r.label} is stranded — battery flat. Another rover can jump-start it.`);
   }
 
   // ------------------------------------------------------------ mining ----
   private doMine(r: Rover, dep: Deposit): void {
     const def = ROVERS[r.kind];
     const hours = SIM_TICK * HOURS_PER_SEC;
+    const onRoute = r.command.type === 'mine' && !!r.command.repeat;
+
+    /**
+     * A haul route parks at the depot while the silo has no room for its
+     * cargo, and sets out again the moment consumption frees some up. Without
+     * this a full silo turns the route into a depot ping-pong.
+     */
+    const stuck = cargoMass(r) > 0.01 ? !this.canDeliverAny(r) : this.storageRoom(dep.resource) < ROUTE_RESUME_ROOM_KG;
+    if (onRoute && stuck) {
+      r.goal = 'idle';
+      r.phase = 'idle';
+      r.routePaused = true;
+      r.statusText = roverStatusText(r);
+      return;
+    }
+    r.routePaused = false;
 
     /**
      * Stop when the load is worth hauling home. For an automatic run that
@@ -1902,19 +2285,22 @@ export class Simulation {
       this.setTravel(r, dep.x, dep.z, 'mine');
       return;
     }
+    this.claimDeposit(r, dep.id);
     r.goal = 'mine';
     r.phase = 'working';
-    r.statusText = 'Mining';
+    r.statusText = onRoute ? 'Hauling route' : 'Mining';
     const rate =
       RESOURCES[dep.resource].mineRateKg *
       def.mineSpeedMul *
-      this.weather.workMultiplier();
+      this.weather.workMultiplier() *
+      this.roverWorkMul(r);
     const gained = Math.min(rate * SIM_TICK, dep.amount, def.capacityKg - cargoMass(r));
     if (gained > 0) {
       dep.amount -= gained;
       r.cargo[dep.resource] += gained;
     }
     r.battery = Math.max(0, r.battery - def.workPowerKw * hours);
+    r.condition = Math.max(0, r.condition - ROVER_WEAR_WORK_S * SIM_TICK);
     if (r.battery <= 0) this.disable(r);
     if (dep.amount <= 0.01) {
       this.event('info', `${RESOURCES[dep.resource].label} deposit exhausted.`);
@@ -1955,23 +2341,38 @@ export class Simulation {
     }
     if (moved > 0.01) {
       this.event('ok', `${r.label} delivered ${Math.round(moved)} kg to storage.`);
+      r.blockNotified = false;
     }
-    if (blocked && cargoMass(r) > 0.01) {
+    if (blocked && cargoMass(r) > 0.01 && !r.blockNotified) {
       this.event('warn', `${r.label} still holds cargo — those silos are full.`);
+      r.blockNotified = true;
     }
     const cmd = r.command;
-    if (cmd.type === 'mine' && !r.autoTask) {
-      // A player-ordered mining run keeps going until the seam is dry.
+    if (cmd.type === 'mine') {
       const dep = this.world.deposits.find((d) => d.id === cmd.depositId);
-      if (!dep || dep.amount <= 0) r.command = { type: 'idle' };
-    } else {
-      // Automatic runs are single-trip: dropping the load returns the rover to
-      // the pool so the scheduler can re-decide what the colony needs *now*.
-      r.command = { type: 'idle' };
-      r.autoTask = false;
+      const seamDry = !dep || dep.amount <= 0.01;
+      if (cmd.repeat && !seamDry) {
+        // The route loops: straight back out to the seam (or, if the silo is
+        // full, doMine parks the rover here until there is room again).
+        r.goal = 'idle';
+        r.phase = 'idle';
+        r.statusText = roverStatusText(r);
+        return;
+      }
+      if (!r.autoTask && !seamDry) {
+        // A plain player-ordered mining run keeps going until the seam is dry.
+        r.goal = 'idle';
+        r.phase = 'idle';
+        r.statusText = roverStatusText(r);
+        return;
+      }
+      if (cmd.repeat && seamDry) {
+        this.event('ok', `${r.label}'s haul route complete — the seam is worked out.`);
+      }
     }
-    r.goal = 'idle';
-    r.phase = 'idle';
+    // Automatic runs are single-trip: dropping the load returns the rover to
+    // the pool so the scheduler can re-decide what the colony needs *now*.
+    this.finishTask(r);
     r.statusText = roverStatusText(r);
   }
 
@@ -1999,17 +2400,20 @@ export class Simulation {
     r.phase = 'working';
     r.statusText = kind === 'repair' ? 'Repairing' : 'Cleaning panels';
 
+    // A worn rover works slower — and the work wears it further.
+    const mul = this.roverWorkMul(r);
     if (kind === 'repair') {
-      b.health = Math.min(BUILDING_MAX_HEALTH, b.health + ROVER_REPAIR_RATE * SIM_TICK);
+      b.health = Math.min(BUILDING_MAX_HEALTH, b.health + ROVER_REPAIR_RATE * mul * SIM_TICK);
       if (b.damaged && b.health >= REPAIR_RESTART_HEALTH) {
         b.damaged = false;
         this.event('ok', `${def.label} repaired and back online.`);
         this.recomputeCapacities();
       }
     } else {
-      b.cleanliness = Math.min(1, b.cleanliness + ROVER_CLEAN_RATE * SIM_TICK);
+      b.cleanliness = Math.min(1, b.cleanliness + ROVER_CLEAN_RATE * mul * SIM_TICK);
     }
     r.battery = Math.max(0, r.battery - ROVERS[r.kind].workPowerKw * hours * 0.5);
+    r.condition = Math.max(0, r.condition - ROVER_WEAR_WORK_S * 0.5 * SIM_TICK);
     if (r.battery <= 0) this.disable(r);
 
     const done =
@@ -2023,9 +2427,86 @@ export class Simulation {
           ? `${r.label} finished repairing the ${def.label}.`
           : `${r.label} cleaned the ${def.label} array — output restored.`,
       );
-      r.command = { type: 'idle' };
-      r.goal = 'idle';
-      r.phase = 'idle';
+      this.finishTask(r);
+    }
+  }
+
+  /**
+   * The RECOVER task (TDD §8): drive out to a battery-flat rover, hook up the
+   * jumper cables, and give it enough charge to get home — while keeping
+   * enough to get the rescuer back too. Pure energy maths, no vibes.
+   */
+  private doRecover(
+    r: Rover,
+    cmd: { type: 'recover'; roverId: number; give?: number; given?: number },
+  ): void {
+    const s = this.roverById(cmd.roverId);
+    if (!s || s.phase !== 'disabled') {
+      // Already rescued (or gone) — nothing to do.
+      this.finishTask(r);
+      return;
+    }
+    const dist = Math.hypot(s.x - r.x, s.z - r.z);
+    if (dist > 6) {
+      if (r.goal !== 'toRecover' || r.phase === 'idle') {
+        this.setTravel(r, s.x, s.z, 'toRecover');
+      }
+      return;
+    }
+    r.gid = s.id;
+    r.goal = 'recover';
+    r.phase = 'working';
+    r.statusText = 'Jump-starting';
+
+    if (cmd.give === undefined) {
+      // First hookup: size the transfer honestly.
+      const sDef = ROVERS[s.kind];
+      const home = this.nearestChargerPoint(s.x, s.z);
+      const need = Math.max(
+        this.travelKWh(s.x, s.z, home.x, home.z, sDef) * 1.25,
+        sDef.maxBatteryKWh * 0.15,
+      );
+      const rDef = ROVERS[r.kind];
+      const rHome = this.nearestChargerPoint(s.x, s.z); // the rescuer walks back from there
+      const reserve = Math.max(
+        rDef.maxBatteryKWh * (r.rules.chargeFloorPct / 100),
+        this.travelKWh(s.x, s.z, rHome.x, rHome.z, rDef) * 1.15,
+      );
+      const spare = r.battery - reserve;
+      if (spare < Math.min(need, RECOVER_MIN_GIVE_KWH)) {
+        this.event(
+          'warn',
+          `${r.label} can't spare enough charge to jump-start ${s.label} — charge up first.`,
+        );
+        this.finishTask(r);
+        return;
+      }
+      cmd.give = Math.min(need, spare);
+      cmd.given = 0;
+    }
+
+    // Trickle the cables over a couple of seconds so it reads as work.
+    const step = Math.min(RECOVER_TRANSFER_KW * SIM_TICK, cmd.give - (cmd.given ?? 0));
+    const got = Math.min(step, Math.max(0, r.battery));
+    r.battery -= got;
+    s.battery += got;
+    cmd.given = (cmd.given ?? 0) + got;
+    r.statusText = `Jump-starting (${cmd.given.toFixed(0)}/${cmd.give.toFixed(0)} kWh)`;
+
+    if (cmd.given >= cmd.give - 1e-6) {
+      s.phase = 'idle';
+      s.goal = 'idle';
+      s.command = { type: 'idle' };
+      s.pending = [];
+      s.recharge = true;
+      s.lowBatteryNotified = true; // it *is* low; don't warn again on the way in
+      s.statusText = 'Returning to charge';
+      this.event(
+        'ok',
+        `${r.label} jump-started ${s.label} — ${cmd.given.toFixed(1)} kWh handed over. Both heading in to charge.`,
+      );
+      r.recharge = true;
+      this.finishTask(r);
     }
   }
 
@@ -2091,14 +2572,63 @@ export class Simulation {
 
     for (const { b, kind } of jobs) {
       if (this.servicingRover(b.id)) continue;
-      // Repairs ignore the auto-haul opt-out (they are too important to skip);
-      // routine cleaning respects it like any other automatic chore.
-      const idx = pool.findIndex((r) => kind === 'repair' || r.autoHaul);
+      // Repairs ignore the auto-maintenance opt-out (they are too important to
+      // skip); routine cleaning respects it like any other automatic chore.
+      const idx = pool.findIndex((r) => kind === 'repair' || r.rules.autoService);
       if (idx < 0) return;
       const rover = pool[idx];
       pool.splice(idx, 1);
-      rover.autoTask = true;
-      rover.command = { type: kind, buildingId: b.id };
+      this.autoAssign(rover, { type: kind, buildingId: b.id });
+    }
+  }
+
+  /**
+   * Automation for the fleet's own survival (T4's "recover"): when a rover is
+   * stranded and nobody is already on the way, an idle volunteer with enough
+   * spare charge — after its own ride home — jumps in. Explicit player orders
+   * always win; this only fills idle time.
+   */
+  private assignRescues(): void {
+    if (this.weather.shelterRovers()) return; // nobody drives into a storm
+    const stranded = this.rovers.filter(
+      (s) => s.phase === 'disabled' && !this.rescueTargeted(s.id),
+    );
+    if (stranded.length === 0) return;
+
+    for (const s of stranded) {
+      const pool = this.rovers.filter(
+        (r) =>
+          r.phase !== 'disabled' &&
+          !r.recharge &&
+          !r.sheltered &&
+          r.command.type === 'idle' &&
+          r.pending.length === 0 &&
+          r.rules.autoRescue &&
+          r.id !== s.id,
+      );
+      if (pool.length === 0) continue;
+      pool.sort(
+        (a, c) =>
+          Math.hypot(a.x - s.x, a.z - s.z) - Math.hypot(c.x - s.x, c.z - s.z) || a.id - c.id,
+      );
+      for (const cand of pool) {
+        const rDef = ROVERS[cand.kind];
+        const sDef = ROVERS[s.kind];
+        const home = this.nearestChargerPoint(s.x, s.z);
+        const need = Math.max(
+          this.travelKWh(s.x, s.z, home.x, home.z, sDef) * 1.25,
+          sDef.maxBatteryKWh * 0.15,
+        );
+        const reserve = Math.max(
+          rDef.maxBatteryKWh * (cand.rules.chargeFloorPct / 100),
+          this.travelKWh(s.x, s.z, home.x, home.z, rDef) * 1.15,
+        );
+        const outAndBack = this.travelKWh(cand.x, cand.z, s.x, s.z, rDef);
+        if (cand.battery - reserve - outAndBack < Math.max(need, RECOVER_MIN_GIVE_KWH)) continue;
+        this.autoAssign(cand, { type: 'recover', roverId: s.id });
+        this.event('info', `${cand.label} is heading out to jump-start ${s.label}.`);
+        break;
+      }
     }
   }
 
@@ -2124,9 +2654,7 @@ export class Simulation {
     // Materials are delivered by tickSiteLogistics; a builder only assembles.
     if (remainingCostTotal(b) > 0) {
       if (b.workerId === r.id) b.workerId = null;
-      r.command = { type: 'idle' };
-      r.goal = 'idle';
-      r.phase = 'idle';
+      this.finishTask(r);
       return;
     }
     if (b.state === 'site') {
@@ -2144,16 +2672,19 @@ export class Simulation {
       }
     }
 
-    const work = ROVERS[r.kind].buildPower * mul * this.weather.workMultiplier();
+    const work =
+      ROVERS[r.kind].buildPower *
+      mul *
+      this.weather.workMultiplier() *
+      this.roverWorkMul(r);
     const before = b.progress;
     b.progress = Math.min(1, b.progress + (work * SIM_TICK) / b.buildTime);
     r.battery = Math.max(0, r.battery - ROVERS[r.kind].workPowerKw * hours * 0.6);
+    r.condition = Math.max(0, r.condition - ROVER_WEAR_WORK_S * 0.7 * SIM_TICK);
     if (r.battery <= 0) this.disable(r);
     if (before < 1 && b.progress >= 1) {
       this.completeBuilding(b);
-      r.command = { type: 'idle' };
-      r.goal = 'idle';
-      r.phase = 'idle';
+      this.finishTask(r);
     }
   }
 
@@ -2351,13 +2882,35 @@ export class Simulation {
       }
     }
 
-    // ---- stranded rovers --------------------------------------------------
+    // ---- stranded & worn rovers -------------------------------------------
     for (const r of this.rovers) {
       const key = `rover-dead-${r.id}`;
       if (r.phase === 'disabled') {
-        A.raise(key, 'warn', `${r.label} stranded`, 'Battery flat, out in the field.', t, stamp, r.id);
+        A.raise(
+          key,
+          'warn',
+          `${r.label} stranded`,
+          'Battery flat, out in the field — another rover can jump-start it.',
+          t,
+          stamp,
+          r.id,
+        );
       } else {
         A.clear(key, t, stamp);
+      }
+      const wkey = `rover-wear-${r.id}`;
+      if (r.condition < ROVER_CONDITION_ALERT) {
+        A.raise(
+          wkey,
+          'warn',
+          `${r.label} needs service`,
+          `Drivetrain at ${Math.round(r.condition)}% — work rate reduced. Park it at a Rover Garage.`,
+          t,
+          stamp,
+          r.id,
+        );
+      } else {
+        A.clear(wkey, t, stamp, `${r.label} is back in shape.`);
       }
     }
 
@@ -2578,6 +3131,8 @@ export class Simulation {
         amount: d.amount,
         maxAmount: d.maxAmount,
         radius: d.radius,
+        // Scheduler claims are authoritative: they steer the next dispatch.
+        reservedBy: d.reservedBy ?? null,
       })),
       rovers: this.rovers.map((r) => ({
         id: r.id,
@@ -2589,7 +3144,13 @@ export class Simulation {
         battery: r.battery,
         cargo: { ...r.cargo },
         command: { ...r.command },
-        autoHaul: r.autoHaul,
+        pending: r.pending.map((task) => ({ ...task })),
+        condition: r.condition,
+        rules: { ...r.rules },
+        autoTask: r.autoTask,
+        recharge: r.recharge,
+        lowBatteryNotified: r.lowBatteryNotified,
+        blockNotified: r.blockNotified,
         sheltered: r.sheltered,
       })),
       buildings: this.buildings.map((b) => ({
@@ -2608,6 +3169,7 @@ export class Simulation {
         health: b.health,
         cleanliness: b.cleanliness,
         damaged: b.damaged,
+        assembly: b.assembly ? { ...b.assembly } : null,
       })),
       weather: this.weather.snapshot(),
       alerts: this.alerts.snapshot(),
@@ -2617,6 +3179,8 @@ export class Simulation {
   /** Restore state from an earlier snapshot(). Mutates this sim in place. */
   restore(data: any): void {
     if (!data || typeof data !== 'object') throw new Error('empty save');
+    // TDD §15: migrate what we understand, refuse what we don't.
+    if (data.version === 3) data = migrateV3Save(data);
     if (data.version !== SAVE_VERSION) {
       throw new Error(`unsupported save version ${data.version}`);
     }
@@ -2645,32 +3209,43 @@ export class Simulation {
       amount: d.amount,
       maxAmount: d.maxAmount,
       radius: d.radius,
+      reservedBy: Number.isFinite(d.reservedBy) ? d.reservedBy : null,
     }));
 
-    this.rovers = (data.rovers ?? []).map((r: any) => ({
-      id: r.id,
-      kind: r.kind,
-      label: ROVERS[r.kind as RoverKind].label,
-      x: r.x,
-      y: this.world.heightAt(r.x, r.z),
-      z: r.z,
-      heading: r.heading,
-      battery: r.battery,
-      cargo: { ...emptyAmounts(), ...(r.cargo ?? {}) },
-      phase: 'idle' as RoverPhase,
-      command: { ...r.command } as RoverCommand,
-      goal: 'idle' as RoverGoal,
-      gx: r.x,
-      gz: r.z,
-      gid: 0,
-      recharge: false,
-      lowBatteryNotified: false,
-      statusText: 'Idle',
-      chargeSat: 0,
-      autoTask: false,
-      autoHaul: r.autoHaul !== false,
-      sheltered: !!r.sheltered,
-    }));
+    this.rovers = (data.rovers ?? []).map((r: any) => {
+      const command = coerceTask(r.command) ?? { type: 'idle' as const };
+      const pending = Array.isArray(r.pending)
+        ? (r.pending as any[]).map(coerceTask).filter((t): t is RoverTask => t !== null)
+        : [];
+      return {
+        id: r.id,
+        kind: r.kind,
+        label: ROVERS[r.kind as RoverKind]?.label ?? 'Rover',
+        x: r.x,
+        y: this.world.heightAt(r.x, r.z),
+        z: r.z,
+        heading: r.heading,
+        battery: r.battery,
+        cargo: { ...emptyAmounts(), ...(r.cargo ?? {}) },
+        phase: 'idle' as RoverPhase,
+        command,
+        pending,
+        goal: 'idle' as RoverGoal,
+        gx: r.x,
+        gz: r.z,
+        gid: 0,
+        recharge: !!r.recharge,
+        lowBatteryNotified: !!r.lowBatteryNotified,
+        statusText: 'Idle',
+        chargeSat: 0,
+        autoTask: !!r.autoTask,
+        condition: typeof r.condition === 'number' ? r.condition : 100,
+        rules: { ...defaultRoverRules(), ...(r.rules ?? {}) },
+        routePaused: false,
+        blockNotified: !!r.blockNotified,
+        sheltered: !!r.sheltered,
+      };
+    });
 
     this.buildings = (data.buildings ?? []).map((b: any) => ({
       id: b.id,
@@ -2693,6 +3268,10 @@ export class Simulation {
       health: b.health ?? BUILDING_MAX_HEALTH,
       cleanliness: b.cleanliness ?? 1,
       damaged: !!b.damaged,
+      assembly:
+        b.assembly && ROVERS[b.assembly.kind as RoverKind]
+          ? { kind: b.assembly.kind, progress: b.assembly.progress ?? 0 }
+          : null,
     }));
 
     this.recomputeCapacities();
@@ -2732,6 +3311,59 @@ export class Simulation {
     for (const d of this.world.deposits) maxId = Math.max(maxId, d.id + 1);
     this.nextId = maxId;
   }
+}
+
+// ------------------------------------------------- save helpers (P4) ----
+
+/**
+ * Validate one task out of a (possibly untrusted) save: shape-check every
+ * field and drop anything malformed rather than executing it (TDD §24).
+ */
+function coerceTask(t: any): RoverTask | null {
+  if (!t || typeof t.type !== 'string') return null;
+  switch (t.type) {
+    case 'moveTo':
+      return Number.isFinite(t.x) && Number.isFinite(t.z)
+        ? { type: 'moveTo', x: t.x, z: t.z }
+        : null;
+    case 'mine':
+      return Number.isFinite(t.depositId)
+        ? { type: 'mine', depositId: t.depositId, ...(t.repeat ? { repeat: true } : {}) }
+        : null;
+    case 'construct':
+    case 'clean':
+    case 'repair':
+      return Number.isFinite(t.buildingId) ? { type: t.type, buildingId: t.buildingId } : null;
+    case 'recover':
+      return Number.isFinite(t.roverId)
+        ? {
+            type: 'recover',
+            roverId: t.roverId,
+            ...(Number.isFinite(t.give) ? { give: t.give, given: t.given ?? 0 } : {}),
+          }
+        : null;
+    case 'wait':
+      return { type: 'wait', seconds: Math.max(0, Number(t.seconds) || 0) };
+    default:
+      return null;
+  }
+}
+
+/**
+ * v3 → v4 (Prototype 4). What changed: rovers grew a task queue, drivetrain
+ * condition and automation rules; buildings (garages) grew an assembly slot.
+ * Old rovers had a single `command` — it becomes the one task in the queue —
+ * and the old `autoHaul` flag carries over as the matching rule.
+ */
+function migrateV3Save(data: any): any {
+  const d: any = { ...data, version: SAVE_VERSION };
+  d.rovers = (data.rovers ?? []).map((r: any) => {
+    const rules = defaultRoverRules();
+    rules.autoHaul = r.autoHaul !== false;
+    return { ...r, pending: [], condition: 100, rules };
+  });
+  d.buildings = (data.buildings ?? []).map((b: any) => ({ ...b, assembly: null }));
+  return d;
 }
 
 export { colonistStatusText };

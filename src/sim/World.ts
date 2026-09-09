@@ -12,6 +12,12 @@ export interface Deposit {
   amount: number;
   maxAmount: number;
   radius: number;
+  /**
+   * Runtime scheduler hint (P4, TDD §8): the rover whose auto-run currently
+   * owns this seam. Never persisted — it is re-derived from live task state,
+   * so a restored colony simply re-claims as its rovers work.
+   */
+  reservedBy?: number | null;
 }
 
 export interface WorldGenParams {

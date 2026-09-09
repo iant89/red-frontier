@@ -138,7 +138,7 @@ export const FLUIDS: Record<FluidId, FluidInfo> = {
 
 // -------------------------------------------------------------- rovers ----
 
-export type RoverKind = 'mining' | 'utility';
+export type RoverKind = 'mining' | 'utility' | 'cargo';
 
 export interface RoverDef {
   kind: RoverKind;
@@ -157,6 +157,10 @@ export interface RoverDef {
   bodyColor: number;
   accentColor: number;
   radius: number; // visual / arrival radius
+  /** Materials consumed when the garage assembles one of these (P4). */
+  cost: ResourceAmounts;
+  /** Garage assembly time at full line power (game seconds). */
+  buildTime: number;
 }
 
 export const ROVERS: Record<RoverKind, RoverDef> = {
@@ -175,6 +179,12 @@ export const ROVERS: Record<RoverKind, RoverDef> = {
     bodyColor: 0xe07b3a,
     accentColor: 0x2b2117,
     radius: 3,
+    cost: costs([
+      ['iron', 60],
+      ['aluminum', 30],
+      ['silicon', 15],
+    ]),
+    buildTime: 55,
   },
   utility: {
     kind: 'utility',
@@ -191,6 +201,34 @@ export const ROVERS: Record<RoverKind, RoverDef> = {
     bodyColor: 0x2f7fb0,
     accentColor: 0x1c2530,
     radius: 2.4,
+    cost: costs([
+      ['iron', 40],
+      ['aluminum', 20],
+      ['silicon', 10],
+    ]),
+    buildTime: 40,
+  },
+  cargo: {
+    kind: 'cargo',
+    label: 'Cargo Rover',
+    role: 'Long-distance hauling',
+    maxBatteryKWh: 120,
+    capacityKg: 3000,
+    cruiseSpeed: 7,
+    turnRate: 1.1,
+    movePowerKw: 12,
+    workPowerKw: 8,
+    mineSpeedMul: 0.25,
+    buildPower: 0.3,
+    bodyColor: 0xb9973e,
+    accentColor: 0x2b2618,
+    radius: 3.4,
+    cost: costs([
+      ['iron', 80],
+      ['aluminum', 50],
+      ['silicon', 25],
+    ]),
+    buildTime: 75,
   },
 };
 
@@ -205,6 +243,7 @@ export type BuildingKind =
   | 'extractor'
   | 'oxygenator'
   | 'greenhouse'
+  | 'garage'
   | 'rtg';
 
 /**
@@ -493,6 +532,29 @@ export const BUILDINGS: Record<BuildingKind, BuildingDef> = {
     exposure: 0.5,
     buildableBy: ['utility', 'mining'],
     order: 7,
+  },
+  garage: {
+    kind: 'garage',
+    label: 'Rover Garage',
+    description:
+      'Vehicle bay. Fast-charges rover batteries, services their worn drivetrains while they park, and can assemble new rovers from stockpiled parts.',
+    radius: 6.5,
+    cost: costs([
+      ['regolith', 25],
+      ['iron', 30],
+      ['silicon', 12],
+    ]),
+    buildTime: 34,
+    powerDrawKw: 3,
+    idlePowerKw: 0.8,
+    powerProduceKw: 0,
+    batteryKWh: 0,
+    storagePerResourceKg: 100,
+    tier: 2,
+    providesCharge: true,
+    exposure: 0.45,
+    buildableBy: ['utility', 'mining'],
+    order: 8,
   },
 };
 

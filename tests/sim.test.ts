@@ -9,11 +9,11 @@
 import assert from 'node:assert/strict';
 import { Simulation } from '../src/sim/Simulation';
 import type { BuildingKind } from '../src/sim/defs';
-import { BUILDINGS, ALL_RESOURCES } from '../src/sim/defs';
+import { BUILDINGS, ALL_RESOURCES, ROVERS } from '../src/sim/defs';
 import { resolvePower } from '../src/sim/power';
 import { sunFor, SolClock } from '../src/sim/clock';
 import { Weather } from '../src/sim/weather';
-import { SOL_SECONDS, SUIT_O2_CAPACITY, POD_BATTERY_KWH } from '../src/sim/config';
+import { SOL_SECONDS, SUIT_O2_CAPACITY, POD_BATTERY_KWH, SAVE_VERSION } from '../src/sim/config';
 
 let pass = 0;
 const failures: string[] = [];
@@ -811,6 +811,322 @@ test('restore tolerates missing optional fields', () => {
   const copy = new Simulation({ seed: 1 });
   copy.restore(snap);
   assert.ok(copy.colonist, 'a colonist should still exist');
+});
+
+// ======================================================= prototype 4 =====
+group('Prototype 4 — rover logistics');
+
+test('a queued task runs after the current one; a plain order replaces the queue', () => {
+  const sim = new Simulation({ seed: 61, nearDeposits: 0.2 });
+  const rv = sim.rovers[0];
+  sim.issueMove(rv.id, 60, 0); // starts immediately
+  sim.issueMove(rv.id, -60, 0, true); // queued behind it
+  sim.issueWait(rv.id, 5, true); // queued behind that
+  assert.equal(rv.pending.length, 2, 'two tasks should sit in the queue');
+  assert.equal(rv.command.type, 'moveTo');
+
+  // A non-queued order is a change of plans: the queue goes.
+  sim.issueMove(rv.id, 0, 60);
+  assert.equal(rv.pending.length, 0, 'a plain order must clear the queue');
+  assert.equal(rv.command.type, 'moveTo');
+
+  // Queued orders on an idle rover start immediately instead.
+  sim.stopRover(rv.id);
+  sim.issueMove(rv.id, 60, 0, true);
+  assert.equal(rv.command.type, 'moveTo', 'a queued order to an idle rover starts now');
+  assert.equal(rv.pending.length, 0);
+});
+
+test('a WAIT task holds position and finishes on schedule', () => {
+  const sim = new Simulation({ seed: 61, nearDeposits: 0.2 });
+  const rv = sim.rovers[0];
+  sim.issueWait(rv.id, 3);
+  assert.equal(rv.command.type, 'wait');
+  assert.equal(rv.phase, 'idle', 'waiting is holding position, not working');
+  run(sim, SOL_SECONDS * 0.1); // 24 game-seconds — comfortably past 3 s
+  assert.equal(rv.command.type, 'idle', 'the wait should be over');
+});
+
+test('a repeat haul route parks when the silo is full and resumes when there is room', () => {
+  const sim = new Simulation({ seed: 42, nearDeposits: 0.2 });
+  buildAndWait(sim, 'warehouse');
+  // Fill the ice silo so a haul route has nowhere to deliver.
+  sim.storage.ice += sim.storageRoom('ice');
+  sim.recomputeCapacities();
+  assert.equal(sim.storageRoom('ice'), 0, 'precondition: ice silo is full');
+
+  const dep = nearDeposit(sim, 'ice');
+  const rv = sim.rovers[0];
+  sim.issueMine(rv.id, dep.id);
+  sim.setRepeatRoute(rv.id, true);
+  run(sim, 0.1);
+  assert.equal(rv.routePaused, true, 'the route should park at the depot');
+  assert.equal(rv.command.type, 'mine', 'the route task survives the pause');
+  assert.ok(rv.command.type === 'mine' && rv.command.repeat, 'and keeps its repeat flag');
+
+  // Consumption frees silo space → the route sets out again.
+  sim.storage.ice = 0;
+  sim.recomputeCapacities();
+  run(sim, 0.05);
+  assert.equal(rv.routePaused, false, 'the route should resume');
+  assert.notEqual(rv.phase, 'idle', 'and the rover should be moving or mining');
+});
+
+test('mining orders claim seams, and reservations follow the player', () => {
+  const sim = new Simulation({ seed: 42, nearDeposits: 0.2 });
+  const [a, b] = sim.rovers;
+  const dep = nearDeposit(sim, 'ice');
+  sim.issueMine(a.id, dep.id);
+  assert.equal(dep.reservedBy, a.id, 'a player order claims the seam');
+  // A second player order may share the seam (people can coordinate);
+  // the reservation follows the latest claim.
+  sim.issueMine(b.id, dep.id);
+  assert.equal(dep.reservedBy, b.id, 'the latest claimant holds the reservation');
+});
+
+test('auto-haul spreads the fleet without idling anyone over a reservation', () => {
+  const sim = new Simulation({ seed: 42, nearDeposits: 0.2 });
+  // A build site creates genuine demand with empty storage.
+  build(sim, 'warehouse');
+  run(sim, 0.1);
+  for (const rv of sim.rovers) {
+    assert.equal(
+      rv.command.type,
+      'mine',
+      `${rv.label} should have been auto-dispatched, got ${rv.command.type}`,
+    );
+  }
+  // The reservation contract: each seam being worked is claimed by exactly
+  // one rover — unless it is rich enough that sharing wastes nothing.
+  for (const rv of sim.rovers) {
+    if (rv.command.type !== 'mine') continue;
+    const dep = sim.world.deposits.find((d) => d.id === rv.command.depositId)!;
+    const holder = dep.reservedBy;
+    const rich = 2.5 * ROVERS[rv.kind].capacityKg;
+    assert.ok(
+      holder === rv.id || dep.amount > rich,
+      `seam ${dep.id} (${dep.amount.toFixed(0)} kg) worked by ${rv.label} should be claimed (by ${holder}) or rich`,
+    );
+  }
+});
+
+test('a flat rover strands, and another rover can jump-start it', () => {
+  const sim = new Simulation({ seed: 63, nearDeposits: 0.2 });
+  const [rescuer, victim] = sim.rovers;
+  // Send the victim into the field and run its battery flat there — the
+  // low-power recall cannot make it home from that far out.
+  victim.x = 150;
+  victim.z = 150;
+  victim.battery = 3;
+  assert.equal(
+    sim.issueRecover(rescuer.id, victim.id),
+    false,
+    'a running rover needs no rescue',
+  );
+  sim.issueMove(victim.id, 200, 200);
+  let sols = 0;
+  while (victim.phase !== 'disabled' && sols < 5) {
+    run(sim, 0.05);
+    sols += 0.05;
+  }
+  assert.equal(victim.phase, 'disabled', 'the victim should be stranded');
+
+  const ok = sim.issueRecover(rescuer.id, victim.id);
+  assert.ok(ok, 'the rescue dispatch should be accepted');
+  sols = 0;
+  while (victim.phase === 'disabled' && sols < 6) {
+    run(sim, 0.05);
+    sols += 0.05;
+  }
+  assert.notEqual(victim.phase, 'disabled', 'the victim should be running again');
+  assert.ok(victim.battery > 0, 'the jump-start should have left charge in the battery');
+  assert.ok(rescuer.battery < ROVERS[rescuer.kind].maxBatteryKWh, 'the rescuer paid for it');
+});
+
+test('tool work wears the drivetrain, and worn rovers work slower', () => {
+  const sim = new Simulation({ seed: 64, nearDeposits: 0.2 });
+  const rv = sim.rovers[0];
+  const dep = nearDeposit(sim, 'iron');
+  sim.issueMine(rv.id, dep.id);
+  const before = dep.amount;
+  run(sim, 1);
+  assert.ok(dep.amount < before, 'the rover should be mining');
+  assert.ok(
+    rv.condition < 100,
+    `a sol of digging should wear the drivetrain, got ${rv.condition.toFixed(1)}%`,
+  );
+
+  // Same dig, half-worn drivetrain: materially less rock moves.
+  const sim2 = new Simulation({ seed: 64, nearDeposits: 0.2 });
+  const rv2 = sim2.rovers[0];
+  rv2.condition = 20;
+  const dep2 = sim2.world.deposits.find((d) => d.id === dep.id)!;
+  sim2.issueMine(rv2.id, dep2.id);
+  run(sim2, 1);
+  assert.ok(
+    before - dep2.amount < before - dep.amount - 5,
+    `a worn rover should mine slower (${(before - dep.amount).toFixed(0)} kg vs ${(before - dep2.amount).toFixed(0)} kg)`,
+  );
+});
+
+test('a garage services drivetrains, fast-charges, and assembles rovers', () => {
+  const sim = new Simulation({ seed: 65, nearDeposits: 0.2 });
+  buildAndWait(sim, 'warehouse');
+  buildAndWait(sim, 'solar');
+  const garage = buildAndWait(sim, 'garage');
+
+  // --- assembly: the line builds a cargo rover from stockpiled parts ---
+  sim.storage.iron = 300;
+  sim.storage.aluminum = 200;
+  sim.storage.silicon = 200;
+  sim.recomputeCapacities();
+  assert.ok(sim.assembleRover(garage.id, 'cargo'), 'assembly should start');
+  assert.ok(!sim.assembleRover(garage.id, 'utility'), 'the line takes one job at a time');
+  const nBefore = sim.rovers.length;
+  let sols = 0;
+  while (sim.rovers.length === nBefore && sols < 2) {
+    run(sim, 0.05);
+    sols += 0.05;
+  }
+  assert.equal(sim.rovers.length, nBefore + 1, 'a new rover should roll out');
+  const fresh = sim.rovers[sim.rovers.length - 1];
+  assert.equal(fresh.kind, 'cargo');
+  assert.ok(
+    fresh.battery >= ROVERS.cargo.maxBatteryKWh - 0.01,
+    'fresh off the line, fully charged',
+  );
+  assert.equal(garage.assembly, null, 'the line should be free again');
+
+  // --- service: parking a worn rover in the bay restores condition ---
+  const worn = sim.rovers[0];
+  worn.condition = 40;
+  worn.x = garage.x;
+  worn.z = garage.z;
+  run(sim, 0.2);
+  assert.ok(
+    worn.condition > 40,
+    `the bay should service the drivetrain, got ${worn.condition.toFixed(1)}%`,
+  );
+
+  // --- fast charge: 40 kW in the bay vs the pod's 20 kW ---
+  const bayRv = sim.rovers[1];
+  bayRv.x = garage.x + 2;
+  bayRv.z = garage.z;
+  bayRv.battery = 10;
+  const bayBefore = bayRv.battery;
+  run(sim, 1 / (SOL_SECONDS * 20)); // exactly one tick
+  const bayGain = bayRv.battery - bayBefore;
+  const podRv = sim.rovers[2]; // the fresh cargo rover
+  podRv.x = 2; // next to the lander pod, away from any garage
+  podRv.z = 2;
+  podRv.battery = 10;
+  podRv.recharge = true;
+  const podBefore = podRv.battery;
+  run(sim, 1 / (SOL_SECONDS * 20));
+  const podGain = podRv.battery - podBefore;
+  assert.ok(
+    bayGain >= podGain * 1.5,
+    `garage charging should dwarf pod charging (${bayGain.toFixed(3)} vs ${podGain.toFixed(3)} kWh/tick)`,
+  );
+});
+
+test('rover automation rules are per-rover levers', () => {
+  const sim = new Simulation({ seed: 66, nearDeposits: 0.2 });
+  const [mining, utility] = sim.rovers;
+
+  // Charge floor clamps to the UI's 10–60% range.
+  sim.setChargeFloor(mining.id, 95);
+  assert.equal(mining.rules.chargeFloorPct, 60, 'floor clamps high');
+  sim.setChargeFloor(mining.id, 2);
+  assert.equal(mining.rules.chargeFloorPct, 10, 'floor clamps low');
+  sim.setChargeFloor(mining.id, 45);
+  assert.equal(mining.rules.chargeFloorPct, 45, 'sane values pass through');
+
+  // A high floor recalls the rover even with plenty of battery left.
+  utility.battery = 20; // 50% of its 40 kWh pack
+  sim.setChargeFloor(utility.id, 60); // 24 kWh floor — above its charge
+  sim.step(1 / 20);
+  assert.ok(utility.recharge, 'the rover should be heading in to charge');
+
+  // Auto-haul off stops the scheduler from using that rover.
+  sim.setRoverRule(utility.id, 'autoHaul', false);
+  sim.setRoverRule(mining.id, 'autoHaul', false);
+  sim.storage.ice = 0;
+  sim.recomputeCapacities();
+  run(sim, 0.1);
+  for (const rv of [mining, utility]) {
+    assert.equal(
+      rv.command.type,
+      'idle',
+      `auto-haul-off ${rv.label} must not be dispatched, got ${rv.command.type}`,
+    );
+  }
+});
+
+test('v3 saves migrate to v4: queues, condition, rules and assembly slots appear', () => {
+  const sim = new Simulation({ seed: 67, nearDeposits: 0.2 });
+  buildAndWait(sim, 'warehouse');
+  // Hand-craft a v3 save: single command, no queue/condition/rules, no slots.
+  const v3 = JSON.parse(JSON.stringify(sim.snapshot())) as any;
+  v3.version = 3;
+  v3.rovers = v3.rovers.map((r: any, i: number) => {
+    const { pending, condition, rules, autoTask, recharge, lowBatteryNotified, blockNotified, ...rest } = r;
+    return { ...rest, autoHaul: i === 1 ? false : true };
+  });
+  v3.buildings = v3.buildings.map((b: any) => {
+    const { assembly, ...rest } = b;
+    return rest;
+  });
+
+  const copy = new Simulation({ seed: 1 });
+  copy.restore(v3);
+  assert.equal(copy.rovers.length, sim.rovers.length, 'all rovers survive the migration');
+  for (const r of copy.rovers) {
+    assert.deepEqual(r.pending, [], 'migrated rovers start with an empty queue');
+    assert.equal(r.condition, 100, 'migrated drivetrains start fresh');
+    assert.ok(r.rules, 'migrated rovers get a rules block');
+  }
+  assert.equal(copy.rovers[1].rules.autoHaul, false, 'the old autoHaul flag carries over');
+  assert.equal(copy.rovers[0].rules.autoHaul, true, 'default autoHaul was already true');
+  for (const b of copy.buildings) {
+    assert.equal(b.assembly, null, 'buildings gain an empty assembly slot');
+  }
+});
+
+test('a P4-heavy state round-trips through save and restore', () => {
+  const sim = new Simulation({ seed: 68, nearDeposits: 0.2 });
+  buildAndWait(sim, 'warehouse');
+  const [a, b] = sim.rovers;
+
+  // Queue with every task shape, a repeat route, custom rules, a reservation.
+  sim.issueMove(a.id, 60, 0);
+  sim.issueMine(a.id, nearDeposit(sim, 'ice').id, true);
+  sim.issueWait(a.id, 10, true);
+  const ironDep = nearDeposit(sim, 'iron');
+  sim.issueMine(b.id, ironDep.id);
+  sim.setRepeatRoute(b.id, true);
+  sim.setChargeFloor(b.id, 45);
+  sim.setRoverRule(b.id, 'stormShelter', false);
+  sim.setRoverRule(b.id, 'autoRescue', false);
+  assert.equal(ironDep.reservedBy, b.id, 'precondition: b holds a reservation');
+
+  const snap = JSON.parse(JSON.stringify(sim.snapshot()));
+  const copy = new Simulation({ seed: 1 });
+  copy.restore(snap);
+  assert.equal(
+    JSON.stringify(copy.snapshot()),
+    JSON.stringify(snap),
+    'restore must reproduce the state exactly',
+  );
+
+  // And it keeps simulating identically afterwards.
+  run(sim, 0.5);
+  run(copy, 0.5);
+  assert.equal(
+    JSON.stringify(copy.snapshot()),
+    JSON.stringify(sim.snapshot()),
+    'a reloaded save must continue the same way',
+  );
 });
 
 // ============================================================== summary ====
