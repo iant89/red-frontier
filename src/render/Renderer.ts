@@ -153,10 +153,11 @@ export class GameRenderer {
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
     const cam = this.sun.shadow.camera;
-    cam.left = -720;
-    cam.right = 720;
-    cam.top = 720;
-    cam.bottom = -720;
+    const ext = this.world.half + 80;
+    cam.left = -ext;
+    cam.right = ext;
+    cam.top = ext;
+    cam.bottom = -ext;
     cam.near = 50;
     cam.far = 2200;
     this.sun.shadow.bias = -0.0006;

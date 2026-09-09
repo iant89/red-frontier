@@ -40,6 +40,8 @@ export interface HUDCallbacks {
   onAction: (action: string, arg?: number | string) => void;
   onStart: (seedText: string, near: number) => void;
   onOverlay: (mode: OverlayMode) => void;
+  /** Save the colony and return to the main menu. */
+  onMenu?: () => void;
 }
 
 const fmtKg = (n: number) =>
@@ -302,6 +304,7 @@ export class HUD {
         <div class="resources" id="resources"></div>
         <button class="btn idle-btn" id="idle-btn" title="Select the next idle rover (.)">😴 <span class="btn-t">Idle</span> <span class="idle-n" id="idle-n">0</span></button>
         <button class="btn" id="history-btn" title="Alert history (H)">📜</button>
+        <button class="btn" id="menu-btn" title="Save and return to the main menu">☰</button>
         <div class="toolbar" id="speeds"></div>
       </div>
 
@@ -423,6 +426,10 @@ export class HUD {
     this.el('history-btn').addEventListener('pointerdown', (e) => {
       e.stopPropagation();
       this.openAlertHistory();
+    });
+    this.el('menu-btn').addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.cb.onMenu?.();
     });
     this.el('hist-close').addEventListener('pointerdown', (e) => {
       e.stopPropagation();
@@ -1650,6 +1657,15 @@ export class HUD {
     this.el('end-title').textContent = title;
     this.el('end-text').textContent = text;
     this.el('end-overlay').style.display = 'flex';
+  }
+
+  /**
+   * The mission menu replaces the prototype's start overlay. The element
+   * stays in the DOM (tests and the HUD contract reference it) but is hidden
+   * while the menu system owns the pre-game screen.
+   */
+  hideStartOverlay(): void {
+    this.el('start-overlay').style.display = 'none';
   }
 }
 

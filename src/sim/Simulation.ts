@@ -85,6 +85,14 @@ import {
   POD_FLUID_CAPACITY,
   POD_STARTING_FLUIDS,
 } from './defs';
+import {
+  DIFFICULTIES,
+  DEFAULT_WORLD_OPTIONS,
+  stormMulFor,
+  suppliesMulFor,
+  richnessMulFor,
+} from './difficulty';
+import type { DifficultyId, WorldOptions } from './difficulty';
 import { SolClock } from './clock';
 import type { SunState } from './clock';
 import { Weather, stormLabel } from './weather';
@@ -339,6 +347,12 @@ export class Simulation {
   version = SAVE_VERSION;
   simTime = 0; // game seconds
   seed: number;
+  /** Difficulty preset chosen in the mission wizard. */
+  difficulty: DifficultyId = 'pioneer';
+  /** Advanced world options chosen in the mission wizard. */
+  worldOptions: WorldOptions = { ...DEFAULT_WORLD_OPTIONS };
+  /** Multiplier on the colonist's per-sol consumption (difficulty). */
+  consumptionMul = 1;
   private nextId = 1000;
 
   clock = new SolClock();
@@ -382,13 +396,29 @@ export class Simulation {
   weather = new Weather(0);
   private stormAnnounced = false;
 
-  constructor(params: { seed: number; nearDeposits?: number }) {
+  constructor(params: {
+    seed: number;
+    nearDeposits?: number;
+    difficulty?: DifficultyId;
+    worldHalf?: number;
+    region?: string | null;
+    worldOptions?: Partial<WorldOptions>;
+  }) {
     this.seed = params.seed;
+    this.difficulty = params.difficulty ?? 'pioneer';
+    this.worldOptions = { ...DEFAULT_WORLD_OPTIONS, ...(params.worldOptions ?? {}) };
+    const diff = DIFFICULTIES[this.difficulty] ?? DIFFICULTIES.pioneer;
+    this.consumptionMul = diff.consumptionMul;
     this.world = new World({
       seed: params.seed,
-      nearDeposits: params.nearDeposits ?? 0.2,
+      nearDeposits: params.nearDeposits ?? this.worldOptions.nearDeposits ?? 0.2,
+      worldHalf: params.worldHalf,
+      region: params.region ?? null,
+      richness: richnessMulFor(this.worldOptions.richness),
     });
     this.weather = new Weather(params.seed ^ 0x77e711e);
+    this.weather.frequencyMul = diff.stormMul * stormMulFor(this.worldOptions.stormLevel);
+    this.weather.damageMul = diff.damageMul;
     this.colonist = makeColonist(
       1,
       'Cmdr. Vega',
@@ -398,7 +428,12 @@ export class Simulation {
     );
     this.spawnStart();
     this.recomputeCapacities();
-    this.pools.amounts = { ...POD_STARTING_FLUIDS };
+    const supplies = diff.suppliesMul * suppliesMulFor(this.worldOptions.supplies);
+    this.pools.amounts = {
+      water: POD_STARTING_FLUIDS.water * supplies,
+      oxygen: POD_STARTING_FLUIDS.oxygen * supplies,
+      food: POD_STARTING_FLUIDS.food * supplies,
+    };
   }
 
   // ------------------------------------------------------------ setup ----
@@ -1649,7 +1684,8 @@ export class Simulation {
   // ----------------------------------------------------- life support ----
 
   private tickLifeSupport(): void {
-    const sols = SIM_TICK * SOLS_PER_SEC;
+    // Difficulty appetite: a Survivor crew burns through stores faster.
+    const sols = SIM_TICK * SOLS_PER_SEC * this.consumptionMul;
     const c = this.colonist;
     if (c.dead) return;
 
@@ -3285,6 +3321,10 @@ export class Simulation {
     return {
       version: SAVE_VERSION,
       seed: this.seed,
+      difficulty: this.difficulty,
+      worldHalf: this.world.half,
+      region: this.world.region,
+      worldOptions: { ...this.worldOptions },
       simTime: this.simTime,
       ticksRun: this.ticksRun,
       clock: this.clock.snapshot(),
@@ -3365,10 +3405,16 @@ export class Simulation {
     // TDD §15: migrate what we understand, refuse what we don't.
     if (data.version === 3) data = migrateV3Save(data);
     if (data.version === 4) data = migrateV4Save(data);
+    if (data.version === 5) data = migrateV5Save(data);
     if (data.version !== SAVE_VERSION) {
       throw new Error(`unsupported save version ${data.version}`);
     }
     this.seed = data.seed;
+    this.difficulty = DIFFICULTIES[data.difficulty as DifficultyId]
+      ? (data.difficulty as DifficultyId)
+      : 'pioneer';
+    this.worldOptions = { ...DEFAULT_WORLD_OPTIONS, ...(data.worldOptions ?? {}) };
+    this.consumptionMul = (DIFFICULTIES[this.difficulty] ?? DIFFICULTIES.pioneer).consumptionMul;
     this.simTime = data.simTime || 0;
     // The tick counter is authoritative; the delivery remainder restarts at
     // zero (where it sits within a frame either way, and it never changes how
@@ -3384,7 +3430,14 @@ export class Simulation {
     this.storage = { ...emptyAmounts(), ...(data.storage ?? {}) };
     this.gameOver = data.gameOver ?? null;
 
-    this.world = new World({ seed: data.seed, nearDeposits: 0.2 });
+    // The terrain must match the original exactly (seed + region + size);
+    // deposits themselves are restored from the save below.
+    this.world = new World({
+      seed: data.seed,
+      nearDeposits: 0.2,
+      worldHalf: Number.isFinite(data.worldHalf) ? data.worldHalf : 640,
+      region: typeof data.region === 'string' ? data.region : null,
+    });
     this.world.deposits = (data.deposits ?? []).map((d: any) => ({
       id: d.id,
       resource: d.resource,
@@ -3578,11 +3631,26 @@ function migrateV3Save(data: any): any {
  * v4 → v5. Rovers grew position lights: a player switch that the sim honours
  * automatically at night and in blowing dust. Every existing rover is
  * assumed to have shipped with the switch armed.
- */
-function migrateV4Save(data: any): any {
-  const d: any = { ...data, version: SAVE_VERSION };
+ */function migrateV4Save(data: any): any {
+  const d: any = { ...data, version: 5 };
   d.rovers = (data.rovers ?? []).map((r: any) => ({ ...r, lightsOn: r.lightsOn !== false }));
-  return d;
+  return migrateV5Save(d);
+}
+
+/**
+ * v5 → v6. Colonies gained a difficulty, a world size, a chosen landing
+ * region and advanced world options. Older saves predate the mission wizard,
+ * so they land on the classic defaults: Pioneer, medium claim, random site.
+ */
+function migrateV5Save(data: any): any {
+  return {
+    ...data,
+    version: SAVE_VERSION,
+    difficulty: 'pioneer',
+    worldHalf: 640,
+    region: null,
+    worldOptions: { ...DEFAULT_WORLD_OPTIONS },
+  };
 }
 
 export { colonistStatusText };

@@ -268,7 +268,7 @@ export const COLONIST_BUILD_POWER = 0.5;
 export const AUTOSAVE_INTERVAL_S = 45;
 
 /** Current save schema version. Bump whenever the snapshot shape changes. */
-export const SAVE_VERSION = 5;
+export const SAVE_VERSION = 6;
 
 // -------------------------------------------------------------- history ----
 

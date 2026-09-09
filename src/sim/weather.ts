@@ -161,6 +161,10 @@ export class Weather {
   seed: number;
   /** Sim time mirror (game seconds) — kept for snapshot sanity. */
   time = 0;
+  /** Multiplier on storm roll probabilities (difficulty × storm option). */
+  frequencyMul = 1;
+  /** Multiplier on storm structural damage (difficulty). */
+  damageMul = 1;
 
   // ---- current readings ----------------------------------------------------
   windSpeed = 8;
@@ -279,7 +283,7 @@ export class Weather {
       if (!can(k)) continue;
       let p: number = STORM_CHANCES[k];
       if (k === 'planetary') p = Math.min(0.03, p + 0.002 * Math.max(0, sol + 1 - STORM_UNLOCK_SOL.planetary));
-      acc += p;
+      acc += p * this.frequencyMul;
       if (r < acc) return k;
     }
     return null;
@@ -356,7 +360,7 @@ export class Weather {
    */
   damageRate(): number {
     if (this.stormIntensity <= 0.25) return 0;
-    return Math.pow(this.stormIntensity, 1.5) * 0.38;
+    return Math.pow(this.stormIntensity, 1.5) * 0.38 * this.damageMul;
   }
 
   /** Test/cheat hook (TDD §22): force a storm on the board right now. */
@@ -390,10 +394,14 @@ export class Weather {
       dust: this.dust,
       windSpeed: this.windSpeed,
       windDirRad: this.windDirRad,
+      frequencyMul: this.frequencyMul,
+      damageMul: this.damageMul,
     };
   }
 
   restore(data: any): void {
+    this.frequencyMul = Number.isFinite(data?.frequencyMul) ? data.frequencyMul : 1;
+    this.damageMul = Number.isFinite(data?.damageMul) ? data.damageMul : 1;
     this.rngState = (data?.rngState ?? (this.seed ^ 0x9e3779b9)) >>> 0;
     this.nextRollAt = data?.nextRollAt ?? WEATHER_CALM_SOLS * SOL_SECONDS;
     this.lastStormEndAt = data?.lastStormEndAt ?? -Infinity;

@@ -13,10 +13,17 @@ export class CameraRig {
   private readonly maxPhi = 1.42;
   private readonly minRadius = 16;
   private readonly maxRadius = 1600;
+  private panLimit = WORLD_HALF - 24;
 
-  constructor(camera: THREE.PerspectiveCamera) {
+  constructor(camera: THREE.PerspectiveCamera, worldHalf: number = WORLD_HALF) {
     this.camera = camera;
+    this.panLimit = worldHalf - 24;
     this.update();
+  }
+
+  /** Match the pan clamp to the active world's footprint. */
+  setWorldHalf(worldHalf: number): void {
+    this.panLimit = worldHalf - 24;
   }
 
   update(): void {
@@ -68,7 +75,7 @@ export class CameraRig {
       .addScaledVector(away, dyPx * scale);
     this.target.add(offset);
     this.target.y = 4;
-    const lim = WORLD_HALF - 24;
+    const lim = this.panLimit;
     this.target.x = Math.max(-lim, Math.min(lim, this.target.x));
     this.target.z = Math.max(-lim, Math.min(lim, this.target.z));
   }

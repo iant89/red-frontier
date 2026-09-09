@@ -1,0 +1,1149 @@
+/**
+ * Red Frontier — mission-control menu theme.
+ *
+ * Splash, loading, main menu, expedition wizard, globe picker and the saved
+ * games browser. The in-game HUD (style.css) keeps its own skin; this file
+ * owns everything *around* the game, in one visual language:
+ * deep charcoal glass, hairline brass borders, signal-orange accents.
+ */
+
+:root {
+  --rf-bg: #0a0705;
+  --rf-panel: rgba(19, 14, 10, 0.92);
+  --rf-panel-solid: #16110c;
+  --rf-line: #4a3826;
+  --rf-line-lit: #8a6238;
+  --rf-text: #f2e7d5;
+  --rf-dim: #b3a08a;
+  --rf-faint: #7a6a56;
+  --rf-accent: #ff7a2f;
+  --rf-accent-soft: rgba(255, 122, 47, 0.14);
+  --rf-accent-2: #ffc46b;
+  --rf-ok: #7fb46a;
+  --rf-warn: #d9a23a;
+  --rf-crit: #e05a41;
+  --rf-cyan: #6fd3ff;
+}
+
+/* ------------------------------------------------------------ overlay --- */
+.rf-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  overflow-y: auto;
+  color: var(--rf-text);
+  font-family: "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
+  animation: rf-in 0.28s ease-out;
+}
+
+@keyframes rf-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.rf-bg {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: radial-gradient(ellipse at 50% 30%, #2a160b 0%, #0a0705 72%);
+}
+
+.rf-bg img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.rf-bg.blur img {
+  filter: blur(7px) brightness(0.62) saturate(1.05);
+  transform: scale(1.06);
+}
+
+.rf-bg.dim img {
+  filter: brightness(0.5) saturate(1.05);
+}
+
+.rf-bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(to top, rgba(10, 7, 5, 0.88) 0%, rgba(10, 7, 5, 0.25) 45%, rgba(10, 7, 5, 0.55) 100%),
+    radial-gradient(ellipse at 50% 40%, transparent 30%, rgba(10, 7, 5, 0.5) 100%);
+}
+
+.rf-card {
+  position: relative;
+  width: min(880px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  background: var(--rf-panel);
+  border: 1px solid var(--rf-line);
+  border-radius: 14px;
+  box-shadow:
+    0 24px 80px rgba(0, 0, 0, 0.65),
+    0 0 0 1px rgba(255, 122, 47, 0.06),
+    0 0 44px rgba(255, 122, 47, 0.07);
+  backdrop-filter: blur(12px);
+  padding: 28px 30px;
+  animation: rf-rise 0.32s ease-out;
+}
+
+@keyframes rf-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+
+/* ---------------------------------------------------------- typography --- */
+.rf-kicker {
+  font-size: 11px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--rf-accent);
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.rf-title {
+  margin: 0;
+  font-size: clamp(30px, 5vw, 44px);
+  letter-spacing: 6px;
+  font-weight: 800;
+  color: var(--rf-text);
+  text-shadow: 0 0 30px rgba(255, 122, 47, 0.35);
+}
+
+.rf-subtitle {
+  margin: 8px 0 0;
+  color: var(--rf-dim);
+  font-size: 14px;
+  line-height: 1.6;
+  max-width: 60ch;
+}
+
+.rf-h2 {
+  margin: 0 0 4px;
+  font-size: 20px;
+  letter-spacing: 2px;
+  font-weight: 700;
+}
+
+.rf-hint {
+  margin: 0 0 14px;
+  color: var(--rf-dim);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* -------------------------------------------------------------- buttons --- */
+.rf-btn {
+  appearance: none;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--rf-text);
+  border: 1px solid var(--rf-line);
+  border-radius: 8px;
+  padding: 11px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  cursor: pointer;
+  font-family: inherit;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    box-shadow 0.15s,
+    transform 0.1s;
+}
+
+.rf-btn:hover:not(:disabled) {
+  background: rgba(255, 122, 47, 0.12);
+  border-color: var(--rf-line-lit);
+  box-shadow: 0 0 18px rgba(255, 122, 47, 0.18);
+}
+
+.rf-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.rf-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.rf-btn-primary {
+  background: linear-gradient(180deg, #ff8f47, #e56a24);
+  border-color: #ff8f47;
+  color: #1c0f06;
+  text-shadow: none;
+  box-shadow: 0 4px 22px rgba(255, 122, 47, 0.35);
+}
+
+.rf-btn-primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, #ffa05c, #f07a2e);
+  border-color: #ffb27a;
+  box-shadow: 0 4px 28px rgba(255, 122, 47, 0.5);
+}
+
+.rf-btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--rf-dim);
+}
+
+.rf-btn-ghost:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--rf-text);
+  box-shadow: none;
+}
+
+.rf-btn-danger:hover:not(:disabled) {
+  background: rgba(224, 90, 65, 0.16);
+  border-color: var(--rf-crit);
+  box-shadow: 0 0 18px rgba(224, 90, 65, 0.25);
+}
+
+.rf-btn-block {
+  width: 100%;
+}
+
+.rf-icon-btn {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  border-radius: 8px;
+}
+
+/* ---------------------------------------------------------------- inputs --- */
+.rf-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.rf-field > label {
+  font-size: 11px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--rf-dim);
+  font-weight: 600;
+}
+
+.rf-input,
+.rf-select {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--rf-line);
+  border-radius: 8px;
+  color: var(--rf-text);
+  padding: 11px 13px;
+  font-size: 14px;
+  font-family: inherit;
+  width: 100%;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+
+.rf-input:focus,
+.rf-select:focus {
+  outline: none;
+  border-color: var(--rf-accent);
+  box-shadow: 0 0 0 3px rgba(255, 122, 47, 0.18);
+}
+
+.rf-select option {
+  background: var(--rf-panel-solid);
+}
+
+.rf-seed-row {
+  display: flex;
+  gap: 8px;
+}
+
+.rf-seed-row .rf-input {
+  flex: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 1px;
+}
+
+/* ----------------------------------------------------------- option grid --- */
+.rf-grid {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.rf-grid.cols-2 {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.rf-grid.cols-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.rf-grid.cols-4 {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.rf-pick {
+  position: relative;
+  text-align: left;
+  background: rgba(0, 0, 0, 0.32);
+  border: 1px solid var(--rf-line);
+  border-radius: 10px;
+  padding: 13px 14px;
+  cursor: pointer;
+  color: var(--rf-text);
+  font-family: inherit;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    box-shadow 0.15s;
+}
+
+.rf-pick:hover {
+  border-color: var(--rf-line-lit);
+  background: rgba(255, 122, 47, 0.06);
+}
+
+.rf-pick.selected {
+  border-color: var(--rf-accent);
+  background: var(--rf-accent-soft);
+  box-shadow:
+    0 0 0 1px var(--rf-accent),
+    0 0 22px rgba(255, 122, 47, 0.22);
+}
+
+.rf-pick .pk-label {
+  display: block;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  margin-bottom: 2px;
+}
+
+.rf-pick .pk-tag {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--rf-accent-2);
+  margin-bottom: 6px;
+}
+
+.rf-pick .pk-desc {
+  display: block;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--rf-dim);
+}
+
+.rf-pick.selected .pk-desc {
+  color: var(--rf-text);
+}
+
+.rf-pick .pk-check {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--rf-line-lit);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: transparent;
+}
+
+.rf-pick.selected .pk-check {
+  background: var(--rf-accent);
+  border-color: var(--rf-accent);
+  color: #1c0f06;
+}
+
+/* --------------------------------------------------------------- splash --- */
+.rf-splash-card {
+  width: min(520px, 100%);
+  text-align: center;
+}
+
+.rf-splash-card .rf-title {
+  font-size: clamp(36px, 8vw, 58px);
+  letter-spacing: 10px;
+}
+
+.rf-progress {
+  margin: 22px 0 8px;
+}
+
+.rf-progress-track {
+  height: 8px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--rf-line);
+  overflow: hidden;
+}
+
+.rf-progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 5px;
+  background: linear-gradient(90deg, #e56a24, #ffc46b);
+  box-shadow: 0 0 14px rgba(255, 122, 47, 0.7);
+  transition: width 0.25s ease-out;
+}
+
+.rf-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-top: 8px;
+  font-size: 12.5px;
+}
+
+.rf-progress-label {
+  color: var(--rf-dim);
+}
+
+.rf-progress-pct {
+  color: var(--rf-accent-2);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.rf-load-steps {
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+  text-align: left;
+  font-size: 12.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.rf-load-steps li {
+  color: var(--rf-faint);
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+
+.rf-load-steps li.done {
+  color: var(--rf-dim);
+}
+
+.rf-load-steps li.active {
+  color: var(--rf-text);
+}
+
+.rf-load-steps .st-ic {
+  width: 18px;
+  text-align: center;
+  color: var(--rf-accent);
+}
+
+/* ------------------------------------------------------------ main menu --- */
+.rf-menu-layout {
+  position: relative;
+  width: min(1060px, 100%);
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 28px;
+  align-items: center;
+}
+
+.rf-menu-hero .rf-title {
+  font-size: clamp(44px, 7vw, 76px);
+  letter-spacing: 12px;
+  line-height: 1.05;
+}
+
+.rf-menu-hero .rf-kicker {
+  font-size: 12px;
+}
+
+.rf-menu-tag {
+  margin: 14px 0 0;
+  color: var(--rf-dim);
+  font-size: 14.5px;
+  line-height: 1.7;
+  max-width: 46ch;
+}
+
+.rf-menu-tag b {
+  color: var(--rf-accent-2);
+}
+
+.rf-menu-stats {
+  display: flex;
+  gap: 18px;
+  margin-top: 18px;
+  flex-wrap: wrap;
+}
+
+.rf-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-left: 2px solid var(--rf-line);
+  padding-left: 10px;
+}
+
+.rf-stat b {
+  font-size: 17px;
+  color: var(--rf-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.rf-stat span {
+  font-size: 10.5px;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: var(--rf-faint);
+}
+
+.rf-menu-panel {
+  background: var(--rf-panel);
+  border: 1px solid var(--rf-line);
+  border-radius: 14px;
+  backdrop-filter: blur(12px);
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+  animation: rf-rise 0.32s ease-out;
+}
+
+.rf-menu-panel .rf-btn {
+  padding: 14px 18px;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: flex-start;
+}
+
+.rf-menu-panel .rf-btn .mi {
+  font-size: 18px;
+  width: 26px;
+  text-align: center;
+}
+
+.rf-menu-panel .rf-btn small {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.4px;
+  text-transform: none;
+  color: var(--rf-dim);
+  margin-top: 2px;
+}
+
+.rf-btn-primary small {
+  color: rgba(28, 15, 6, 0.75) !important;
+}
+
+.rf-menu-foot {
+  margin-top: 6px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--rf-faint);
+  letter-spacing: 0.6px;
+}
+
+/* --------------------------------------------------------------- wizard --- */
+.rf-wizard-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.rf-wizard-head .grow {
+  flex: 1;
+}
+
+.rf-steps {
+  display: flex;
+  gap: 6px;
+  margin: 16px 0 20px;
+}
+
+.rf-step {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 10.5px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--rf-faint);
+}
+
+.rf-step .bar {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.rf-step.done {
+  color: var(--rf-dim);
+}
+
+.rf-step.done .bar {
+  background: var(--rf-line-lit);
+}
+
+.rf-step.active {
+  color: var(--rf-accent-2);
+}
+
+.rf-step.active .bar {
+  background: linear-gradient(90deg, var(--rf-accent), var(--rf-accent-2));
+  box-shadow: 0 0 10px rgba(255, 122, 47, 0.5);
+}
+
+.rf-wizard-nav {
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin-top: 20px;
+  border-top: 1px solid var(--rf-line);
+  padding-top: 18px;
+}
+
+.rf-wizard-nav .spacer {
+  flex: 1;
+}
+
+.rf-advanced {
+  margin-top: 16px;
+  border: 1px solid var(--rf-line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.rf-advanced-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(0, 0, 0, 0.3);
+  border: none;
+  color: var(--rf-text);
+  padding: 13px 15px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.rf-advanced-toggle:hover {
+  background: rgba(255, 122, 47, 0.08);
+}
+
+.rf-advanced-toggle .chev {
+  margin-left: auto;
+  color: var(--rf-dim);
+  transition: transform 0.2s;
+}
+
+.rf-advanced.open .rf-advanced-toggle .chev {
+  transform: rotate(180deg);
+}
+
+.rf-advanced-body {
+  display: none;
+  padding: 16px 15px 4px;
+  border-top: 1px solid var(--rf-line);
+}
+
+.rf-advanced.open .rf-advanced-body {
+  display: block;
+}
+
+.rf-adv-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 14px;
+}
+
+.rf-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--rf-line);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-top: 14px;
+}
+
+.rf-summary-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 14px;
+  font-size: 13px;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.rf-summary-row:nth-child(even) {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.rf-summary-row .k {
+  color: var(--rf-faint);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  font-size: 11px;
+  padding-top: 2px;
+}
+
+.rf-summary-row .v {
+  color: var(--rf-text);
+  text-align: right;
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------- globe --- */
+.rf-globe-layout {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.rf-globe-wrap {
+  position: relative;
+  min-height: 340px;
+  border: 1px solid var(--rf-line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 45%, #1a0f08 0%, #060403 70%);
+}
+
+.rf-globe-wrap canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+}
+
+.rf-globe-wrap canvas:active {
+  cursor: grabbing;
+}
+
+.rf-globe-tip {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(10, 7, 5, 0.92);
+  border: 1px solid var(--rf-line-lit);
+  border-radius: 6px;
+  padding: 4px 9px;
+  font-size: 12px;
+  color: var(--rf-accent-2);
+  display: none;
+  white-space: nowrap;
+  z-index: 3;
+}
+
+.rf-globe-hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--rf-dim);
+  padding: 8px;
+  background: linear-gradient(to top, rgba(6, 4, 3, 0.9), transparent);
+  pointer-events: none;
+}
+
+.rf-globe-fallback {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.rf-site-panel {
+  border: 1px solid var(--rf-line);
+  border-radius: 12px;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.3);
+  min-height: 340px;
+  display: flex;
+  flex-direction: column;
+}
+
+.rf-site-panel.empty {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--rf-faint);
+  font-size: 13px;
+  line-height: 1.7;
+  gap: 8px;
+}
+
+.rf-site-biome {
+  display: inline-block;
+  align-self: flex-start;
+  font-size: 10.5px;
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 20px;
+  border: 1px solid;
+  margin-bottom: 8px;
+}
+
+.rf-site-name {
+  margin: 0 0 2px;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+}
+
+.rf-site-coords {
+  font-size: 12px;
+  color: var(--rf-faint);
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 10px;
+}
+
+.rf-site-desc {
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--rf-dim);
+  margin: 0 0 12px;
+}
+
+.rf-site-traits {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: auto;
+}
+
+.rf-site-traits li {
+  font-size: 12.5px;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  color: var(--rf-text);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--rf-line);
+  border-radius: 7px;
+  padding: 6px 9px;
+}
+
+.rf-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 10px;
+  font-size: 11.5px;
+  color: var(--rf-dim);
+}
+
+.rf-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rf-legend i {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  display: inline-block;
+  opacity: 0.85;
+}
+
+/* ------------------------------------------------------------ load games --- */
+.rf-save-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 14px 0;
+  max-height: 46vh;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.rf-save-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  background: rgba(0, 0, 0, 0.32);
+  border: 1px solid var(--rf-line);
+  border-radius: 10px;
+  padding: 12px 12px 12px 15px;
+  cursor: pointer;
+  color: var(--rf-text);
+  font-family: inherit;
+  width: 100%;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+
+.rf-save-row:hover {
+  border-color: var(--rf-line-lit);
+  background: rgba(255, 122, 47, 0.06);
+}
+
+.rf-save-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.rf-save-name {
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rf-save-meta {
+  font-size: 12px;
+  color: var(--rf-dim);
+  margin-top: 3px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rf-save-meta .dot-sep {
+  color: var(--rf-faint);
+}
+
+.rf-save-launch {
+  font-size: 11px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--rf-accent);
+  border: 1px solid var(--rf-line);
+  border-radius: 7px;
+  padding: 7px 12px;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+}
+
+.rf-save-row:hover .rf-save-launch {
+  border-color: var(--rf-accent);
+  background: var(--rf-accent-soft);
+}
+
+.rf-dots {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--rf-dim);
+  font-size: 17px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.rf-dots:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--rf-text);
+  border-color: var(--rf-line);
+}
+
+.rf-menu-pop {
+  position: absolute;
+  right: 10px;
+  top: calc(100% - 6px);
+  z-index: 20;
+  min-width: 190px;
+  background: var(--rf-panel-solid);
+  border: 1px solid var(--rf-line-lit);
+  border-radius: 9px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.65);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.rf-menu-pop button {
+  background: transparent;
+  border: none;
+  color: var(--rf-text);
+  text-align: left;
+  padding: 10px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+
+.rf-menu-pop button:hover {
+  background: rgba(255, 122, 47, 0.12);
+}
+
+.rf-menu-pop button.danger {
+  color: #f0937f;
+}
+
+.rf-menu-pop button.danger:hover {
+  background: rgba(224, 90, 65, 0.16);
+}
+
+.rf-menu-pop button.confirm {
+  background: rgba(224, 90, 65, 0.2);
+  color: #ffb3a3;
+  font-weight: 700;
+}
+
+.rf-rename-row {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+}
+
+.rf-rename-row .rf-input {
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.rf-empty {
+  text-align: center;
+  padding: 34px 16px;
+  color: var(--rf-dim);
+  font-size: 13.5px;
+  line-height: 1.7;
+  border: 1px dashed var(--rf-line-lit);
+  border-radius: 10px;
+}
+
+/* --------------------------------------------------------------- misc --- */
+.rf-top-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.rf-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--rf-line-lit) transparent;
+}
+
+.rf-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.rf-scroll::-webkit-scrollbar-thumb {
+  background: var(--rf-line);
+  border-radius: 4px;
+}
+
+/* Legacy end-screen inherits the new skin. */
+#end-overlay.overlay {
+  background: radial-gradient(ellipse at 50% 35%, #2a160b 0%, #0a0705 78%);
+}
+
+#end-overlay h1 {
+  letter-spacing: 8px;
+}
+
+/* ------------------------------------------------------------ responsive --- */
+@media (max-width: 860px) {
+  .rf-menu-layout {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+
+  .rf-menu-hero .rf-title {
+    letter-spacing: 7px;
+  }
+
+  .rf-grid.cols-4 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .rf-globe-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .rf-globe-wrap,
+  .rf-site-panel {
+    min-height: 280px;
+  }
+}
+
+@media (max-width: 620px) {
+  .rf-overlay {
+    padding: 12px;
+  }
+
+  .rf-card {
+    padding: 20px 16px;
+    max-height: calc(100vh - 24px);
+  }
+
+  .rf-grid.cols-3,
+  .rf-adv-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .rf-grid.cols-2 {
+    grid-template-columns: 1fr;
+  }
+
+  .rf-wizard-nav {
+    flex-wrap: wrap;
+  }
+
+  .rf-wizard-nav .rf-btn {
+    flex: 1;
+    text-align: center;
+  }
+
+  .rf-step span.lbl {
+    display: none;
+  }
+}
