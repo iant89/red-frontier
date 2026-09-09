@@ -350,7 +350,7 @@ export const BUILDINGS: Record<BuildingKind, BuildingDef> = {
     buildTime: 18,
     powerDrawKw: 0,
     idlePowerKw: 0,
-    powerProduceKw: 24,
+    powerProduceKw: 28,
     generation: 'solar',
     batteryKWh: 0,
     storagePerResourceKg: 0,

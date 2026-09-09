@@ -511,5 +511,360 @@ test('a dismissed alert returns if its condition clears and re-raises', () => {
   hud.updateAlerts([]);
 });
 
+console.log('\nRover unload order');
+
+test('the rover inspector offers an Unload order button', () => {
+  const r = sim.rovers[0];
+  r.command = { type: 'idle' };
+  r.pending = [];
+  r.cargo.ice = 100;
+  hud.showRover(r, sim);
+  const btn = doc.querySelector('#i-unload') as any;
+  assert.ok(btn, 'expected an #i-unload button in the inspector');
+  assert.equal(btn.hasAttribute('disabled'), false, 'a loaded hold means the order is live');
+  calls.length = 0;
+  btn.dispatchEvent(new dom.window.Event('pointerdown', { bubbles: true }));
+  assert.ok(calls.includes('action:unload:'), `expected unload action, saw ${calls}`);
+  r.cargo.ice = 0;
+});
+
+test('the Unload button reads the queue, not just the hold', () => {
+  const r = sim.rovers[0];
+  r.cargo.ice = 0;
+  r.command = { type: 'idle' };
+  r.pending = [];
+  hud.showRover(r, sim);
+  assert.equal(
+    (doc.querySelector('#i-unload') as any).hasAttribute('disabled'),
+    true,
+    'empty hold, nothing queued: the order would be pointless',
+  );
+  const dep = sim.world.deposits.find((d) => d.amount > 0)!;
+  r.pending = [{ type: 'mine', depositId: dep.id }];
+  hud.showRover(r, sim);
+  assert.equal(
+    (doc.querySelector('#i-unload') as any).hasAttribute('disabled'),
+    false,
+    'a queued mine run will fill the hold: unloading after it is sensible',
+  );
+  r.pending = [];
+});
+
+test('an unload task renders in the route list', () => {
+  const r = sim.rovers[0];
+  r.command = { type: 'unload' };
+  r.pending = [];
+  hud.showRover(r, sim);
+  const route = (doc.querySelector('#i-route') as any).textContent;
+  assert.ok(route.includes('Unload cargo at depot'), `route list says: ${route}`);
+  r.command = { type: 'idle' };
+});
+
+console.log('\nIdle rover cycling');
+
+test('the topbar shows an idle count that tracks the sim', () => {
+  for (const r of sim.rovers) {
+    r.command = { type: 'idle' };
+    r.pending = [];
+    r.recharge = false;
+    r.sheltered = false;
+    r.phase = 'idle';
+  }
+  hud.updateVitals(sim);
+  assert.equal((doc.querySelector('#idle-n') as any).textContent, '2');
+  sim.issueMove(sim.rovers[0].id, 10, 10);
+  hud.updateVitals(sim);
+  assert.equal((doc.querySelector('#idle-n') as any).textContent, '1');
+  assert.equal((doc.querySelector('#idle-btn') as any).classList.contains('none'), false);
+  sim.stopRover(sim.rovers[0].id);
+  sim.stopRover(sim.rovers[1].id);
+});
+
+test('the idle button asks the game to cycle to the next idle rover', () => {
+  calls.length = 0;
+  (doc.querySelector('#idle-btn') as any).dispatchEvent(
+    new dom.window.Event('pointerdown', { bubbles: true }),
+  );
+  assert.ok(calls.includes('action:cycle-idle:'), `expected cycle-idle, saw ${calls}`);
+});
+
+console.log('\nAutopause on critical');
+
+test('autopause defaults off and toggles with persistence', () => {
+  const btn = doc.querySelector('#autopause-btn') as any;
+  assert.ok(btn, 'expected an autopause toggle in the speed toolbar');
+  assert.equal(btn.getAttribute('aria-pressed'), 'false', 'opt-in: off unless enabled');
+  calls.length = 0;
+  btn.dispatchEvent(new dom.window.Event('pointerdown', { bubbles: true }));
+  assert.equal(btn.getAttribute('aria-pressed'), 'true');
+  assert.equal(hud.autopauseOnCrit, true);
+  // A memory-backed localStorage proves the preference persists to a new HUD.
+  const store = new Map<string, string>([['rf-autopause', '1']]);
+  const mem = {
+    getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+    setItem: (k: string, v: string) => void store.set(k, v),
+  };
+  const w = dom.window as any;
+  const real = Object.getOwnPropertyDescriptor(w, 'localStorage');
+  Object.defineProperty(w, 'localStorage', { value: mem, configurable: true });
+  try {
+    const hud2 = new HUD({
+      onSpeed: () => {},
+      onPickBuild: () => {},
+      onAction: () => {},
+      onStart: () => {},
+      onOverlay: () => {},
+    });
+    assert.equal(hud2.autopauseOnCrit, true, 'a fresh HUD reads the stored preference');
+    // Tear its DOM back out: duplicate panel IDs would confuse later queries.
+    const roots = doc.querySelectorAll('#app > .hud');
+    roots[roots.length - 1]?.remove();
+  } finally {
+    if (real) Object.defineProperty(w, 'localStorage', real);
+    else delete w.localStorage;
+  }
+  btn.dispatchEvent(new dom.window.Event('pointerdown', { bubbles: true }));
+  assert.equal(hud.autopauseOnCrit, false, 'toggle back off for the tests below');
+});
+
+test('a new critical alert pauses the game only when opted in', () => {
+  hud.setSpeed(1);
+  hud.updateAlerts([]); // baseline: nothing critical
+  hud.setAutopause(false);
+  hud.updateAlerts([
+    { key: 'oxygen-low', severity: 'crit', title: 'O2 critical', detail: 'dying', since: 0, lastSeen: 0 },
+  ]);
+  assert.equal(hud.speedIdx, 1, 'opted out: the game keeps running');
+  hud.setSpeed(1);
+  hud.updateAlerts([]); // the condition clears…
+  hud.setAutopause(true);
+  calls.length = 0;
+  hud.updateAlerts([
+    { key: 'oxygen-low', severity: 'crit', title: 'O2 critical', detail: 'dying', since: 0, lastSeen: 0 },
+  ]);
+  assert.equal(hud.speedIdx, 0, 'opted in: a fresh critical pauses');
+  assert.ok(calls.includes('speed:0'), `expected onSpeed(0), saw ${calls}`);
+  hud.setAutopause(false);
+});
+
+test('a repeating critical never re-pauses after the player resumes', () => {
+  hud.setAutopause(true);
+  hud.setSpeed(1);
+  hud.updateAlerts([
+    { key: 'oxygen-low', severity: 'crit', title: 'O2 critical', detail: 'dying', since: 0, lastSeen: 0 },
+  ]);
+  assert.equal(hud.speedIdx, 1, 'already-seen key: no pause');
+  hud.updateAlerts([
+    { key: 'oxygen-low', severity: 'crit', title: 'O2 critical', detail: 'still dying', since: 0, lastSeen: 0 },
+    { key: 'grid-down', severity: 'crit', title: 'Grid brownout', detail: 'dark', since: 0, lastSeen: 0 },
+  ]);
+  assert.equal(hud.speedIdx, 0, 'a second, genuinely new critical pauses');
+  hud.setSpeed(1); // the player resumes into the crisis…
+  hud.updateAlerts([
+    { key: 'oxygen-low', severity: 'crit', title: 'O2 critical', detail: 'still dying', since: 0, lastSeen: 0 },
+    { key: 'grid-down', severity: 'crit', title: 'Grid brownout', detail: 'dark', since: 0, lastSeen: 0 },
+  ]);
+  assert.equal(hud.speedIdx, 1, 'repeats after resume do not re-pause');
+  hud.updateAlerts([]);
+  hud.setAutopause(false);
+  hud.setSpeed(1);
+});
+
+console.log('\nAlert history');
+
+test('the history modal lists past events, newest first', () => {
+  sim.alerts.reset();
+  sim.alerts.event('info', 'first thing', 1, 'Sol 1 · 08:00');
+  sim.alerts.event('crit', 'bad thing', 2, 'Sol 1 · 09:00');
+  sim.alerts.event('warn', 'worrying thing', 3, 'Sol 1 · 10:00');
+  hud.updateAlerts(sim.alerts.list(), sim.alerts);
+  (doc.querySelector('#history-btn') as any).dispatchEvent(
+    new dom.window.Event('pointerdown', { bubbles: true }),
+  );
+  const ov = doc.querySelector('#history-overlay') as any;
+  assert.equal(ov.style.display, 'flex', 'the modal should open');
+  const items = doc.querySelectorAll('#hist-list .hist-item');
+  assert.equal(items.length, 3);
+  assert.ok(items[0].textContent.includes('worrying thing'), 'newest first');
+  assert.ok(items[2].textContent.includes('first thing'), 'oldest last');
+  assert.ok((doc.querySelector('#hist-count') as any).textContent.includes('3 events'));
+});
+
+test('severity chips filter the history', () => {
+  const chip = (sev: string) => doc.querySelector(`#hist-chips [data-sev="${sev}"]`) as any;
+  chip('crit').dispatchEvent(new dom.window.Event('pointerdown', { bubbles: true }));
+  let items = doc.querySelectorAll('#hist-list .hist-item');
+  assert.equal(items.length, 1, 'only the crit survives the filter');
+  assert.ok(items[0].textContent.includes('bad thing'));
+  assert.ok(chip('crit').classList.contains('active'), 'the active chip reads as active');
+  chip('ok').dispatchEvent(new dom.window.Event('pointerdown', { bubbles: true }));
+  items = doc.querySelectorAll('#hist-list .hist-item');
+  assert.equal(items.length, 0, 'nothing ok happened');
+  assert.ok(doc.querySelector('#hist-list .hist-empty'), 'an empty filter says so');
+  chip('all').dispatchEvent(new dom.window.Event('pointerdown', { bubbles: true }));
+  assert.equal(doc.querySelectorAll('#hist-list .hist-item').length, 3);
+});
+
+test('the history modal closes via × and reports its state for Esc', () => {
+  assert.equal(hud.closeAlertHistory(), true, 'open → closes and reports true');
+  assert.equal((doc.querySelector('#history-overlay') as any).style.display, 'none');
+  assert.equal(hud.closeAlertHistory(), false, 'already closed → false, so Esc falls through');
+  (doc.querySelector('#history-btn') as any).dispatchEvent(
+    new dom.window.Event('pointerdown', { bubbles: true }),
+  );
+  (doc.querySelector('#hist-close') as any).dispatchEvent(
+    new dom.window.Event('pointerdown', { bubbles: true }),
+  );
+  assert.equal((doc.querySelector('#history-overlay') as any).style.display, 'none');
+  sim.alerts.reset();
+});
+
+console.log('\nBuild dossier (touch hold)');
+
+// Fake the window timers so holds fire synchronously and deterministically.
+function withFakeTimers(fn: (timers: { fire: () => void; pending: () => boolean }) => void): void {
+  const w = dom.window as any;
+  const realSet = w.setTimeout;
+  const realClear = w.clearTimeout;
+  let held: (() => void) | null = null;
+  w.setTimeout = (cb: () => void) => {
+    held = cb;
+    return 1;
+  };
+  w.clearTimeout = () => {
+    held = null;
+  };
+  try {
+    fn({
+      fire: () => {
+        const cb = held;
+        held = null;
+        cb?.();
+      },
+      pending: () => held !== null,
+    });
+  } finally {
+    w.setTimeout = realSet;
+    w.clearTimeout = realClear;
+  }
+}
+
+function press(target: any, type: string, x = 100, y = 100): void {
+  const ev = new dom.window.Event(type, { bubbles: true }) as any;
+  ev.pointerType = 'touch';
+  ev.clientX = x;
+  ev.clientY = y;
+  target.dispatchEvent(ev);
+}
+
+test('holding a blueprint opens its dossier and disarms the tap', () => {
+  withFakeTimers((timers) => {
+    calls.length = 0;
+    hud.setBuild(null);
+    const btn = doc.querySelectorAll('#buildbar .build-btn')[1] as any; // Solar Array
+    press(btn, 'pointerdown');
+    assert.ok(calls.includes('build:solar'), `the tap arms the blueprint first: ${calls}`);
+    assert.ok(timers.pending(), 'a hold timer should be armed for touch');
+    timers.fire(); // the hold elapses
+    assert.ok(calls.includes('build:null'), `the hold disarms the tap: ${calls}`);
+    const card = doc.querySelector('#build-info') as any;
+    assert.equal(card.style.display, 'block', 'the dossier should open');
+    assert.ok((doc.querySelector('#bi-name') as any).textContent.includes('Solar'));
+    assert.ok((doc.querySelector('#bi-power') as any).textContent.includes('kW'));
+    (doc.querySelector('#bi-close') as any).dispatchEvent(
+      new dom.window.Event('pointerdown', { bubbles: true }),
+    );
+    assert.equal(card.style.display, 'none', '× closes the dossier');
+  });
+});
+
+test('a mouse press never arms a dossier hold', () => {
+  withFakeTimers((timers) => {
+    const btn = doc.querySelectorAll('#buildbar .build-btn')[1] as any;
+    const ev = new dom.window.Event('pointerdown', { bubbles: true }) as any;
+    ev.pointerType = 'mouse';
+    btn.dispatchEvent(ev);
+    assert.equal(timers.pending(), false, 'desktop keeps hover; no hold timer');
+    hud.setBuild(null);
+  });
+});
+
+test('lifting the finger or drifting cancels the hold', () => {
+  withFakeTimers((timers) => {
+    const btn = doc.querySelectorAll('#buildbar .build-btn')[2] as any;
+    press(btn, 'pointerdown', 100, 100);
+    assert.ok(timers.pending());
+    press(btn, 'pointerup', 100, 100);
+    assert.equal(timers.pending(), false, 'a tap (up in time) cancels the hold');
+    press(btn, 'pointerdown', 100, 100);
+    press(btn, 'pointermove', 160, 100);
+    assert.equal(timers.pending(), false, 'a swipe (drift) cancels the hold');
+    assert.equal(
+      (doc.querySelector('#build-info') as any).style.display,
+      'none',
+      'no dossier from a cancelled hold',
+    );
+    hud.setBuild(null);
+  });
+});
+
+test('closeBuildInfo reports its state for Esc chaining', () => {
+  hud.showBuildInfo('greenhouse');
+  assert.equal((doc.querySelector('#build-info') as any).style.display, 'block');
+  assert.ok((doc.querySelector('#bi-process') as any).textContent.length > 0);
+  assert.equal(hud.closeBuildInfo(), true);
+  assert.equal(hud.closeBuildInfo(), false);
+});
+
+console.log('\nOff-screen markers');
+
+test('a stranded rover off-screen grows an edge marker that focuses on tap', () => {
+  const r = sim.rovers[0];
+  r.phase = 'disabled';
+  hud.updateMarkers(sim, () => ({ x: 5000, y: 300, behind: false }));
+  const marker = doc.querySelector('#markers .marker') as any;
+  assert.ok(marker, 'expected a marker for the stranded rover');
+  assert.ok(marker.textContent.includes('stranded'), `marker says: ${marker.textContent}`);
+  assert.equal(marker.style.display, 'flex', 'off-screen: visible');
+  const left = parseFloat(marker.style.left);
+  assert.ok(left <= 1024 - 46 + 1, `clamped to the right edge, at ${left}`);
+  calls.length = 0;
+  marker.dispatchEvent(new dom.window.Event('pointerdown', { bubbles: true }));
+  assert.ok(calls.includes(`action:focus:${r.id}`), `expected focus, saw ${calls}`);
+  // …but no marker while the camera can already see the trouble.
+  hud.updateMarkers(sim, () => ({ x: 512, y: 384, behind: false }));
+  assert.equal(marker.style.display, 'none', 'on-screen: hidden');
+  r.phase = 'idle';
+  hud.updateMarkers(sim, () => ({ x: 512, y: 384, behind: false }));
+  assert.equal(doc.querySelectorAll('#markers .marker').length, 0, 'rescued: marker removed');
+});
+
+test('a damaged structure behind the camera lands on the correct edge', () => {
+  let spot: { x: number; z: number } | null = null;
+  for (let rad = 40; rad <= 120 && !spot; rad += 5) {
+    for (let a = 0; a < 360 && !spot; a += 15) {
+      const x = Math.cos((a * Math.PI) / 180) * rad;
+      const z = Math.sin((a * Math.PI) / 180) * rad;
+      if (sim.canPlace('solar', x, z) === null) spot = { x, z };
+    }
+  }
+  assert.ok(spot, 'a legal spot for a sacrificial array');
+  const b = sim.placeBuilding('solar', spot!.x, spot!.z)!;
+  b.state = 'online';
+  b.damaged = true;
+  // Top-left projection, but behind the camera: the mirror must land it
+  // bottom-right instead of trusting the flipped coordinates.
+  hud.updateMarkers(sim, () => ({ x: 100, y: 100, behind: true }));
+  const marker = doc.querySelector('#markers .marker') as any;
+  assert.ok(marker, 'expected a marker for the damaged array');
+  assert.equal(marker.style.display, 'flex', 'behind the camera still counts as off-screen');
+  assert.ok(marker.textContent.includes('damaged'));
+  assert.equal(parseFloat(marker.style.left), 1024 - 100, 'mirrored horizontally');
+  assert.equal(parseFloat(marker.style.top), 768 - 100, 'mirrored vertically');
+  sim.buildings.splice(sim.buildings.indexOf(b), 1);
+  hud.updateMarkers(sim, () => ({ x: 512, y: 384, behind: false }));
+  assert.equal(doc.querySelectorAll('#markers .marker').length, 0, 'repaired: marker removed');
+});
+
 console.log(`\n${pass} HUD checks passed${failures.length ? `, ${failures.length} FAILED` : ''}.`);
 if (failures.length) process.exit(1);

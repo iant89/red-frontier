@@ -30,7 +30,7 @@ import {
   BUILDING_MAX_HEALTH,
 } from '../sim/config';
 import type { PowerTier } from '../sim/config';
-import type { Alert, Severity } from '../sim/alerts';
+import type { Alert, AlertBus, Severity } from '../sim/alerts';
 
 export type OverlayMode = 'none' | 'power' | 'life' | 'weather';
 
@@ -44,6 +44,11 @@ export interface HUDCallbacks {
 
 const fmtKg = (n: number) =>
   n >= 10000 ? `${(n / 1000).toFixed(1)} t` : `${Math.round(n)} kg`;
+
+/** How long a touch must rest on a blueprint before its dossier opens. */
+const BUILD_INFO_HOLD_MS = 450;
+/** Drift beyond this (px) turns a hold into a swipe — no dossier. */
+const BUILD_INFO_DRIFT_PX = 12;
 
 /** One line describing a queued rover task (route list + tooltips). */
 function taskLabel(sim: Simulation, t: RoverTask): string {
@@ -67,6 +72,8 @@ function taskLabel(sim: Simulation, t: RoverTask): string {
       const s = sim.roverById(t.roverId);
       return `Jump-start ${s ? s.label : 'a stranded rover'}`;
     }
+    case 'unload':
+      return 'Unload cargo at depot';
     case 'wait':
       return `Wait ${Math.max(0, Math.ceil(t.seconds))} s`;
     default:
@@ -106,6 +113,8 @@ function severityIcon(s: Severity): string {
 
 export class HUD {
   private root: HTMLElement;
+  /** This instance's own chrome root — lookups never leak into another HUD. */
+  private hudRoot!: HTMLElement;
   cb: HUDCallbacks;
   speedIdx = 1;
   activeBuild: BuildingKind | null = null;
@@ -130,6 +139,24 @@ export class HUD {
   /** Alert keys the player has snoozed (cleared when the condition resolves). */
   private dismissed = new Set<string>();
   private lastAlerts: Alert[] = [];
+
+  /** Opt-in: pause the sim the moment a *new* critical alert appears. */
+  autopauseOnCrit = false;
+  private autopauseBtn: HTMLElement | null = null;
+  /** Critical keys already seen — only arrivals pause, never repeats. */
+  private seenCritKeys = new Set<string>();
+  private autopauseArmed = false;
+
+  /** The sim's event bus (handed over each frame) — feeds the history modal. */
+  private alertBus: AlertBus | null = null;
+  private histFilter: Severity | 'all' = 'all';
+
+  /** Pending touch-hold on a blueprint (dossier), if any. */
+  private buildInfoTimer: number | null = null;
+  private buildInfoAt: { x: number; y: number } | null = null;
+
+  /** Off-screen marker nodes by entity id (stranded rovers, damaged structures). */
+  private markerNodes = new Map<number, HTMLElement>();
 
   private vitalsCollapsed = false;
   private inspectorCollapsed = false;
@@ -250,7 +277,9 @@ export class HUD {
   private el(id: string): HTMLElement {
     let e = this.els[id];
     if (!e) {
-      e = document.getElementById(id)!;
+      // Scoped to this HUD's own root: a second instance (tests, embeds)
+      // must wire its own buttons, never another HUD's.
+      e = this.hudRoot.querySelector<HTMLElement>('#' + id)!;
       this.els[id] = e;
     }
     return e;
@@ -271,6 +300,8 @@ export class HUD {
           <div class="sun-meta"><span id="phase-label">Morning</span><span id="irr-label">0%</span></div>
         </div>
         <div class="resources" id="resources"></div>
+        <button class="btn idle-btn" id="idle-btn" title="Select the next idle rover (.)">😴 <span class="btn-t">Idle</span> <span class="idle-n" id="idle-n">0</span></button>
+        <button class="btn" id="history-btn" title="Alert history (H)">📜</button>
         <div class="toolbar" id="speeds"></div>
       </div>
 
@@ -326,10 +357,26 @@ export class HUD {
       </div>
 
       <div class="panel" id="alerts"></div>
+      <div id="markers"></div>
       <div class="panel" id="inspector"><div class="empty">Select a rover, a building, or your colonist.</div></div>
       <div class="panel" id="buildbar"></div>
+      <div class="build-info" id="build-info" style="display:none">
+        <div class="bi-head"><span id="bi-icon"></span><b id="bi-name"></b><span class="i-spacer"></span><button class="mini-btn" id="bi-close" title="Close">×</button></div>
+        <div class="bi-desc" id="bi-desc"></div>
+        <div class="bi-cost" id="bi-cost"></div>
+        <div class="bi-power" id="bi-power"></div>
+        <div class="bi-process" id="bi-process"></div>
+      </div>
       <div class="panel" id="hintbar" style="display:none"></div>
       <div class="panel" id="log"><span class="lg-title">Colony log</span></div>
+
+      <div class="hist-overlay" id="history-overlay" style="display:none">
+        <div class="hist-card">
+          <div class="hist-head"><b>Alert history</b><span class="hist-count" id="hist-count"></span><span class="i-spacer"></span><button class="mini-btn" id="hist-close" title="Close (Esc)">×</button></div>
+          <div class="hist-chips" id="hist-chips"></div>
+          <div class="hist-list" id="hist-list"></div>
+        </div>
+      </div>
 
       <div class="overlay" id="start-overlay">
         <h1>RED FRONTIER</h1>
@@ -366,13 +413,34 @@ export class HUD {
 
       <div id="save-flash"></div>
     `;
+    this.hudRoot = d;
     this.root.appendChild(d);
 
+    this.el('idle-btn').addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.cb.onAction('cycle-idle');
+    });
+    this.el('history-btn').addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.openAlertHistory();
+    });
+    this.el('hist-close').addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.closeAlertHistory();
+    });
+    this.el('bi-close').addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.closeBuildInfo();
+    });
+    this.buildHistoryChips();
+
+    this.autopauseOnCrit = this.storeGet('rf-autopause') === '1';
     this.buildResourceChips();
     this.buildLifeBlock();
     this.buildTierRows();
     this.buildSpeeds();
     this.buildOverlayToggles();
+    this.syncAutopauseBtn();
 
     this.el('start-btn').addEventListener('pointerdown', (e) => {
       e.stopPropagation();
@@ -481,7 +549,33 @@ export class HUD {
       speeds.appendChild(b);
       this.speedBtns.push(b);
     });
+    const ap = document.createElement('button');
+    ap.className = 'btn speed-btn autopause-btn';
+    ap.id = 'autopause-btn';
+    ap.textContent = '⏸!';
+    ap.title = 'Auto-pause when a critical alert appears (off)';
+    ap.setAttribute('aria-pressed', 'false');
+    ap.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.setAutopause(!this.autopauseOnCrit);
+    });
+    speeds.appendChild(ap);
+    this.autopauseBtn = ap;
     this.el('speeds').replaceChildren(speeds);
+  }
+
+  setAutopause(on: boolean): void {
+    this.autopauseOnCrit = on;
+    this.storeSet('rf-autopause', on ? '1' : '0');
+    this.syncAutopauseBtn();
+  }
+
+  private syncAutopauseBtn(): void {
+    const b = this.autopauseBtn;
+    if (!b) return;
+    b.classList.toggle('active', this.autopauseOnCrit);
+    b.setAttribute('aria-pressed', String(this.autopauseOnCrit));
+    b.title = `Auto-pause when a critical alert appears (${this.autopauseOnCrit ? 'on' : 'off'})`;
   }
 
   private buildOverlayToggles(): void {
@@ -560,9 +654,34 @@ export class HUD {
         ${i < 9 ? `<span class="key">${i + 1}</span>` : ''}`;
       btn.addEventListener('pointerdown', (e) => {
         e.stopPropagation();
+        this.closeBuildInfo();
         const active = this.activeBuild === k;
         this.cb.onPickBuild(active ? null : k);
+        // Touch has no hover: holding a blueprint peeks at its dossier instead
+        // of arming it. A press that becomes a hold is disarmed as the card
+        // opens, so peeking never leaves a blueprint armed by accident.
+        if (e.pointerType === 'mouse') return;
+        this.cancelBuildInfoTimer();
+        this.buildInfoAt = { x: e.clientX, y: e.clientY };
+        this.buildInfoTimer = window.setTimeout(() => {
+          this.buildInfoTimer = null;
+          this.buildInfoAt = null;
+          if (!active) this.cb.onPickBuild(null);
+          this.showBuildInfo(k);
+        }, BUILD_INFO_HOLD_MS);
       });
+      btn.addEventListener('pointermove', (e) => {
+        const at = this.buildInfoAt;
+        if (this.buildInfoTimer === null || !at) return;
+        if (Math.hypot(e.clientX - at.x, e.clientY - at.y) > BUILD_INFO_DRIFT_PX) {
+          this.cancelBuildInfoTimer();
+        }
+      });
+      btn.addEventListener('pointerup', () => this.cancelBuildInfoTimer());
+      btn.addEventListener('pointercancel', () => this.cancelBuildInfoTimer());
+      btn.addEventListener('pointerleave', () => this.cancelBuildInfoTimer());
+      // Hold-to-peek must not summon the OS context menu mid-press.
+      btn.addEventListener('contextmenu', (e) => e.preventDefault());
       bar.appendChild(btn);
       this.buildBtns.set(k, btn);
     });
@@ -571,6 +690,49 @@ export class HUD {
   setBuild(kind: BuildingKind | null): void {
     this.activeBuild = kind;
     for (const [k, btn] of this.buildBtns) btn.classList.toggle('active', kind === k);
+  }
+
+  /** Show a blueprint's full dossier (the touch equivalent of hover). */
+  showBuildInfo(kind: BuildingKind): void {
+    const def = BUILDINGS[kind];
+    this.el('bi-icon').textContent = iconFor(kind);
+    this.el('bi-name').textContent = def.label;
+    this.el('bi-desc').textContent = def.description;
+    const costTxt = ALL_RESOURCES.filter((r) => def.cost[r] > 0)
+      .map((r) => `${Math.round(def.cost[r])} ${RESOURCES[r].short}`)
+      .join(' · ');
+    this.el('bi-cost').innerHTML = `<span class="k">Cost</span> ${costTxt}`;
+    const power =
+      def.powerProduceKw > 0
+        ? `+${def.powerProduceKw} kW generation`
+        : def.powerDrawKw > 0
+          ? `−${def.powerDrawKw} kW draw (tier ${def.tier})`
+          : def.batteryKWh
+            ? `${def.batteryKWh} kWh grid storage`
+            : '';
+    const pw = this.el('bi-power');
+    pw.style.display = power ? '' : 'none';
+    if (power) pw.innerHTML = `<span class="k">Power</span> ${power}`;
+    const pr = this.el('bi-process');
+    pr.style.display = def.process ? '' : 'none';
+    if (def.process) pr.innerHTML = `<span class="k">Process</span> ${def.process.summary}`;
+    this.el('build-info').style.display = 'block';
+  }
+
+  /** Hide the dossier. Returns true if it was open (for Esc chaining). */
+  closeBuildInfo(): boolean {
+    const card = this.el('build-info');
+    if (card.style.display === 'none') return false;
+    card.style.display = 'none';
+    return true;
+  }
+
+  private cancelBuildInfoTimer(): void {
+    if (this.buildInfoTimer !== null) {
+      window.clearTimeout(this.buildInfoTimer);
+      this.buildInfoTimer = null;
+    }
+    this.buildInfoAt = null;
   }
 
   /** Grey out anything the colony cannot currently afford. */
@@ -617,6 +779,11 @@ export class HUD {
       ref.bar.style.width = `${pct}%`;
       ref.wrap.classList.toggle('full', pct >= 99.5);
     }
+
+    // ---- idle rovers ----
+    const idleN = sim.idleRovers().length;
+    this.el('idle-n').textContent = String(idleN);
+    this.el('idle-btn').classList.toggle('none', idleN === 0);
 
     // ---- power ----
     const p = sim.power;
@@ -782,8 +949,10 @@ export class HUD {
   }
 
   // ------------------------------------------------------------ alerts ----
-  updateAlerts(alerts: Alert[]): void {
+  updateAlerts(alerts: Alert[], bus?: AlertBus): void {
     this.lastAlerts = alerts;
+    if (bus) this.alertBus = bus;
+    this.maybeAutopause(alerts);
     // A dismissal lasts until the condition itself clears — if it re-raises
     // later, it deserves attention again.
     if (this.dismissed.size > 0) {
@@ -848,6 +1017,183 @@ export class HUD {
     });
   }
 
+  /**
+   * Pause on a *new* critical alert when the player opted in. The first call
+   * only records the baseline (restoring into a crisis shouldn't freeze the
+   * game before the first frame); afterwards any arrival pauses, while a
+   * repeat of an already-seen key never re-pauses after the player resumes.
+   */
+  private maybeAutopause(alerts: Alert[]): void {
+    const live = new Set(alerts.filter((a) => a.severity === 'crit').map((a) => a.key));
+    if (!this.autopauseArmed) {
+      this.autopauseArmed = true;
+      this.seenCritKeys = live;
+      return;
+    }
+    let fresh = false;
+    for (const k of live) {
+      if (!this.seenCritKeys.has(k)) fresh = true;
+    }
+    this.seenCritKeys = live;
+    if (fresh && this.autopauseOnCrit && this.speedIdx !== 0) {
+      this.setSpeed(0);
+      this.cb.onSpeed(0);
+      this.flashSave('⏸ Auto-paused — critical alert');
+    }
+  }
+
+  /** Show every retained log event, newest first, behind severity filters. */
+  openAlertHistory(): void {
+    this.histFilter = 'all';
+    this.renderHistory();
+    this.el('history-overlay').style.display = 'flex';
+  }
+
+  /** Hide the history modal. Returns true if it was open (for Esc chaining). */
+  closeAlertHistory(): boolean {
+    const ov = this.el('history-overlay');
+    if (ov.style.display === 'none') return false;
+    ov.style.display = 'none';
+    return true;
+  }
+
+  private buildHistoryChips(): void {
+    const wrap = this.el('hist-chips');
+    wrap.innerHTML = '';
+    const opts: Array<{ id: Severity | 'all'; label: string }> = [
+      { id: 'all', label: 'All' },
+      { id: 'crit', label: '⛔ Crit' },
+      { id: 'warn', label: '⚠ Warn' },
+      { id: 'info', label: 'ⓘ Info' },
+      { id: 'ok', label: '✓ OK' },
+    ];
+    for (const o of opts) {
+      const b = document.createElement('button');
+      b.className = 'btn hist-chip';
+      b.dataset.sev = o.id;
+      b.textContent = o.label;
+      b.addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        this.histFilter = o.id;
+        this.renderHistory();
+      });
+      wrap.appendChild(b);
+    }
+  }
+
+  private renderHistory(): void {
+    const all = this.alertBus?.history() ?? [];
+    const items = all
+      .filter(
+        (e) =>
+          this.histFilter === 'all' ||
+          e.severity === this.histFilter ||
+          // Good-news rarities read as info, not their own tribe.
+          (this.histFilter === 'info' && e.severity === 'opportunity'),
+      )
+      .slice(-120)
+      .reverse();
+    this.el('hist-chips')
+      .querySelectorAll('.hist-chip')
+      .forEach((n) =>
+        (n as HTMLElement).classList.toggle(
+          'active',
+          (n as HTMLElement).dataset.sev === this.histFilter,
+        ),
+      );
+    this.el('hist-count').textContent =
+      this.histFilter === 'all'
+        ? all.length + ' events'
+        : items.length + ' of ' + all.length;
+    this.el('hist-list').innerHTML = items.length
+      ? items
+          .map(
+            (e) => `
+        <div class="hist-item ${e.severity}">
+          <span class="a-ic">${severityIcon(e.severity)}</span>
+          <span class="hist-body"><span>${e.text}</span><span class="ts">${e.stamp}</span></span>
+        </div>`,
+          )
+          .join('')
+      : '<div class="hist-empty">No events recorded yet.</div>';
+  }
+
+  /**
+   * Edge markers for trouble the camera can't see: stranded rovers and
+   * storm-damaged structures. On-screen entities need no marker (the world
+   * shows them); off-screen ones clamp to the viewport edge, and tapping one
+   * focuses it like an alert would. Runs every frame — node churn is avoided
+   * by reusing one button per entity and only rewriting changed labels.
+   */
+  updateMarkers(
+    sim: Simulation,
+    project: (x: number, z: number) => { x: number; y: number; behind: boolean },
+  ): void {
+    const wrap = this.el('markers');
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const M = 46; // edge margin: markers live inside the chrome, not under it
+    const seen = new Set<number>();
+
+    const cands: Array<{ id: number; x: number; z: number; icon: string; label: string; cls: string }> = [];
+    for (const r of sim.rovers) {
+      if (r.phase === 'disabled') {
+        cands.push({ id: r.id, x: r.x, z: r.z, icon: '🛻', label: `${r.label} stranded`, cls: 'crit' });
+      }
+    }
+    for (const b of sim.buildings) {
+      if (b.damaged) {
+        cands.push({
+          id: b.id,
+          x: b.x,
+          z: b.z,
+          icon: '🏚',
+          label: `${BUILDINGS[b.kind].label} damaged`,
+          cls: 'warn',
+        });
+      }
+    }
+
+    for (const c of cands) {
+      seen.add(c.id);
+      const p = project(c.x, c.z);
+      // Behind the camera the projection comes out mirrored — flip it around
+      // the centre so the clamp below lands on the correct edge.
+      let sx = p.behind ? vw - p.x : p.x;
+      let sy = p.behind ? vh - p.y : p.y;
+      const onScreen = !p.behind && sx > M && sx < vw - M && sy > M && sy < vh - M;
+      sx = Math.max(M, Math.min(vw - M, sx));
+      sy = Math.max(M, Math.min(vh - M, sy));
+
+      let node = this.markerNodes.get(c.id);
+      if (!node) {
+        node = document.createElement('button');
+        node.className = `marker ${c.cls}`;
+        node.addEventListener('pointerdown', (e) => {
+          e.stopPropagation();
+          this.cb.onAction('focus', c.id);
+        });
+        wrap.appendChild(node);
+        this.markerNodes.set(c.id, node);
+      }
+      const html = `${c.icon} <span>${c.label}</span>`;
+      if (node.dataset.html !== html) {
+        node.dataset.html = html;
+        node.innerHTML = html;
+      }
+      node.title = `${c.label} — tap to focus`;
+      node.style.display = onScreen ? 'none' : 'flex';
+      node.style.left = `${sx}px`;
+      node.style.top = `${sy}px`;
+    }
+    for (const [id, node] of this.markerNodes) {
+      if (!seen.has(id)) {
+        node.remove();
+        this.markerNodes.delete(id);
+      }
+    }
+  }
+
   private dismissAlert(key: string): void {
     this.dismissed.add(key);
     this.alertKey = '';
@@ -907,6 +1253,7 @@ export class HUD {
           <input type="range" id="r-charge" min="10" max="60" step="5" /></label>
         <div class="action-grid">
           <button class="btn" data-act="stop" title="Stop and clear the queue">⏹ <span class="btn-t">Stop</span></button>
+          <button class="btn" data-act="unload" id="i-unload" title="Drive to the nearest depot and unload — Shift+click queues it after the current job.">📦 <span class="btn-t">Unload</span></button>
           <button class="btn" data-act="wait" data-arg="60" title="Hold position for a minute — usually queued between jobs.">⏳ <span class="btn-t">Wait 1m</span></button>
           <button class="btn" data-act="recenter" title="Center the camera here (F)">🎯 <span class="btn-t">Focus</span></button>
         </div>
@@ -955,6 +1302,13 @@ export class HUD {
             `<span class="chip"><i style="background:#${RESOURCES[res].color.toString(16).padStart(6, '0')}"></i>${RESOURCES[res].short} ${Math.round(r.cargo[res])}</span>`,
         )
         .join('') || '<span class="dim">Cargo bay empty</span>';
+
+    const unloadBtn = insp.querySelector('#i-unload') as HTMLButtonElement | null;
+    if (unloadBtn) {
+      // Pointless only when the hold is empty *and* nothing queued will fill it.
+      const willHaul = [r.command, ...r.pending].some((t) => t.type === 'mine');
+      unloadBtn.toggleAttribute('disabled', mass <= 0.01 && !willHaul);
+    }
 
     // ---- the task queue ---------------------------------------------------
     const tasks: RoverTask[] = [r.command, ...r.pending].filter((t) => t.type !== 'idle');
@@ -1172,7 +1526,7 @@ export class HUD {
           btn.innerHTML = `${rdef.label.split(' ')[0]}<span class="cost">${cost}</span>`;
         }
         q('b-asm-note').innerHTML =
-          'Also: 40 kW fast charge bay · services parked rovers back to 100% condition.';
+          'Also: 32 kW fast charge bay · services parked rovers back to 100% condition.';
       }
     } else {
       garage.style.display = 'none';

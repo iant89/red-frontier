@@ -435,6 +435,41 @@ test('batteries charge by day and discharge by night', () => {
   );
 });
 
+test('a rover charging at noon leaves surplus for the batteries', () => {
+  const sim = new Simulation({ seed: 42, nearDeposits: 0.2 });
+  buildAndWait(sim, 'warehouse');
+  buildAndWait(sim, 'solar');
+  buildAndWait(sim, 'battery');
+
+  // Freeze the sky: clear any storm in progress and roll no new ones, so the
+  // measurement below is about the grid, not the weather.
+  const wx = sim.weather as any;
+  wx.active = null;
+  wx.scheduled = null;
+  sim.weather.debugSuppressRolls();
+  sim.weather.dust = 0.08;
+
+  // One rover on the charger with a flat pack; the other parked out of it.
+  const charger = sim.rovers[0];
+  charger.x = 2;
+  charger.z = 2;
+  charger.battery = 5;
+  charger.recharge = true;
+  charger.command = { type: 'idle' };
+  charger.pending = [];
+  sim.issueWait(sim.rovers[1].id, 100000);
+
+  sim.storedKWh = sim.batteryCapacity() * 0.5;
+  sim.clock.frac = 0.45;
+  const before = sim.storedKWh;
+  run(sim, 0.02);
+  assert.ok(
+    sim.storedKWh > before,
+    `daytime charging must not eat the whole surplus (${before.toFixed(0)} → ${sim.storedKWh.toFixed(0)} kWh)`,
+  );
+  assert.equal(sim.power.brownout, false, 'nothing should shed while the sun is up');
+});
+
 test('switching a building off removes its load from the grid', () => {
   const sim = new Simulation({ seed: 42, nearDeposits: 0.2 });
   buildAndWait(sim, 'warehouse');
@@ -1054,7 +1089,7 @@ test('a garage services drivetrains, fast-charges, and assembles rovers', () => 
     `the bay should service the drivetrain, got ${worn.condition.toFixed(1)}%`,
   );
 
-  // --- fast charge: 40 kW in the bay vs the pod's 20 kW ---
+  // --- fast charge: 32 kW in the bay vs the pod's 16 kW ---
   const bayRv = sim.rovers[1];
   bayRv.x = garage.x + 2;
   bayRv.z = garage.z;
@@ -1230,6 +1265,89 @@ test('after charging, the rover rolls back out to its mining job', () => {
     Math.hypot(rv.x, rv.z) > 15,
     `the rover should be back in the field, is at (${rv.x.toFixed(0)}, ${rv.z.toFixed(0)})`,
   );
+});
+
+// ================================================== rover unload order ====
+group('Rover unload order');
+
+test('an unload order pours the hold into storage', () => {
+  const sim = new Simulation({ seed: 7, nearDeposits: 0.2 });
+  const r = sim.rovers[0];
+  r.cargo.ice = 200;
+  sim.issueUnload(r.id);
+  sim.step(1 / 20); // a single tick: both starters spawn within depot reach
+  assert.equal(r.command.type, 'idle', 'the task completes once the hold is empty');
+  assert.ok(r.cargo.ice < 0.01, 'the hold should be empty');
+  assert.equal(sim.storage.ice, 200, 'everything poured into storage');
+});
+
+test('unload with an empty hold says so and issues nothing', () => {
+  const sim = new Simulation({ seed: 7, nearDeposits: 0.2 });
+  const r = sim.rovers[0];
+  sim.drainEvents();
+  sim.issueUnload(r.id);
+  assert.equal(r.command.type, 'idle', 'no task should be issued');
+  const evs = sim.drainEvents();
+  assert.ok(
+    evs.some((e) => e.text.includes('already empty')),
+    'the player should get a log line, not silence',
+  );
+});
+
+test('unload queues behind other orders and chains forward', () => {
+  const sim = new Simulation({ seed: 7, nearDeposits: 0.2 });
+  for (const o of sim.rovers) o.rules.autoHaul = false; // the scheduler stays out of the queue
+  const r = sim.rovers[0];
+  const x0 = r.x;
+  r.cargo.iron = 50;
+  sim.issueUnload(r.id);
+  sim.issueMove(r.id, r.x + 60, r.z, true);
+  assert.equal(r.pending.length, 1, 'the move should queue behind the unload');
+  run(sim, 0.05); // 12 game seconds
+  assert.equal(sim.storage.iron, 50, 'the hold poured out first');
+  assert.equal(r.pending.length, 0, 'the queued move promoted');
+  assert.ok(Math.abs(r.x - x0) > 5, '…and the rover drove on afterwards');
+});
+
+test('an unload task survives a save round-trip', () => {
+  const sim = new Simulation({ seed: 7, nearDeposits: 0.2 });
+  const r = sim.rovers[0];
+  r.cargo.iron = 50;
+  r.x += 200; // far from any depot, so the task is still travelling
+  sim.issueUnload(r.id);
+  const data = JSON.parse(JSON.stringify(sim.snapshot()));
+  const sim2 = new Simulation({ seed: 999 });
+  sim2.restore(data);
+  const r2 = sim2.roverById(r.id)!;
+  assert.equal(r2.command.type, 'unload', 'the task type must restore');
+  assert.equal(r2.cargo.iron, 50, 'the cargo must restore with it');
+});
+
+// =================================================== idle rover query ====
+group('Idle rover query');
+
+test('idleRovers finds rovers with nothing to do', () => {
+  const sim = new Simulation({ seed: 7, nearDeposits: 0.2 });
+  assert.equal(sim.idleRovers().length, 2);
+  sim.issueMove(sim.rovers[0].id, 50, 50);
+  assert.deepEqual(
+    sim.idleRovers().map((r) => r.id),
+    [sim.rovers[1].id],
+    'a rover with a task is not idle',
+  );
+});
+
+test('idleRovers skips the stranded, the charging and the storm-bound', () => {
+  const sim = new Simulation({ seed: 7, nearDeposits: 0.2 });
+  const [a, b] = sim.rovers;
+  a.phase = 'disabled';
+  b.recharge = true;
+  assert.equal(sim.idleRovers().length, 0, 'neither stranded nor charging counts');
+  b.recharge = false;
+  b.sheltered = true;
+  assert.equal(sim.idleRovers().length, 0, 'storm shelter is not idle time');
+  b.sheltered = false;
+  assert.equal(sim.idleRovers().length, 1, 'releasing it makes it idle again');
 });
 
 // ============================================================== summary ====

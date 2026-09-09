@@ -318,6 +318,7 @@ export class Game {
       return;
     }
     if (e.key === 'Escape') {
+      if (this.hud.closeAlertHistory() || this.hud.closeBuildInfo()) return;
       if (this.pendingBuild) this.setPendingBuild(null);
       else this.selected = null;
       return;
@@ -333,6 +334,15 @@ export class Game {
     }
     if (key === 'f') {
       this.centerOnSelected();
+      return;
+    }
+    if (key === 'h') {
+      this.hud.openAlertHistory();
+      return;
+    }
+    if (key === '.') {
+      this.cycleIdle();
+      this.syncUI(true);
       return;
     }
     // Number keys select build blueprints in palette order.
@@ -465,6 +475,11 @@ export class Game {
       this.syncUI(true);
       return;
     }
+    if (a === 'cycle-idle') {
+      this.cycleIdle();
+      this.syncUI(true);
+      return;
+    }
     if (!this.selected) return;
     switch (a) {
       case 'deselect':
@@ -472,6 +487,10 @@ export class Game {
         break;
       case 'stop':
         if (this.selected.type === 'rover') this.sim.stopRover(this.selected.id);
+        break;
+      case 'unload':
+        if (this.selected.type === 'rover')
+          this.sim.issueUnload(this.selected.id, this.shiftHeld);
         break;
       case 'wait':
         if (this.selected.type === 'rover')
@@ -536,6 +555,21 @@ export class Game {
     this.syncUI(true);
   }
 
+  /** Jump to the next rover with nothing to do (`.` hotkey + HUD button). */
+  private idleCycleIdx = 0;
+  private cycleIdle(): void {
+    if (!this.sim) return;
+    const idle = this.sim.idleRovers();
+    if (idle.length === 0) {
+      this.hud.flashSave('No idle rovers');
+      return;
+    }
+    const r = idle[this.idleCycleIdx % idle.length];
+    this.idleCycleIdx = (this.idleCycleIdx + 1) % idle.length;
+    this.selected = { type: 'rover', id: r.id };
+    this.centerOnSelected();
+  }
+
   private centerOnSelected(): void {
     if (!this.rig || !this.selected || !this.sim) return;
     const e =
@@ -596,6 +630,8 @@ export class Game {
 
     this.updateGhost();
     this.updateSelectionVisual();
+    const renderer = this.renderer;
+    this.hud.updateMarkers(this.sim, (x, z) => renderer.project(x, z));
     this.syncUI(false);
     this.renderer.render();
 
@@ -701,7 +737,7 @@ export class Game {
     this.lastInspector = now;
 
     this.hud.updateVitals(this.sim);
-    this.hud.updateAlerts(this.sim.alerts.list());
+    this.hud.updateAlerts(this.sim.alerts.list(), this.sim.alerts);
     this.hud.updateAffordability(this.sim);
 
     if (this.selected) {

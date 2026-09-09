@@ -1211,6 +1211,22 @@ export class GameRenderer {
     return out;
   }
 
+  /**
+   * World → screen projection for the HUD's off-screen markers. Returns client
+   * coords plus whether the point sits behind the camera (callers mirror
+   * those to the far edge instead of trusting the flipped projection).
+   */
+  project(x: number, z: number): { x: number; y: number; behind: boolean } {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    this.camera.updateMatrixWorld();
+    const v = new THREE.Vector3(x, this.world.heightAt(x, z) + 2, z).project(this.camera);
+    return {
+      x: rect.left + ((v.x + 1) / 2) * rect.width,
+      y: rect.top + ((1 - v.y) / 2) * rect.height,
+      behind: v.z > 1,
+    };
+  }
+
   raycastTerrain(clientX: number, clientY: number): THREE.Vector3 | null {
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.ndc.set(
