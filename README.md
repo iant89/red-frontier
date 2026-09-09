@@ -21,13 +21,20 @@ and [`docs/design/TDD.md`](docs/design/TDD.md).
 
 ```bash
 npm install
-npm run dev          # local dev server (Vite), http://localhost:5173
-npm run build        # type-check + production build to dist/
-npm run preview      # serve the production build
-npm run typecheck    # TypeScript type-check only
-npm run test:sim     # headless simulation + HUD tests (Node)
-npm run test:sim sim # just the simulation suite
-npm run test:sim hud # just the HUD suite
+npm run dev             # local dev server (Vite), http://localhost:5173
+npm run build           # type-check + production build to dist/
+npm run preview         # serve the production build
+npm run typecheck       # type-check src and tests
+
+npm test                # the full test: every suite, linked, ~3 min
+npm run test:affected   # only the suites your working changes touch (seconds)
+npm run test:watch      # …and again on every save
+
+npm run test:sim        # every tests/sim suite
+npm run test:hud        # every tests/hud suite
+npm run test:unit       # the fast formula-level suites
+npm test -- power       # any suite whose name/desc matches "power"
+npm run test:list       # all 25 suites, what each covers, and how long it is
 ```
 
 ## How to survive
@@ -183,8 +190,8 @@ src/
   render/           three.js renderer (terrain, entities, day/night, overlays)
   ui/               DOM HUD (vitals, alerts, inspectors, build palette)
   lib/              deterministic RNG + simplex noise
-tests/              headless simulation + jsdom HUD tests
-scripts/            esbuild test runner
+tests/              25 headless suites (sim/*, hud/*) + the linked full test
+scripts/            esbuild test runner: filters, --affected, --watch
 ```
 
 ## Architecture
@@ -211,30 +218,82 @@ scripts/            esbuild test runner
 
 ### Testing
 
-`npm run test:sim` runs 86 checks across two suites, covering TDD §21's
-categories:
+The tests are split into **25 small suites** that each pin one corner of the
+game, plus one **full test** that links them all. A suite is a plain module that
+registers cases with `test()` and finishes with `await finish()`; `scripts/run-tests.mjs`
+bundles and runs any subset of them in its own process.
 
-- **Unit** — power allocation, tier shedding, energy conservation, the sun
-  model, dust transmission and visibility.
-- **Integration** — ice → water → oxygen actually produces oxygen; a full colony
-  reaches a sustainable steady state with a net-positive food loop; batteries
-  charge by day and drain by night; switching a building off drops grid demand;
-  storms cut solar, bury arrays, damage structures, shelter crews, refuse EVAs,
-  and recover; the full cascade (storm → solar collapse → battery strain →
-  repair and recovery) runs end to end. The P4 suite covers the queue (order,
-  replace, WAIT), haul routes parking on a full silo and resuming, seam
-  reservations (claim, player override, fleet spread), jump-start recovery,
-  drivetrain wear slowing work, garage service/fast-charge/assembly, per-rover
-  automation rules, the v3→v4 save migration, and a P4-heavy state round-trip.
-- **Determinism** — identical seeds and identical elapsed time produce identical
-  state hashes regardless of frame pacing; weather is identical across replays
-  and across a save/restore.
-- **Persistence** — snapshot/restore round-trips exactly, a reloaded colony
-  continues identically, and bad saves are rejected.
-- **HUD** — every panel exists and patches live under jsdom; callbacks fire;
-  the weather panel and the maintenance inspector track the sim.
+```
+tests/
+  harness.ts          test()/group()/finish(), the per-suite report, the roll-up
+  full.test.ts        the full test: imports all 25 suites, prints the total
+  fixtures/sim.ts     shared sim setup (place a building, run N sols, find a seam)
+  fixtures/hud.ts     jsdom bootstrap, one mounted HUD + sim per suite
+  sim/                power · clock · life-support · colony · soak · build · grid
+                      · alerts · weather · storms · rovers · fleet · garage
+                      · determinism · persistence
+  hud/                chrome · weather · inspectors · fleet · garage · controls
+                      · alerts · mobile · dossier · markers
+```
 
-The renderer needs a GPU and is not covered headlessly.
+Run the piece you touched, not the whole planet:
+
+```bash
+npm test -- sim/power            # 0.5 s   — the grid maths, no Simulation built
+npm test -- sim/storms           # ~25 s   — storm damage, sheltering, recovery
+npm run test:affected            # seconds — whatever `git diff` implies
+npm test -- sim/life-support --case suit   # one case, inside its suite
+```
+
+`--affected` works because every suite header declares the sources it pins:
+
+```ts
+/**
+ * @suite sim/power            the name you type
+ * @group unit                 unit | integration | determinism | load | hud
+ * @covers src/sim/power.ts    changed here → this suite runs
+ * @desc What the suite is for, in a line.
+ */
+```
+
+A changed file selects a suite when it matches `@covers`, when it *is* the suite,
+or when the suite imports it — so editing `tests/fixtures/sim.ts` re-runs every
+suite that shares it. `src/sim/**` appears in the determinism and soak suites,
+which is honest: a change that can move a tick can move those.
+
+Adding a suite means dropping a `*.test.ts` in `tests/sim/` or `tests/hud/` with
+that header, and importing it in `tests/full.test.ts`. `npm run test:check`
+(which `npm test` runs first, silently) fails if a suite on disk is not linked,
+or if a suite declares no `@covers` and could therefore never be picked by
+`--affected`.
+
+What is covered, by TDD §21's categories:
+
+- **Unit** (`sim/power`, `sim/clock`, `sim/alerts`, `sim/weather`) — power
+  allocation, tier shedding, energy conservation, the sun model, dust
+  transmission and visibility, the alert bus's raise/clear rule.
+- **Integration** (`sim/life-support`, `sim/colony`, `sim/build`, `sim/grid`,
+  `sim/storms`, `sim/rovers`, `sim/fleet`, `sim/garage`, `sim/persistence`) —
+  ice → water → oxygen actually produces oxygen; the greenhouse closes the food
+  loop; batteries charge by day and drain by night; switching a building off
+  drops grid demand; storms cut solar, bury arrays, damage structures, shelter
+  crews, refuse EVAs and recover, end to end; rover orders (queue, replace,
+  WAIT), haul routes parking on a full silo and resuming, seam reservations,
+  jump-start recovery, drivetrain wear, garage service/fast-charge/assembly,
+  per-rover automation rules, the v3→v4 save migration.
+- **Determinism** (`sim/determinism`, `sim/weather`, `sim/persistence`) —
+  identical seeds and identical elapsed time produce identical state hashes
+  regardless of frame pacing; weather is identical across replays and across a
+  save/restore.
+- **Load** (`sim/soak`) — twenty sols of live operation: days, nights, storms,
+  hauling and wear. The one suite worth running on its own before a release.
+- **HUD** (`hud/*`) — every panel exists and patches live under jsdom, every
+  callback fires, the inspectors, the mobile collapse and dismiss gestures, the
+  alert history, autopause and the off-screen markers.
+
+`npm test` (the linked run) takes about 3 minutes; `npm run test:all` runs the
+same 120 checks as parallel child processes, roughly halving that. The renderer
+needs a GPU and is not covered headlessly.
 
 ## Next milestones (per GDD §16 / TDD §25)
 
