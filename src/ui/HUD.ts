@@ -1251,6 +1251,9 @@ export class HUD {
         <label class="toggle"><input type="checkbox" id="r-rescue" /> <span>Auto-rescue stranded rovers</span></label>
         <label class="slider-row">Charge below <b id="r-chargev">20%</b>
           <input type="range" id="r-charge" min="10" max="60" step="5" /></label>
+        <div class="sub sm">Lights</div>
+        <label class="toggle"><input type="checkbox" id="r-lights" /> <span>Position lights &amp; headlights</span></label>
+        <div class="stat"><span class="k">Lights</span><span class="v" id="i-lights">—</span></div>
         <div class="action-grid">
           <button class="btn" data-act="stop" title="Stop and clear the queue">⏹ <span class="btn-t">Stop</span></button>
           <button class="btn" data-act="unload" id="i-unload" title="Drive to the nearest depot and unload — Shift+click queues it after the current job.">📦 <span class="btn-t">Unload</span></button>
@@ -1273,6 +1276,7 @@ export class HUD {
       rule('r-svc', 'rule-svc');
       rule('r-storm', 'rule-storm');
       rule('r-rescue', 'rule-rescue');
+      rule('r-lights', 'rule-lights');
       const slider = insp.querySelector('#r-charge') as HTMLInputElement;
       slider.addEventListener('input', () =>
         this.cb.onAction('rule-charge', Number(slider.value)),
@@ -1345,12 +1349,27 @@ export class HUD {
     sync('r-svc', r.rules.autoService);
     sync('r-storm', r.rules.stormShelter);
     sync('r-rescue', r.rules.autoRescue);
+    sync('r-lights', r.lightsOn);
     const slider = insp.querySelector('#r-charge') as HTMLInputElement;
     if (slider && Number(slider.value) !== r.rules.chargeFloorPct) {
       slider.value = String(r.rules.chargeFloorPct);
     }
     const cv = insp.querySelector('#r-chargev') as HTMLElement;
     if (cv) cv.textContent = `${r.rules.chargeFloorPct}%`;
+
+    // Lights: dead rovers flash their reserve-powered yellow strobe; live
+    // ones either burn the battery for light or wait for dark.
+    const lv = q('i-lights');
+    const draw = ROVERS[r.kind].lightsPowerKw.toFixed(1);
+    lv.textContent =
+      r.phase === 'disabled'
+        ? 'Emergency strobe — flashing yellow'
+        : r.lightsActive
+          ? `Lit — drawing ${draw} kW`
+          : r.lightsOn
+            ? 'Auto — off in good visibility'
+            : 'Switched off';
+    lv.className = `v ${r.lightsActive || r.phase === 'disabled' ? 'warn' : ''}`;
   }
 
   showBuilding(b: Building, sim: Simulation): void {

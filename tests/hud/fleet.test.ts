@@ -67,6 +67,44 @@ test('the wait button queues a hold via the wait action', () => {
   assert.ok(calls.includes('action:wait:60'), `got ${JSON.stringify(calls)}`);
 });
 
+group('Position lights');
+
+test('the lights switch renders, mirrors the sim and fires the action', () => {
+  const rv = sim.rovers[0];
+  hud.showRover(rv, sim);
+  const box = doc.getElementById('r-lights') as any;
+  assert.ok(box, 'the inspector should carry a lights switch');
+  assert.equal(box.checked, true, 'rovers leave the factory armed');
+
+  calls.length = 0;
+  box.checked = false;
+  box.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+  assert.ok(calls.includes('action:rule-lights:0'), `got ${JSON.stringify(calls)}`);
+
+  // The sim flips the switch and the panel reads it back.
+  sim.setRoverLights(rv.id, false);
+  hud.showRover(rv, sim);
+  assert.equal((doc.getElementById('r-lights') as any).checked, false);
+  assert.match((doc.getElementById('i-lights') as any).textContent, /Switched off/);
+  sim.setRoverLights(rv.id, true);
+  hud.showRover(rv, sim);
+  assert.equal((doc.getElementById('r-lights') as any).checked, true);
+});
+
+test('a lit rover shows its draw; a stranded rover shows the emergency strobe', () => {
+  const rv = sim.rovers[1]; // utility — 0.5 kW of lights
+  rv.lightsActive = true;
+  hud.showRover(rv, sim);
+  assert.match((doc.getElementById('i-lights') as any).textContent, /drawing 0\.5 kW/);
+  rv.lightsActive = false;
+
+  rv.phase = 'disabled';
+  hud.showRover(rv, sim);
+  assert.match((doc.getElementById('i-lights') as any).textContent, /Emergency strobe/);
+  rv.phase = 'idle';
+  hud.showRover(rv, sim);
+});
+
 group('Rover unload order');
 
 test('the rover inspector offers an Unload order button', () => {

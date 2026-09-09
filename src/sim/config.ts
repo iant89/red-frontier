@@ -118,6 +118,20 @@ export const RECOVER_TRANSFER_KW = 12;
 /** A rescue that cannot deliver at least this much is refused outright (kWh). */
 export const RECOVER_MIN_GIVE_KWH = 4;
 
+/**
+ * Position lights & headlights. Rovers carry them to stay visible at night
+ * and in blowing dust; the switch is on by default and the sim lights them
+ * automatically whenever it is dark or visibility is poor — while they are
+ * lit they draw their `lightsPowerKw` straight off the rover's battery.
+ *
+ * Auto-on conditions: the sun is weaker than this irradiance (night and the
+ * dim shoulder of dawn/dusk), **or** weather visibility has fallen below
+ * this fraction (dust haze, storms). Ambient clear-sky visibility stays
+ * above 0.85, so dust alone never flickers the lights on.
+ */
+export const LIGHTS_AUTO_IRRADIANCE = 0.25;
+export const LIGHTS_AUTO_VISIBILITY = 0.8;
+
 /** Route pause: a repeat route waits at the depot until the silo has this much room (kg). */
 export const ROUTE_RESUME_ROOM_KG = 60;
 
@@ -254,7 +268,7 @@ export const COLONIST_BUILD_POWER = 0.5;
 export const AUTOSAVE_INTERVAL_S = 45;
 
 /** Current save schema version. Bump whenever the snapshot shape changes. */
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 
 // -------------------------------------------------------------- history ----
 

@@ -150,6 +150,13 @@ export interface RoverDef {
   turnRate: number; // rad/s
   movePowerKw: number;
   workPowerKw: number;
+  /**
+   * Position lights + headlights load (kW) while lit. Drawn from the rover's
+   * own battery whenever the sim has the lights on (night / low visibility).
+   * A battery-flat rover can no longer power them — but its yellow emergency
+   * strobe runs off a small reserve cell and keeps flashing anyway.
+   */
+  lightsPowerKw: number;
   /** Multiplier on resource.mineRateKg applied by this rover's tool. */
   mineSpeedMul: number;
   /** Construction work output relative to baseline (1.0). */
@@ -174,6 +181,7 @@ export const ROVERS: Record<RoverKind, RoverDef> = {
     turnRate: 1.4,
     movePowerKw: 9,
     workPowerKw: 10,
+    lightsPowerKw: 0.7,
     mineSpeedMul: 1.5,
     buildPower: 0.6,
     bodyColor: 0xe07b3a,
@@ -196,6 +204,7 @@ export const ROVERS: Record<RoverKind, RoverDef> = {
     turnRate: 1.8,
     movePowerKw: 6,
     workPowerKw: 7,
+    lightsPowerKw: 0.5,
     mineSpeedMul: 0.6,
     buildPower: 1.6,
     bodyColor: 0x2f7fb0,
@@ -218,6 +227,7 @@ export const ROVERS: Record<RoverKind, RoverDef> = {
     turnRate: 1.1,
     movePowerKw: 12,
     workPowerKw: 8,
+    lightsPowerKw: 0.9,
     mineSpeedMul: 0.25,
     buildPower: 0.3,
     bodyColor: 0xb9973e,

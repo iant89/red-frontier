@@ -559,22 +559,80 @@ export class GameRenderer {
       g.rotation.y = r.heading - Math.PI / 2;
       g.userData.battery = r.battery / ROVERS[r.kind].maxBatteryKWh;
 
-      // A battery-flat rover dims and pulses a red beacon — "come get me".
+      // A battery-flat rover goes dark and flashes its reserve-powered yellow
+      // strobe — "come get me". Live rovers burn headlights and a white rear
+      // strobe whenever the sim has the lights lit (night / blowing dust).
       const stranded = r.phase === 'disabled';
-      const beacon = g.getObjectByName('beacon') as THREE.Mesh | undefined;
-      if (beacon) {
-        beacon.visible = stranded;
-        if (stranded) {
-          const pulse = 0.5 + 0.5 * Math.sin(this.clockT * 6);
-          (beacon.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.5 + 1.9 * pulse;
-        }
-      }
+      this.syncRoverLights(g, r.id, r.lightsActive && !stranded, stranded);
       this.setGroupBrightness(g, stranded ? 0.55 : 1);
     }
     for (const [id, g] of this.roverMeshes) {
       if (!seen.has(id)) {
         this.roverRoot.remove(g);
         this.roverMeshes.delete(id);
+      }
+    }
+  }
+
+  /**
+   * Double-flash beacon envelope: two quick hits, then a rest, on a 1.6 s
+   * cycle. Driven by sim time, so it freezes with the world when the game is
+   * paused — lights are sim state, not a screen effect.
+   */
+  private strobeFlash(t: number): number {
+    const p = ((t % 1.6) + 1.6) % 1.6;
+    return p < 0.14 || (p >= 0.3 && p < 0.44) ? 1 : 0;
+  }
+
+  /**
+   * Drive one rover's light rig from the sim: headlamps + beam while the
+   * lights are lit, and the rear strobe — a white double-flash on the move,
+   * or the amber emergency flash of a disabled rover, whose point light
+   * lights up the ground in a radius around the truck every time it fires.
+   */
+  private syncRoverLights(g: THREE.Group, id: number, lit: boolean, stranded: boolean): void {
+    // A per-rover offset keeps a fleet from blinking in lockstep; it is a
+    // pure function of the (deterministic) rover id.
+    const flash = this.strobeFlash(this.clockT + (id % 5) * 0.37);
+
+    const head = g.getObjectByName('headlight') as THREE.SpotLight | undefined;
+    if (head) head.intensity = lit ? 2.6 : 0;
+
+    for (const name of ['lampL', 'lampR']) {
+      const lamp = g.getObjectByName(name) as THREE.Mesh | undefined;
+      if (!lamp) continue;
+      (lamp.material as THREE.MeshStandardMaterial).emissiveIntensity = lit ? 1.8 : 0;
+    }
+    const marker = g.getObjectByName('marker') as THREE.Mesh | undefined;
+    if (marker) {
+      (marker.material as THREE.MeshStandardMaterial).emissiveIntensity = lit ? 1.2 : 0.3;
+    }
+
+    const strobe = g.getObjectByName('strobe') as THREE.Mesh | undefined;
+    const strobeLight = g.getObjectByName('strobeLight') as THREE.PointLight | undefined;
+    if (strobe) {
+      const m = strobe.material as THREE.MeshStandardMaterial;
+      if (stranded) {
+        // The emergency strobe is yellow, and it flashes whether or not the
+        // lights switch is on — it runs off a reserve cell, not the battery.
+        m.emissive.setHex(0xffb824);
+        m.emissiveIntensity = 0.4 + 2.2 * flash;
+      } else if (lit) {
+        m.emissive.setHex(0xfff3c0);
+        m.emissiveIntensity = 0.15 + 2.0 * flash;
+      } else {
+        m.emissiveIntensity = 0;
+      }
+    }
+    if (strobeLight) {
+      if (stranded) {
+        strobeLight.color.setHex(0xffb824);
+        strobeLight.intensity = 3.0 * flash;
+      } else if (lit) {
+        strobeLight.color.setHex(0xfff3c0);
+        strobeLight.intensity = 2.4 * flash;
+      } else {
+        strobeLight.intensity = 0;
       }
     }
   }
@@ -1056,35 +1114,64 @@ export class GameRenderer {
       new THREE.MeshStandardMaterial({ color: 0xdddddd }),
     );
     ant.position.set(-L / 2 + 0.4, 2.6, 0);
-    const light = new THREE.Mesh(
+    const marker = new THREE.Mesh(
       new THREE.SphereGeometry(0.18, 8, 8),
       new THREE.MeshStandardMaterial({
         color: 0xffc040,
         emissive: 0xffa020,
-        emissiveIntensity: 0.7,
+        emissiveIntensity: 0.3,
       }),
     );
-    light.position.set(L / 2 + 0.5, 1.6, 0);
+    marker.name = 'marker';
+    marker.position.set(L / 2 + 0.5, 1.6, 0);
     g.add(body);
     g.add(chassis);
     g.add(cab);
     g.add(ant);
-    g.add(light);
+    g.add(marker);
 
-    // Stranded beacon — hidden until the sim says the battery is flat (P4).
-    const beacon = new THREE.Mesh(
-      new THREE.SphereGeometry(0.17, 8, 8),
+    // ---- position lights ---------------------------------------------------
+    // Headlamps on the nose plus a beam that reaches down the road; the sim
+    // powers them (and bills the battery) whenever it calls for lights.
+    const lampMat = new THREE.MeshStandardMaterial({
+      color: 0xf7f2dd,
+      emissive: 0xffedb0,
+      emissiveIntensity: 0,
+      roughness: 0.35,
+    });
+    for (const side of [-1, 1]) {
+      const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.16, 0.22, 10), lampMat);
+      lamp.name = side < 0 ? 'lampL' : 'lampR';
+      lamp.rotation.z = Math.PI / 2;
+      lamp.position.set(L / 2 + 0.12, 1.15, side * W * 0.32);
+      g.add(lamp);
+    }
+    const headlight = new THREE.SpotLight(0xffedb0, 0, 46, 0.5, 0.55, 1.2);
+    headlight.name = 'headlight';
+    headlight.position.set(L / 2 + 0.3, 1.5, 0);
+    headlight.target.position.set(L / 2 + 24, -2, 0);
+    g.add(headlight);
+    g.add(headlight.target);
+
+    // Rear strobe on the antenna mast. White double-flash while the lights
+    // are on; the reserve-powered amber flash of a disabled rover. Its point
+    // light is what slaps the ground bright inside the flash.
+    const strobe = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.15, 0.19, 0.34, 10),
       new THREE.MeshStandardMaterial({
-        color: 0xff4030,
-        emissive: 0xff2010,
-        emissiveIntensity: 1.4,
+        color: 0x3a3a40,
+        emissive: 0xfff3c0,
+        emissiveIntensity: 0,
         roughness: 0.4,
       }),
     );
-    beacon.name = 'beacon';
-    beacon.position.set(-L / 2 + 0.4, 3.25, 0);
-    beacon.visible = false;
-    g.add(beacon);
+    strobe.name = 'strobe';
+    strobe.position.set(-L / 2 + 0.4, 3.3, 0);
+    const strobeLight = new THREE.PointLight(0xfff3c0, 0, 30, 2);
+    strobeLight.name = 'strobeLight';
+    strobeLight.position.set(-L / 2 + 0.4, 3.7, 0);
+    g.add(strobe);
+    g.add(strobeLight);
 
     if (kind === 'mining') {
       const arm = new THREE.Mesh(
