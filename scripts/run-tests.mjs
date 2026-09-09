@@ -396,7 +396,7 @@ function select() {
   return { selected: sel };
 }
 
-async function once({ selected, forceSuites = false, basis = '' }) {
+async function once({ selected, forceSuites = false }) {
   const t0 = Date.now();
   const jobs = Number(flags.jobs || Math.max(1, Math.min(4, os.availableParallelism?.() ?? os.cpus().length)));
   const env = { RF_CASE: flags.case ? String(flags.case) : '' };
@@ -417,10 +417,7 @@ async function once({ selected, forceSuites = false, basis = '' }) {
     console.log(`${tick(true)} nothing a suite covers has changed \u2014 no tests to run ${C.dim(`(${secs(t0)})`)}`);
     return 0;
   }
-  console.log(
-    C.bold(`${selected.length} suite(s)${basis ? C.dim(` \u00b7 ${basis}`) : ''}`) +
-      ' \u00b7 ' + selected.map((s) => s.suite).join(' '),
-  );
+  console.log(C.bold(`${selected.length} suite(s)`) + ' \u00b7 ' + selected.map((s) => s.suite).join(' '));
   const capture = selected.length > 1 && !flags.verbose;
   const results = await runSuites(selected, { jobs, capture, env });
   const failed = results.filter((r) => r.res.code !== 0);
@@ -463,14 +460,13 @@ async function watch({ selected }) {
   const runOnce = (why) => {
     running = running.then(async () => {
       let sel = selected;
-      let basis = '';
       if (flags.affected) {
         const { ref, files } = changedFiles(typeof flags.affected === 'string' ? flags.affected : undefined);
-        basis = `${files.length} changed file(s) \u00b7 ${ref}`;
         sel = narrow([...affectedBy(suites, files).values()].map((h) => h.suite));
+        why += ` \u2014 ${files.length} changed file(s) \u00b7 ${ref}`;
       }
       console.log(`\n${C.bold(why)}`);
-      await once({ selected: sel, forceSuites: true, basis });
+      await once({ selected: sel, forceSuites: true });
     });
     return running;
   };
@@ -518,9 +514,8 @@ async function main() {
     for (const s of sel) {
       console.log(C.dim(`  ${s.suite.padEnd(22)}\u2190 ${hit.get(s.suite).via}`));
     }
-    const basis = `${files.length} changed file(s) \u00b7 ${ref}`;
     if (flags.watch) return watch({ selected: sel });
-    return once({ selected: sel, forceSuites: true, basis });
+    return once({ selected: sel, forceSuites: true });
   }
 
   if (flags.watch) return watch({ selected });
