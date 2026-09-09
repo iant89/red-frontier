@@ -1,8 +1,13 @@
-import { Noise2D } from '../lib/noise';
-import { mulberry32, clamp, norm, smoothstep } from '../lib/rng';
+import { MartianTerrain } from './terrain';
+import type { ScatterRock, SurfaceSample, LandingSite } from './terrain';
+import { NavGrid } from './navgrid';
+import type { NavPoint } from './navgrid';
+import { mulberry32 } from '../lib/rng';
 import { WORLD_HALF, SPAWN_RADIUS } from './config';
 import type { ResourceId } from './defs';
 import { ALL_RESOURCES, RESOURCES, DEPOSIT_TABLE } from './defs';
+
+export type { ScatterRock, SurfaceSample, LandingSite } from './terrain';
 
 export interface Deposit {
   id: number;
@@ -33,40 +38,38 @@ export interface WorldGenParams {
  */
 export class World {
   seed: number;
-  private noise: Noise2D;
-  private heightNoise: Noise2D;
+  private terrain: MartianTerrain;
+  private nav: NavGrid;
   deposits: Deposit[] = [];
   private depositRng: () => number;
   private nextId = 1;
 
   constructor(params: WorldGenParams) {
     this.seed = params.seed >>> 0;
-    this.noise = new Noise2D(this.seed);
-    // a separate, higher-frequency layer for the fine surface
-    this.heightNoise = new Noise2D(this.seed ^ 0x5deece66d);
+    this.terrain = new MartianTerrain(this.seed);
+    this.nav = new NavGrid((x, z) => this.terrain.heightAt(x, z));
     this.depositRng = mulberry32(this.seed ^ 0x9e3779b9);
     this.generateDeposits(params);
   }
 
   /** Authoritative ground height at world (x, z). Continuous. */
   heightAt(x: number, z: number): number {
-    // broad lowlands / ridge system
-    const broad =
-      this.noise.fbm(x * 0.0018 + 11.3, z * 0.0018 - 7.2, 4, 2.0, 0.5) *
-      7.5;
-    // medium undulation
-    const mid =
-      this.heightNoise.fbm(x * 0.006 + 3.1, z * 0.006 - 1.9, 3, 2.0, 0.5) * 2.2;
-    // fine detail
-    const fine =
-      this.noise.sample(x * 0.045 + 51, z * 0.045 - 23) * 0.5;
-    let h = broad + mid + fine;
+    return this.terrain.heightAt(x, z);
+  }
 
-    // flatten the landing zone so the base sits on level, buildable ground
-    const r = Math.hypot(x, z);
-    const flat = 1 - smoothstep(norm(r, SPAWN_RADIUS, SPAWN_RADIUS + 46));
-    h *= flat;
-    return h;
+  /** Full geological sample — materials, region, rockiness. */
+  sampleSurface(x: number, z: number): SurfaceSample {
+    return this.terrain.sample(x, z);
+  }
+
+  /** Instanced debris derived from geology (rims, cliffs, rugged slopes). */
+  rocks(): ScatterRock[] {
+    return this.terrain.rocks;
+  }
+
+  /** Seeded landing site on the Mars globe. */
+  landingSite(): LandingSite {
+    return this.terrain.site;
   }
 
   /** Local slope (radians) at (x,z) — used for placement validation. */
@@ -81,20 +84,35 @@ export class World {
     return Math.abs(x) < WORLD_HALF - 8 && Math.abs(z) < WORLD_HALF - 8;
   }
 
+  /** Rovers may drive here: not a rim drop-off, and reachable from the pad. */
+  canDrive(x: number, z: number): boolean {
+    return this.nav.canDrive(x, z);
+  }
+
+  /** Buildings may sit here: driveable and under the 0.24 slope cap. */
+  canBuild(x: number, z: number): boolean {
+    return this.nav.canBuild(x, z);
+  }
+
+  findPath(ax: number, az: number, bx: number, bz: number): NavPoint[] | null {
+    return this.nav.findPath(ax, az, bx, bz);
+  }
+
+  pathLength(ax: number, az: number, bx: number, bz: number): number {
+    return this.nav.pathLength(ax, az, bx, bz);
+  }
+
+  navStats(): { walkable: number; blocked: number; reachable: number } {
+    return this.nav.stats();
+  }
+
   private randIn(min: number, max: number): number {
     return min + this.depositRng() * (max - min);
   }
 
   private generateDeposits(params: WorldGenParams): void {
-    const total = 30;
+    const total = 42;
     const nearCount = Math.max(5, Math.round(total * params.nearDeposits));
-    const counts: Record<ResourceId, number> = {
-      regolith: 0,
-      iron: 0,
-      silicon: 0,
-      aluminum: 0,
-      ice: 0,
-    };
     const weight: Record<ResourceId, number> = {
       regolith: 3,
       iron: 3,
@@ -115,28 +133,29 @@ export class World {
       let res: ResourceId;
       if (i < guaranteed.length) res = guaranteed[i];
       else res = this.pickWeighted(weight);
-      counts[res]++;
 
       let x = 0;
       let z = 0;
       const rng = this.depositRng;
-      // near deposits cluster in a ring around the base; far ones across region
-      if (isNear) {
-        const ang = rng() * Math.PI * 2;
-        const rad = SPAWN_RADIUS + 24 + rng() * 40;
-        x = Math.cos(ang) * rad;
-        z = Math.sin(ang) * rad;
-      } else {
-        const d = this.randIn(90, WORLD_HALF - 20);
-        const ang = rng() * Math.PI * 2;
-        x = Math.cos(ang) * d;
-        z = Math.sin(ang) * d;
+      let placed = false;
+      for (let t = 0; t < 36 && !placed; t++) {
+        if (isNear) {
+          const ang = rng() * Math.PI * 2;
+          const rad = SPAWN_RADIUS + 24 + rng() * 40;
+          x = Math.cos(ang) * rad;
+          z = Math.sin(ang) * rad;
+        } else {
+          const d = this.randIn(90, WORLD_HALF - 20);
+          const ang = rng() * Math.PI * 2;
+          x = Math.cos(ang) * d;
+          z = Math.sin(ang) * d;
+        }
+        placed = this.canDrive(x, z);
       }
+      if (!placed) continue;
 
       const table = DEPOSIT_TABLE[res];
-      const amount =
-        table.amountKg *
-        (1 + (rng() * 2 - 1) * table.amountVariance);
+      const amount = table.amountKg * (1 + (rng() * 2 - 1) * table.amountVariance);
       this.deposits.push({
         id: this.nextId++,
         resource: res,

@@ -10,7 +10,6 @@
 import assert from 'node:assert/strict';
 import { Simulation } from '../../src/sim/Simulation';
 import { ALL_RESOURCES, ROVERS } from '../../src/sim/defs';
-import { SOL_SECONDS } from '../../src/sim/config';
 import { nearDeposit, run, build, buildAndWait } from '../fixtures/sim';
 import { group, test, finish } from '../harness';
 
@@ -43,7 +42,7 @@ test('a WAIT task holds position and finishes on schedule', () => {
   sim.issueWait(rv.id, 3);
   assert.equal(rv.command.type, 'wait');
   assert.equal(rv.phase, 'idle', 'waiting is holding position, not working');
-  run(sim, SOL_SECONDS * 0.1); // 24 game-seconds — comfortably past 3 s
+  run(sim, 0.1); // 24 game-seconds — comfortably past 3 s
   assert.equal(rv.command.type, 'idle', 'the wait should be over');
 });
 

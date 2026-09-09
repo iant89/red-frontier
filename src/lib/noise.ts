@@ -109,6 +109,26 @@ export class Noise2D {
     }
     return sum / normSum;
   }
+
+  /**
+   * Ridged multifractal — sharp crests, useful for eroded highlands and
+   * gully networks rather than smooth hills.
+   * Returns roughly [0, 1].
+   */
+  ridged(x: number, y: number, octaves = 4, lacunarity = 2, gain = 0.5): number {
+    let amp = 0.5;
+    let freq = 1;
+    let sum = 0;
+    let normSum = 0;
+    for (let o = 0; o < octaves; o++) {
+      const n = 1 - Math.abs(this.sample(x * freq, y * freq));
+      sum += n * n * amp;
+      normSum += amp;
+      amp *= gain;
+      freq *= lacunarity;
+    }
+    return sum / Math.max(1e-6, normSum);
+  }
 }
 
 const GRAD3 = [

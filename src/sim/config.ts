@@ -24,8 +24,8 @@ export const SPEEDS = [0, 1, 2, 4] as const; // paused, 1x, 2x, 4x
 
 // ---------------------------------------------------------------- world ----
 
-// Playable region is [-WORLD_HALF, WORLD_HALF]^2 in world units.
-export const WORLD_HALF = 320;
+// Playable region is [-WORLD_HALF, WORLD_HALF]^2 in world units (1 unit = 1 m).
+export const WORLD_HALF = 640;
 
 export const SPAWN_X = 0;
 export const SPAWN_Z = 0;
