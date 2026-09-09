@@ -281,6 +281,117 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Small square buttons for panel bars (collapse / close / dismiss). */
+.mini-btn {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: transparent;
+  color: var(--ui-text-dim);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  font-family: inherit;
+}
+
+.mini-btn:hover {
+  background: #31251a;
+  border-color: var(--ui-border);
+  color: var(--ui-text);
+}
+
+#i-close:hover {
+  background: #5d2820;
+  border-color: var(--crit);
+  color: #fff;
+}
+
+/* Inspector bar: kind label on the left, collapse + deselect on the right. */
+.i-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 7px;
+}
+
+.i-bar-kind {
+  font-size: 10px;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: var(--ui-text-faint);
+}
+
+.i-spacer {
+  flex: 1;
+}
+
+/* Collapsed panels keep only their header bar visible. */
+#inspector.collapsed .i-body {
+  display: none;
+}
+
+#inspector.collapsed {
+  width: auto;
+  min-width: 176px;
+}
+
+#inspector.collapsed .i-bar {
+  margin-bottom: 0;
+}
+
+#vitals.collapsed > :not(.vitals-head) {
+  display: none;
+}
+
+#vitals.collapsed {
+  width: auto;
+  min-width: 208px;
+}
+
+.vitals-head {
+  gap: 8px;
+}
+
+.vh-sub {
+  flex: 1;
+  text-align: right;
+}
+
+/* The build bar folds down to just its toggle. */
+.build-toggle {
+  align-self: stretch;
+  min-width: 30px;
+  background: transparent;
+  color: var(--ui-text-dim);
+  border: 1px solid transparent;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.build-toggle:hover {
+  background: #31251a;
+  color: var(--ui-text);
+}
+
+#buildbar.bar-hidden {
+  padding: 4px;
+}
+
+#buildbar.bar-hidden .build-btn {
+  display: none;
+}
+
+#buildbar.bar-hidden .build-toggle {
+  min-width: 46px;
+  min-height: 46px;
+  font-size: 19px;
+}
+
 /* ------------------------------------------------------------- vitals --- */
 #vitals {
   top: 62px;
@@ -702,7 +813,7 @@ body {
   backdrop-filter: blur(7px);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
   pointer-events: auto;
-  cursor: default;
+  cursor: pointer;
   animation: alert-in 0.22s ease-out;
 }
 
@@ -742,6 +853,49 @@ body {
   gap: 1px;
   font-size: 11.5px;
   line-height: 1.35;
+  flex: 1;
+}
+
+/* Per-alert dismiss. Tapping the body focuses (when focusable) and dismisses;
+   the × dismisses without moving the camera. */
+.a-x {
+  flex: none;
+  align-self: flex-start;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--ui-text-dim);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  font-family: inherit;
+}
+
+.a-x:hover {
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  border-color: var(--ui-border-lit);
+}
+
+/* Slim chip left behind by snoozed alerts — tap to bring them back. */
+.alerts-restore {
+  padding: 5px 10px;
+  border-radius: 7px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--ui-text-dim);
+  border: 1px dashed var(--ui-border-lit);
+  background: rgba(14, 11, 9, 0.7);
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.alerts-restore:hover {
+  color: var(--ui-text);
+  border-color: var(--ui-text-dim);
 }
 
 .a-body b {
@@ -1348,4 +1502,44 @@ body {
   width: 100%;
   accent-color: var(--cyan);
   pointer-events: auto;
+}
+
+/* -------------------------------------------------- mobile icon-only --- */
+/* Phones get icon-only controls: labels cost horizontal space the panels
+   don't have, while the glyph + tap target stays fully usable. */
+@media (max-width: 680px) {
+  .build-btn .bl,
+  .build-btn .cost,
+  .build-btn .pw,
+  .build-btn .key {
+    display: none;
+  }
+
+  .build-btn {
+    min-width: 52px;
+    min-height: 52px;
+    padding: 6px 8px;
+  }
+
+  .build-btn .ic {
+    font-size: 21px;
+  }
+
+  #inspector .btn-t {
+    display: none;
+  }
+
+  #inspector .action-grid .btn {
+    font-size: 16px;
+    padding: 6px 4px;
+  }
+
+  /* Slimmer top bar: the clock matters, the wordmark doesn't. */
+  .brand b {
+    display: none;
+  }
+
+  .brand {
+    min-width: 0;
+  }
 }

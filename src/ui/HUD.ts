@@ -127,12 +127,124 @@ export class HUD {
   private inspectorKey = '';
   private alertKey = '';
 
+  /** Alert keys the player has snoozed (cleared when the condition resolves). */
+  private dismissed = new Set<string>();
+  private lastAlerts: Alert[] = [];
+
+  private vitalsCollapsed = false;
+  private inspectorCollapsed = false;
+  private buildCollapsed = false;
+
   constructor(cb: HUDCallbacks) {
     this.cb = cb;
     this.root = document.getElementById('app')!;
     this.buildChrome();
     this.buildPalette();
     this.setSpeed(1);
+    this.initCollapseDefaults();
+  }
+
+  // ------------------------------------------------- collapse helpers ----
+  private storeGet(key: string): string | null {
+    try {
+      return window.localStorage?.getItem(key) ?? null;
+    } catch {
+      return null; // private mode, opaque origin, or no DOM storage at all
+    }
+  }
+
+  private storeSet(key: string, val: string): void {
+    try {
+      window.localStorage?.setItem(key, val);
+    } catch {
+      /* collapse state is a nicety, not a promise */
+    }
+  }
+
+  private isNarrowViewport(): boolean {
+    try {
+      return (
+        typeof window.matchMedia === 'function' &&
+        window.matchMedia('(max-width: 760px)').matches
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  /** Stored preference wins; otherwise phones start with the side panels folded. */
+  private initCollapseDefaults(): void {
+    const narrow = this.isNarrowViewport();
+    const read = (key: string, fallback: boolean): boolean => {
+      const v = this.storeGet(key);
+      if (v === '1') return true;
+      if (v === '0') return false;
+      return fallback;
+    };
+    this.setVitalsCollapsed(read('rf-collapse-vitals', narrow));
+    this.setBuildCollapsed(read('rf-collapse-build', false));
+    // The inspector starts empty; a fresh selection re-opens it (see showRover
+    // et al), so folding it on phones costs nothing.
+    this.inspectorCollapsed = read('rf-collapse-inspector', narrow);
+    this.applyInspectorCollapse();
+  }
+
+  setVitalsCollapsed(on: boolean): void {
+    this.vitalsCollapsed = on;
+    this.el('vitals').classList.toggle('collapsed', on);
+    const btn = this.el('vitals-toggle');
+    btn.textContent = on ? '▸' : '▾';
+    btn.setAttribute('aria-expanded', String(!on));
+    btn.setAttribute('title', on ? 'Expand panel' : 'Collapse panel');
+    this.storeSet('rf-collapse-vitals', on ? '1' : '0');
+  }
+
+  setBuildCollapsed(on: boolean): void {
+    this.buildCollapsed = on;
+    this.el('buildbar').classList.toggle('bar-hidden', on);
+    const btn = this.el('build-toggle');
+    btn.textContent = on ? '🏗' : '▾';
+    btn.setAttribute('aria-expanded', String(!on));
+    btn.setAttribute('title', on ? 'Show build menu' : 'Hide build menu');
+    this.storeSet('rf-collapse-build', on ? '1' : '0');
+  }
+
+  setInspectorCollapsed(on: boolean): void {
+    this.inspectorCollapsed = on;
+    this.applyInspectorCollapse();
+    this.storeSet('rf-collapse-inspector', on ? '1' : '0');
+  }
+
+  private applyInspectorCollapse(): void {
+    this.el('inspector').classList.toggle('collapsed', this.inspectorCollapsed);
+    const btn = this.el('inspector').querySelector('#i-collapse');
+    if (btn) {
+      btn.textContent = this.inspectorCollapsed ? '▸' : '▾';
+      btn.setAttribute('aria-expanded', String(!this.inspectorCollapsed));
+      btn.setAttribute(
+        'title',
+        this.inspectorCollapsed ? 'Expand panel' : 'Collapse panel',
+      );
+    }
+  }
+
+  /** Wire the inspector's own bar after each rebuild (its buttons are re-created). */
+  private wireInspectorBar(insp: HTMLElement): void {
+    insp
+      .querySelector('#i-collapse')
+      ?.addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        this.setInspectorCollapsed(!this.inspectorCollapsed);
+      });
+    this.applyInspectorCollapse();
+  }
+
+  /** Update an icon+label button, touching the DOM only when it changes. */
+  private setIconButton(btn: HTMLElement, icon: string, label: string): void {
+    if (btn.dataset.label === label && btn.dataset.icon === icon) return;
+    btn.dataset.label = label;
+    btn.dataset.icon = icon;
+    btn.innerHTML = `${icon} <span class="btn-t">${label}</span>`;
   }
 
   private el(id: string): HTMLElement {
@@ -166,6 +278,7 @@ export class HUD {
         <div class="vitals-head">
           <span class="vh-title">Colony vitals</span>
           <span class="vh-sub" id="vitals-sub"></span>
+          <button class="mini-btn" id="vitals-toggle" title="Collapse panel" aria-expanded="true">▾</button>
         </div>
         <div id="power-block">
           <div class="pw-top">
@@ -271,6 +384,14 @@ export class HUD {
       e.stopPropagation();
       window.location.reload();
     });
+
+    this.el('vitals-toggle').addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.setVitalsCollapsed(!this.vitalsCollapsed);
+    });
+    // Normalise the inspector to the bar + body structure every render path
+    // below assumes.
+    this.clearInspector();
   }
 
   private buildResourceChips(): void {
@@ -404,6 +525,17 @@ export class HUD {
   // ----------------------------------------------------------- palette ----
   private buildPalette(): void {
     const bar = this.el('buildbar');
+    const toggle = document.createElement('button');
+    toggle.className = 'build-toggle';
+    toggle.id = 'build-toggle';
+    toggle.title = 'Hide build menu';
+    toggle.setAttribute('aria-expanded', 'true');
+    toggle.textContent = '▾';
+    toggle.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.setBuildCollapsed(!this.buildCollapsed);
+    });
+    bar.appendChild(toggle);
     BUILDING_ORDER.forEach((k, i) => {
       const def = BUILDINGS[k];
       const btn = document.createElement('button');
@@ -651,47 +783,95 @@ export class HUD {
 
   // ------------------------------------------------------------ alerts ----
   updateAlerts(alerts: Alert[]): void {
-    const key = alerts.map((a) => `${a.key}:${a.severity}:${a.detail}`).join('|');
+    this.lastAlerts = alerts;
+    // A dismissal lasts until the condition itself clears — if it re-raises
+    // later, it deserves attention again.
+    if (this.dismissed.size > 0) {
+      const live = new Set(alerts.map((a) => a.key));
+      for (const k of [...this.dismissed]) {
+        if (!live.has(k)) this.dismissed.delete(k);
+      }
+    }
+    const visible = alerts.filter((a) => !this.dismissed.has(a.key));
+    const key =
+      visible.map((a) => `${a.key}:${a.severity}:${a.detail}`).join('|') +
+      `#snoozed:${[...this.dismissed].sort().join(',')}`;
     if (key === this.alertKey) return;
     this.alertKey = key;
 
     const wrap = this.el('alerts');
-    if (alerts.length === 0) {
+    if (visible.length === 0 && this.dismissed.size === 0) {
       wrap.style.display = 'none';
       wrap.innerHTML = '';
       return;
     }
     wrap.style.display = 'flex';
-    wrap.innerHTML = alerts
-      .slice(0, 6)
-      .map(
-        (a) => `
-        <div class="alert ${a.severity}" ${a.entityId ? `data-focus="${a.entityId}"` : ''}>
+    wrap.innerHTML =
+      visible
+        .slice(0, 6)
+        .map(
+          (a) => `
+        <div class="alert ${a.severity}" data-key="${a.key}" ${
+          a.entityId
+            ? `data-focus="${a.entityId}" title="Tap to focus & dismiss"`
+            : 'title="Tap to dismiss"'
+        }>
           <span class="a-ic">${severityIcon(a.severity)}</span>
           <span class="a-body"><b>${a.title}</b><span>${a.detail}</span></span>
+          <button class="a-x" title="Dismiss">×</button>
         </div>`,
-      )
-      .join('');
-    wrap.querySelectorAll('[data-focus]').forEach((n) =>
-      n.addEventListener('pointerdown', (e) => {
+        )
+        .join('') +
+      (this.dismissed.size > 0
+        ? `<div class="alerts-restore" title="Show snoozed alerts">⚠ ${this.dismissed.size} snoozed — tap to show</div>`
+        : '');
+    wrap.querySelectorAll('.alert').forEach((n) => {
+      const node = n as HTMLElement;
+      node.addEventListener('pointerdown', (e) => {
         e.stopPropagation();
-        this.cb.onAction('focus', Number((n as HTMLElement).dataset.focus));
-      }),
-    );
+        // Tapping the body jumps to the trouble (when there is somewhere to
+        // jump to) and then gets out of the way.
+        if (node.dataset.focus) this.cb.onAction('focus', Number(node.dataset.focus));
+        this.dismissAlert(node.dataset.key!);
+      });
+      node.querySelector('.a-x')?.addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        // The × alone dismisses without moving the camera.
+        this.dismissAlert(node.dataset.key!);
+      });
+    });
+    wrap.querySelector('.alerts-restore')?.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.dismissed.clear();
+      this.alertKey = '';
+      this.updateAlerts(this.lastAlerts);
+    });
+  }
+
+  private dismissAlert(key: string): void {
+    this.dismissed.add(key);
+    this.alertKey = '';
+    this.updateAlerts(this.lastAlerts);
   }
 
   // --------------------------------------------------------- inspector ----
   clearInspector(): void {
     if (this.inspectorKey === 'empty') return;
     this.inspectorKey = 'empty';
-    this.el('inspector').innerHTML = `
+    const insp = this.el('inspector');
+    insp.innerHTML = `
+      <div class="i-bar"><span class="i-bar-kind">Selection</span><span class="i-spacer"></span><button class="mini-btn" id="i-collapse" title="Collapse panel">▾</button></div>
+      <div class="i-body">
       <div class="empty">
         Select a <b>rover</b>, a <b>building</b>, or your <b>colonist</b>.<br/><br/>
         With a rover selected, tap a deposit to mine it or the ground to move —
         <b>Shift</b>+tap queues the order, and any mine order can become a
         repeating haul route. Tap a stranded rover to send yours out with
-        jumper cables. Idle rovers work for the colony on their own.
+        jumper cables. Idle rovers work for the colony on their own.<br/><br/>
+        Tap the selected object again, press <b>Esc</b>, or hit <b>×</b> to deselect.
+      </div>
       </div>`;
+    this.wireInspectorBar(insp);
   }
 
   showRover(r: Rover, sim: Simulation): void {
@@ -703,6 +883,8 @@ export class HUD {
     if (this.inspectorKey !== key) {
       this.inspectorKey = key;
       insp.innerHTML = `
+        <div class="i-bar"><span class="i-bar-kind">Rover</span><span class="i-spacer"></span><button class="mini-btn" id="i-collapse" title="Collapse panel">▾</button><button class="mini-btn" id="i-close" data-act="deselect" title="Deselect (Esc)">×</button></div>
+        <div class="i-body">
         <div class="i-head"><h3>${r.label}</h3><span class="i-id">#${r.id}</span></div>
         <div class="sub">${def.role}</div>
         <div class="stat"><span class="k">Status</span><span class="v" id="i-status">—</span></div>
@@ -724,9 +906,10 @@ export class HUD {
         <label class="slider-row">Charge below <b id="r-chargev">20%</b>
           <input type="range" id="r-charge" min="10" max="60" step="5" /></label>
         <div class="action-grid">
-          <button class="btn" data-act="stop">Stop</button>
-          <button class="btn" data-act="wait" data-arg="60" title="Hold position for a minute — usually queued between jobs.">Wait 1m</button>
-          <button class="btn" data-act="recenter">Focus</button>
+          <button class="btn" data-act="stop" title="Stop and clear the queue">⏹ <span class="btn-t">Stop</span></button>
+          <button class="btn" data-act="wait" data-arg="60" title="Hold position for a minute — usually queued between jobs.">⏳ <span class="btn-t">Wait 1m</span></button>
+          <button class="btn" data-act="recenter" title="Center the camera here (F)">🎯 <span class="btn-t">Focus</span></button>
+        </div>
         </div>`;
       insp.querySelectorAll('[data-act]').forEach((b) =>
         b.addEventListener('pointerdown', (e) => {
@@ -747,6 +930,9 @@ export class HUD {
       slider.addEventListener('input', () =>
         this.cb.onAction('rule-charge', Number(slider.value)),
       );
+      this.wireInspectorBar(insp);
+      // A fresh selection always opens the panel — selecting means looking.
+      this.setInspectorCollapsed(false);
     }
 
     const q = (id: string) => insp.querySelector(`#${id}`) as HTMLElement;
@@ -821,6 +1007,8 @@ export class HUD {
     if (this.inspectorKey !== key) {
       this.inspectorKey = key;
       insp.innerHTML = `
+        <div class="i-bar"><span class="i-bar-kind">Structure</span><span class="i-spacer"></span><button class="mini-btn" id="i-collapse" title="Collapse panel">▾</button><button class="mini-btn" id="i-close" data-act="deselect" title="Deselect (Esc)">×</button></div>
+        <div class="i-body">
         <div class="i-head"><h3>${def.label}</h3><span class="i-id">#${b.id}</span></div>
         <div class="sub">${def.description}</div>
         <div class="stat"><span class="k">Status</span><span class="v" id="b-state">—</span></div>
@@ -840,9 +1028,10 @@ export class HUD {
           <div class="note dim" id="b-asm-note"></div>
         </div>
         <div class="action-grid" id="b-actions">
-          <button class="btn" data-act="service" id="b-service">Clean panels</button>
-          <button class="btn" data-act="toggle" id="b-toggle">Switch off</button>
-          <button class="btn danger" data-act="demolish">Dismantle</button>
+          <button class="btn" data-act="service" id="b-service">✨ <span class="btn-t">Clean panels</span></button>
+          <button class="btn" data-act="toggle" id="b-toggle">⏻ <span class="btn-t">Switch off</span></button>
+          <button class="btn danger" data-act="demolish" title="Dismantle this structure">💥 <span class="btn-t">Dismantle</span></button>
+        </div>
         </div>`;
       insp.querySelectorAll('[data-act]').forEach((n) =>
         n.addEventListener('pointerdown', (e) => {
@@ -851,6 +1040,9 @@ export class HUD {
           this.cb.onAction(el.dataset.act!, el.dataset.arg);
         }),
       );
+      this.wireInspectorBar(insp);
+      // A fresh selection always opens the panel — selecting means looking.
+      this.setInspectorCollapsed(false);
     }
 
     const q = (id: string) => insp.querySelector(`#${id}`) as HTMLElement;
@@ -988,7 +1180,7 @@ export class HUD {
 
     const toggle = q('b-toggle') as HTMLButtonElement;
     toggle.style.display = b.state === 'online' ? '' : 'none';
-    toggle.textContent = b.enabled ? 'Switch off' : 'Switch on';
+    this.setIconButton(toggle, '⏻', b.enabled ? 'Switch off' : 'Switch on');
 
     const svc = q('b-service') as HTMLButtonElement;
     const needsRepair = b.state === 'online' && b.health < BUILDING_MAX_HEALTH - 0.5;
@@ -997,7 +1189,11 @@ export class HUD {
       BUILDINGS[b.kind].generation === 'solar' &&
       b.cleanliness < 0.995;
     svc.style.display = needsRepair || needsClean ? '' : 'none';
-    svc.textContent = needsRepair ? 'Dispatch repair' : 'Clean panels';
+    this.setIconButton(
+      svc,
+      needsRepair ? '🔧' : '✨',
+      needsRepair ? 'Dispatch repair' : 'Clean panels',
+    );
   }
 
   showColonist(c: Colonist, sim: Simulation): void {
@@ -1006,6 +1202,8 @@ export class HUD {
     if (this.inspectorKey !== key) {
       this.inspectorKey = key;
       insp.innerHTML = `
+        <div class="i-bar"><span class="i-bar-kind">Crew</span><span class="i-spacer"></span><button class="mini-btn" id="i-collapse" title="Collapse panel">▾</button><button class="mini-btn" id="i-close" data-act="deselect" title="Deselect (Esc)">×</button></div>
+        <div class="i-body">
         <div class="i-head"><h3>${c.name}</h3><span class="i-id">Crew</span></div>
         <div class="sub">The only human on the planet.</div>
         <div class="stat"><span class="k">Status</span><span class="v" id="c-status">—</span></div>
@@ -1017,8 +1215,9 @@ export class HUD {
         <div class="note">Right-click the ground to send them on an EVA — the suit carries a fixed
         reserve, so range is limited. They return to shelter automatically when it runs low.</div>
         <div class="action-grid">
-          <button class="btn" data-act="shelter">Return to shelter</button>
-          <button class="btn" data-act="recenter">Focus</button>
+          <button class="btn" data-act="shelter" title="Walk back to the nearest pressurised volume">🏠 <span class="btn-t">Return to shelter</span></button>
+          <button class="btn" data-act="recenter" title="Center the camera here (F)">🎯 <span class="btn-t">Focus</span></button>
+        </div>
         </div>`;
       insp.querySelectorAll('[data-act]').forEach((n) =>
         n.addEventListener('pointerdown', (e) => {
@@ -1026,6 +1225,9 @@ export class HUD {
           this.cb.onAction((n as HTMLElement).dataset.act!);
         }),
       );
+      this.wireInspectorBar(insp);
+      // A fresh selection always opens the panel — selecting means looking.
+      this.setInspectorCollapsed(false);
     }
     const q = (id: string) => insp.querySelector(`#${id}`) as HTMLElement;
     q('c-status').textContent = colonistStatusText(c);

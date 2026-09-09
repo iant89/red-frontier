@@ -2144,6 +2144,10 @@ export class Simulation {
 
   private doRecharge(r: Rover): void {
     const def = ROVERS[r.kind];
+    // A rover that limps home with a full hold empties it while it charges:
+    // every charger sits on a depot, so there is no detour involved. Whatever
+    // the silos have room for goes in now; whatever doesn't rides back out.
+    this.unloadWhileCharging(r);
     if (r.battery >= def.maxBatteryKWh * 0.98 && !r.sheltered) {
       r.recharge = false;
       r.phase = 'idle';
@@ -2165,6 +2169,38 @@ export class Simulation {
     } else if (r.goal !== 'toCharge') {
       const pt = this.nearestChargerPoint(r.x, r.z);
       this.setTravel(r, pt.x, pt.z, 'toCharge');
+    }
+  }
+
+  /**
+   * Pour whatever fits out of a recharging rover's hold. Runs every tick the
+   * rover spends heading in or plugged in, so cargo that arrives while the
+   * silo is full still drains away the moment consumption frees some room —
+   * the rover always rolls back out to its job as empty as the colony allows.
+   */
+  private unloadWhileCharging(r: Rover): void {
+    if (cargoMass(r) <= 0.01 || !this.nearDepot(r.x, r.z)) return;
+    let moved = 0;
+    let blocked = false;
+    for (const res of ALL_RESOURCES) {
+      if (r.cargo[res] <= 0) continue;
+      const room = this.storageRoom(res);
+      if (room <= 0.01) {
+        blocked = true;
+        continue;
+      }
+      const take = Math.min(r.cargo[res], room);
+      r.cargo[res] -= take;
+      this.storage[res] += take;
+      moved += take;
+    }
+    if (moved > 0.01) {
+      this.event('ok', `${r.label} delivered ${Math.round(moved)} kg to storage.`);
+      r.blockNotified = false;
+    }
+    if (blocked && cargoMass(r) > 0.01 && !r.blockNotified) {
+      this.event('warn', `${r.label} still holds cargo — those silos are full.`);
+      r.blockNotified = true;
     }
   }
 

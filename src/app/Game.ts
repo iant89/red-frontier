@@ -356,6 +356,10 @@ export class Game {
       this.sim.issueMove(this.selected.id, pt.x, pt.z, this.shiftHeld);
     } else if (this.selected?.type === 'colonist') {
       this.sim.orderColonist({ type: 'moveTo', x: pt.x, z: pt.z });
+    } else if (this.selected?.type === 'building') {
+      // Right-clicking empty ground with a structure selected clears it.
+      this.selected = null;
+      this.syncUI(true);
     }
   }
 
@@ -375,6 +379,9 @@ export class Game {
         const target = this.sim.roverById(pick.id);
         if (rv && target && target.id !== rv.id && target.phase === 'disabled') {
           this.sim.issueRecover(rv.id, target.id, this.shiftHeld);
+        } else if (this.selected?.type === 'rover' && this.selected.id === pick.id) {
+          // Tapping the selected rover again deselects it.
+          this.selected = null;
         } else {
           this.selected = { type: 'rover', id: pick.id };
         }
@@ -387,11 +394,18 @@ export class Game {
         if (rv && job) {
           if (job === 'repair') this.sim.issueRepair(rv.id, pick.id, this.shiftHeld);
           else this.sim.issueClean(rv.id, pick.id, this.shiftHeld);
+        } else if (this.selected?.type === 'building' && this.selected.id === pick.id) {
+          // Tapping the selected structure again deselects it.
+          this.selected = null;
         } else {
           this.selected = { type: 'building', id: pick.id };
         }
       } else if (pick.type === 'colonist') {
-        this.selected = { type: 'colonist', id: pick.id };
+        if (this.selected?.type === 'colonist' && this.selected.id === pick.id) {
+          this.selected = null;
+        } else {
+          this.selected = { type: 'colonist', id: pick.id };
+        }
       } else if (pick.type === 'deposit') {
         if (this.selected?.type === 'rover') {
           this.sim.issueMine(this.selected.id, pick.id, this.shiftHeld);
@@ -412,6 +426,11 @@ export class Game {
     if (!pt) return;
     if (this.selected?.type === 'rover') {
       this.sim.issueMove(this.selected.id, pt.x, pt.z, this.shiftHeld);
+    } else if (this.selected) {
+      // Tapping empty ground with a structure or the colonist selected
+      // clears the selection (a rover instead takes it as a move order).
+      this.selected = null;
+      this.syncUI(true);
     }
   }
 
@@ -448,6 +467,9 @@ export class Game {
     }
     if (!this.selected) return;
     switch (a) {
+      case 'deselect':
+        this.selected = null;
+        break;
       case 'stop':
         if (this.selected.type === 'rover') this.sim.stopRover(this.selected.id);
         break;
