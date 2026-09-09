@@ -8,15 +8,11 @@
 name: screenshots
 
 on:
+  # Dispatch-only: run from the Actions tab, or
+  # `gh workflow run screenshots.yml --ref <branch>`.
+  # (Note: dispatching a branch other than default requires the workflow file
+  # to exist on that branch, which it does once this is merged.)
   workflow_dispatch:
-  # One-shot bootstrap: run on push until the first capture lands (workflow
-  # dispatch needs a token with actions:write; pushes trigger either way).
-  # Trim back to dispatch-only after merging to the default branch.
-  push:
-    branches: [arena/01a08788-red-frontier]
-    paths:
-      - scripts/screenshots.mjs
-      - .github/workflows/screenshots.yml
 
 permissions:
   contents: write
