@@ -26,6 +26,7 @@ import './sim/storms.test';
 import './sim/rovers.test';
 import './sim/fleet.test';
 import './sim/garage.test';
+import './sim/lights.test';
 import './sim/determinism.test';
 import './sim/persistence.test';
 import './hud/chrome.test';
@@ -41,4 +42,4 @@ import './hud/markers.test';
 
 // Each suite prints one line as it runs; `report` prints the total, every
 // failure, and exits non-zero if anything broke.
-report(25);
+report(26);

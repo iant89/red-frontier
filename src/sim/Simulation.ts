@@ -62,6 +62,8 @@ import {
   RECOVER_TRANSFER_KW,
   RECOVER_MIN_GIVE_KWH,
   ROUTE_RESUME_ROOM_KG,
+  LIGHTS_AUTO_IRRADIANCE,
+  LIGHTS_AUTO_VISIBILITY,
 } from './config';
 import type { PowerTier } from './config';
 import type {
@@ -188,6 +190,15 @@ export interface Rover {
   blockNotified: boolean;
   /** Forced back to base by storm weather; released when the storm passes. */
   sheltered: boolean;
+  /**
+   * Player switch for the position lights & headlights. When on, the sim
+   * lights them automatically at night or in low visibility (and bills the
+   * rover's battery for it). The yellow emergency strobe of a disabled rover
+   * ignores this switch entirely.
+   */
+  lightsOn: boolean;
+  /** Runtime: headlights + rear strobe are lit right now and drawing power. */
+  lightsActive: boolean;
 }
 
 export type RoverGoal =
@@ -423,6 +434,8 @@ export class Simulation {
       routePaused: false,
       blockNotified: false,
       sheltered: false,
+      lightsOn: true,
+      lightsActive: false,
     };
     this.rovers.push(r);
     return r;
@@ -866,6 +879,54 @@ export class Simulation {
   }
 
   /**
+   * Flip the position-lights switch (headlights + rear strobe). When on,
+   * the sim lights them automatically at night or in low visibility — and
+   * bills the battery for every hour they stay lit.
+   */
+  setRoverLights(roverId: number, on: boolean): void {
+    const r = this.roverById(roverId);
+    if (!r || r.lightsOn === on) return;
+    r.lightsOn = on;
+    this.event(
+      'info',
+      on
+        ? `${r.label} lights armed — they come on at night and in blowing dust.`
+        : `${r.label} lights switched off — it will run dark to save power.`,
+    );
+  }
+
+  /**
+   * The sim's one judgement call about visibility: it is dark (sun weaker
+   * than the auto threshold) or the dust has closed visibility in. Both
+   * inputs are authoritative sim state, so this is deterministic.
+   */
+  lightsNeeded(): boolean {
+    return (
+      this.clock.sun.irradiance < LIGHTS_AUTO_IRRADIANCE ||
+      this.weather.visibility < LIGHTS_AUTO_VISIBILITY
+    );
+  }
+
+  /**
+   * Light a rover's position lights if the switch is on and they are needed,
+   * and pay for them out of the rover's own battery. A disabled rover is
+   * skipped by the caller — its yellow emergency strobe costs nothing here.
+   * Returns false if the lights drank the last of the battery (stranded).
+   */
+  private tickRoverLights(r: Rover): boolean {
+    r.lightsActive = r.lightsOn && this.lightsNeeded() && r.battery > 0;
+    if (!r.lightsActive) return true;
+    const hours = SIM_TICK * HOURS_PER_SEC;
+    r.battery = Math.max(0, r.battery - ROVERS[r.kind].lightsPowerKw * hours);
+    // Sitting out a long night with the lights on can strand a rover too.
+    if (r.battery <= 0) {
+      this.disable(r);
+      return false;
+    }
+    return true;
+  }
+
+  /**
    * Start assembling a rover on a garage's line. Materials leave storage up
    * front; the build itself runs on garage power and pauses in a brownout.
    */
@@ -1212,6 +1273,7 @@ export class Simulation {
     this.assignSupplyRuns();
     for (const r of this.rovers) {
       if (r.phase === 'disabled') continue;
+      if (!this.tickRoverLights(r)) continue; // the lights drank the last of it
       this.updateRover(r);
     }
     for (const r of this.rovers) {
@@ -2313,6 +2375,7 @@ export class Simulation {
     r.phase = 'disabled';
     r.goal = 'idle';
     r.routePaused = false;
+    r.lightsActive = false; // nothing left to power them; the yellow strobe takes over
     r.statusText = 'Disabled — out of power';
     this.releaseReservations(r);
     this.event('crit', `${r.label} is stranded — battery flat. Another rover can jump-start it.`);
@@ -3242,6 +3305,7 @@ export class Simulation {
         lowBatteryNotified: r.lowBatteryNotified,
         blockNotified: r.blockNotified,
         sheltered: r.sheltered,
+        lightsOn: r.lightsOn,
       })),
       buildings: this.buildings.map((b) => ({
         id: b.id,
@@ -3271,6 +3335,7 @@ export class Simulation {
     if (!data || typeof data !== 'object') throw new Error('empty save');
     // TDD §15: migrate what we understand, refuse what we don't.
     if (data.version === 3) data = migrateV3Save(data);
+    if (data.version === 4) data = migrateV4Save(data);
     if (data.version !== SAVE_VERSION) {
       throw new Error(`unsupported save version ${data.version}`);
     }
@@ -3334,6 +3399,8 @@ export class Simulation {
         routePaused: false,
         blockNotified: !!r.blockNotified,
         sheltered: !!r.sheltered,
+        lightsOn: r.lightsOn !== false,
+        lightsActive: false,
       };
     });
 
@@ -3363,6 +3430,23 @@ export class Simulation {
           ? { kind: b.assembly.kind, progress: b.assembly.progress ?? 0 }
           : null,
     }));
+
+    /**
+     * Rovers resume *at rest*: the in-flight phase is not saved, so re-derive
+     * the one resting state the power grid needs to see. A rover parked at a
+     * charger with room in its battery was plugged in when the save closed,
+     * and must still read as charging when it reopens — otherwise the first
+     * tick after a load silently skips a charge the live colony got, and a
+     * reloaded save drifts from the original by exactly that one tick.
+     */
+    for (const r of this.rovers) {
+      if (r.battery <= 0) continue; // a flat rover stays dark (it re-strands itself)
+      if (r.battery >= ROVERS[r.kind].maxBatteryKWh - 1e-6) continue;
+      if (this.nearCharger(r.x, r.z)) {
+        r.phase = 'charging';
+        r.statusText = 'Charging';
+      }
+    }
 
     this.recomputeCapacities();
     this.pools.amounts = { ...emptyFluids(), ...(data.fluids ?? {}) };
@@ -3445,16 +3529,28 @@ function coerceTask(t: any): RoverTask | null {
  * v3 → v4 (Prototype 4). What changed: rovers grew a task queue, drivetrain
  * condition and automation rules; buildings (garages) grew an assembly slot.
  * Old rovers had a single `command` — it becomes the one task in the queue —
- * and the old `autoHaul` flag carries over as the matching rule.
+ * and the old `autoHaul` flag carries over as the matching rule. From there
+ * the v4 → v5 step adds the position-lights switch.
  */
 function migrateV3Save(data: any): any {
-  const d: any = { ...data, version: SAVE_VERSION };
+  const d: any = { ...data, version: 4 };
   d.rovers = (data.rovers ?? []).map((r: any) => {
     const rules = defaultRoverRules();
     rules.autoHaul = r.autoHaul !== false;
     return { ...r, pending: [], condition: 100, rules };
   });
   d.buildings = (data.buildings ?? []).map((b: any) => ({ ...b, assembly: null }));
+  return migrateV4Save(d);
+}
+
+/**
+ * v4 → v5. Rovers grew position lights: a player switch that the sim honours
+ * automatically at night and in blowing dust. Every existing rover is
+ * assumed to have shipped with the switch armed.
+ */
+function migrateV4Save(data: any): any {
+  const d: any = { ...data, version: SAVE_VERSION };
+  d.rovers = (data.rovers ?? []).map((r: any) => ({ ...r, lightsOn: r.lightsOn !== false }));
   return d;
 }
 

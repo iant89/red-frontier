@@ -526,6 +526,11 @@ export class Game {
           this.sim.setChargeFloor(this.selected.id, arg);
         }
         break;
+      case 'rule-lights':
+        if (this.selected.type === 'rover') {
+          this.sim.setRoverLights(this.selected.id, arg === 1);
+        }
+        break;
       case 'toggle':
         if (this.selected.type === 'building') {
           const b = this.sim.buildingById(this.selected.id);

@@ -34,7 +34,7 @@ npm run test:sim        # every tests/sim suite
 npm run test:hud        # every tests/hud suite
 npm run test:unit       # the fast formula-level suites
 npm test -- power       # any suite whose name/desc matches "power"
-npm run test:list       # all 25 suites, what each covers, and how long it is
+npm run test:list       # all 26 suites, what each covers, and how long it is
 ```
 
 ## How to survive
@@ -82,8 +82,8 @@ battered/buried structure to clean or repair it. **Shift+order** stacks tasks
 into a queue — the rover's inspector shows the route — and a *Wait 1m* button
 holds position between jobs. A mining task can be set as a **repeating haul
 route** that loops the seam and pauses at the depot only while the silo is
-full. A stranded rover (battery flat) shows a pulsing beacon: select another
-rover and tap it to jump-start.
+full. A stranded rover (battery flat) goes dark and flashes a **yellow strobe**
+— select another rover and tap it to jump-start.
 
 Each rover carries its own automation levers in the inspector: **auto-haul**
 (fetch what the build queue is short of), **auto maintenance** (repair and
@@ -157,9 +157,18 @@ the moment consumption frees 60 kg of room.
 
 **Wear & recovery:** tool work, driving and storms grind drivetrain condition;
 below 45% a rover works progressively slower (never below half rate — rovers
-fail *soft*). A battery-flat rover strands with a beacon; a rescuer transfers
-just enough charge for the ride home. The garage bay services parked rovers
-back to 100%.
+fail *soft*). A battery-flat rover strands with a flashing yellow strobe; a
+rescuer transfers just enough charge for the ride home. The garage bay services
+parked rovers back to 100%.
+
+**Position lights:** every rover carries headlights and a rear strobe so it
+stays visible at night and in blowing dust. The sim switches them on
+automatically whenever the sun drops or visibility closes in, and bills the
+rover's own battery for it (0.5–0.9 kW per rover kind) — a fleet left lit
+through a long night pays a real energy toll, and a parked rover can
+theoretically drain itself flat. The per-rover switch in the inspector can run
+a rover dark to save power. A stranded rover's headlights die with its battery,
+but a reserve-powered **yellow strobe** keeps flashing to mark the wreck.
 
 Materials flow into sites *without* a rover parked there — the "Materials
 Reserved" stage of TDD §7. A site quietly accumulates regolith while a rover
@@ -190,7 +199,7 @@ src/
   render/           three.js renderer (terrain, entities, day/night, overlays)
   ui/               DOM HUD (vitals, alerts, inspectors, build palette)
   lib/              deterministic RNG + simplex noise
-tests/              25 headless suites (sim/*, hud/*) + the linked full test
+tests/              26 headless suites (sim/*, hud/*) + the linked full test
 scripts/            esbuild test runner: filters, --affected, --watch
 ```
 
@@ -218,7 +227,7 @@ scripts/            esbuild test runner: filters, --affected, --watch
 
 ### Testing
 
-The tests are split into **25 small suites** that each pin one corner of the
+The tests are split into **26 small suites** that each pin one corner of the
 game, plus one **full test** that links them all. A suite is a plain module that
 registers cases with `test()` and finishes with `await finish()`; `scripts/run-tests.mjs`
 bundles and runs any subset of them in its own process.
@@ -226,12 +235,12 @@ bundles and runs any subset of them in its own process.
 ```
 tests/
   harness.ts          test()/group()/finish(), the per-suite report, the roll-up
-  full.test.ts        the full test: imports all 25 suites, prints the total
+  full.test.ts        the full test: imports all 26 suites, prints the total
   fixtures/sim.ts     shared sim setup (place a building, run N sols, find a seam)
   fixtures/hud.ts     jsdom bootstrap, one mounted HUD + sim per suite
   sim/                power · clock · life-support · colony · soak · build · grid
                       · alerts · weather · storms · rovers · fleet · garage
-                      · determinism · persistence
+                      · lights · determinism · persistence
   hud/                chrome · weather · inspectors · fleet · garage · controls
                       · alerts · mobile · dossier · markers
 ```
@@ -273,14 +282,17 @@ What is covered, by TDD §21's categories:
   allocation, tier shedding, energy conservation, the sun model, dust
   transmission and visibility, the alert bus's raise/clear rule.
 - **Integration** (`sim/life-support`, `sim/colony`, `sim/build`, `sim/grid`,
-  `sim/storms`, `sim/rovers`, `sim/fleet`, `sim/garage`, `sim/persistence`) —
+  `sim/storms`, `sim/rovers`, `sim/fleet`, `sim/garage`, `sim/lights`,
+  `sim/persistence`) —
   ice → water → oxygen actually produces oxygen; the greenhouse closes the food
   loop; batteries charge by day and drain by night; switching a building off
   drops grid demand; storms cut solar, bury arrays, damage structures, shelter
   crews, refuse EVAs and recover, end to end; rover orders (queue, replace,
   WAIT), haul routes parking on a full silo and resuming, seam reservations,
   jump-start recovery, drivetrain wear, garage service/fast-charge/assembly,
-  per-rover automation rules, the v3→v4 save migration.
+  per-rover automation rules, position lights (night/dust auto-on, battery
+  draw, the switch, the stranded rover's reserve strobe), the v3→v4→v5 save
+  migrations.
 - **Determinism** (`sim/determinism`, `sim/weather`, `sim/persistence`) —
   identical seeds and identical elapsed time produce identical state hashes
   regardless of frame pacing; weather is identical across replays and across a
@@ -292,7 +304,7 @@ What is covered, by TDD §21's categories:
   alert history, autopause and the off-screen markers.
 
 `npm test` (the linked run) takes about 3 minutes; `npm run test:all` runs the
-same 120 checks as parallel child processes, roughly halving that. The renderer
+same 133 checks as parallel child processes, roughly halving that. The renderer
 needs a GPU and is not covered headlessly.
 
 ## Next milestones (per GDD §16 / TDD §25)
