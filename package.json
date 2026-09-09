@@ -8,10 +8,22 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit",
-    "test:sim": "node scripts/run-tests.mjs"
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "test": "node scripts/run-tests.mjs",
+    "test:sim": "node scripts/run-tests.mjs sim/",
+    "test:hud": "node scripts/run-tests.mjs hud/",
+    "test:unit": "node scripts/run-tests.mjs --group unit",
+    "test:integration": "node scripts/run-tests.mjs --group integration",
+    "test:affected": "node scripts/run-tests.mjs --affected",
+    "test:watch": "node scripts/run-tests.mjs --watch --affected",
+    "test:all": "node scripts/run-tests.mjs --all",
+    "test:list": "node scripts/run-tests.mjs --list",
+    "test:check": "node scripts/run-tests.mjs --check"
   },
   "devDependencies": {
+    "@types/jsdom": "^21.1.7",
+    "@types/node": "^22.20.1",
+    "esbuild": "^0.21.5",
     "jsdom": "^25.0.1",
     "typescript": "^5.5.4",
     "vite": "^5.4.2"
