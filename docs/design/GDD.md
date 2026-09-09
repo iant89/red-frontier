@@ -66,7 +66,7 @@ Utility networks: Power, Water, Atmosphere, Waste, Data, Logistics. Infrastructu
 | Mining | 1,500 kg | Low | 80 kWh | drilling / extraction |
 | Cargo | 3,000 kg | Low | 120 kWh | long-distance logistics |
 
-Task system: MOVE, MINE, HAUL, BUILD, REPAIR, CLEAN, SCOUT, SALVAGE, RECOVER, RETURN, CHARGE, WAIT — first-class, queueable/repeatable.
+Task system: MOVE, MINE, UNLOAD, HAUL, BUILD, REPAIR, CLEAN, SCOUT, SALVAGE, RECOVER, RETURN, CHARGE, WAIT — first-class, queueable/repeatable.
 Automation rules (player-authored): IF battery <20% → return to charger; IF cargo >90% → return to warehouse; IF storm warning → return to shelter. Automation is a progression mechanic.
 Rover failure: wheel/motor/battery/sensor/navigation/dust failures; stranded (recoverable) rather than destroyed → recovery expeditions.
 

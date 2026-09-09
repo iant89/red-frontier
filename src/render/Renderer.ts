@@ -380,7 +380,9 @@ export class GameRenderer {
     const g = this.colonistMesh;
     const y = this.world.heightAt(c.x, c.z);
     g.position.set(c.x, y, c.z);
-    g.rotation.y = -c.heading;
+    // The figure faces +Z (lamp forward, pack aft), and sim headings are
+    // atan2(x, z) compass angles — so the mesh yaw *is* the heading.
+    g.rotation.y = c.heading;
     // Inside a pressurised volume the figure is hidden by the structure.
     g.visible = !c.inside && !c.dead;
   }
@@ -550,7 +552,11 @@ export class GameRenderer {
       }
       const y = this.world.heightAt(r.x, r.z);
       g.position.set(r.x, y + 0.4, r.z);
-      g.rotation.y = -r.heading;
+      // The truck faces +X (cab and headlight forward), while sim headings
+      // are atan2(x, z) compass angles measured from +Z. Offsetting by -90°
+      // swings the nose onto the direction of travel — without it rovers
+      // drive visibly sideways.
+      g.rotation.y = r.heading - Math.PI / 2;
       g.userData.battery = r.battery / ROVERS[r.kind].maxBatteryKWh;
 
       // A battery-flat rover dims and pulses a red beacon — "come get me".
@@ -1032,10 +1038,10 @@ export class GameRenderer {
       new THREE.MeshStandardMaterial({ color: def.accentColor, roughness: 0.7 }),
     );
     chassis.position.y = 0.55;
-    // wheels
+    // wheels — the axle runs across the truck (Z), so the treads roll fore/aft
     const wheelGeo = new THREE.CylinderGeometry(0.55, 0.55, 0.5, 12);
     const wheelMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9 });
-    wheelGeo.rotateZ(Math.PI / 2);
+    wheelGeo.rotateX(Math.PI / 2);
     const wheelXs = kind === 'cargo' ? [-L / 2 + 0.5, 0, L / 2 - 0.5] : [-1.3, 1.3];
     for (const wx of wheelXs) {
       for (const wz of [W / 2 + 0.05, -W / 2 - 0.05]) {
@@ -1203,6 +1209,22 @@ export class GameRenderer {
     for (const [, rec] of this.buildingMeshes) out.push(rec.group);
     for (const [, g] of this.depositMeshes) out.push(g);
     return out;
+  }
+
+  /**
+   * World → screen projection for the HUD's off-screen markers. Returns client
+   * coords plus whether the point sits behind the camera (callers mirror
+   * those to the far edge instead of trusting the flipped projection).
+   */
+  project(x: number, z: number): { x: number; y: number; behind: boolean } {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    this.camera.updateMatrixWorld();
+    const v = new THREE.Vector3(x, this.world.heightAt(x, z) + 2, z).project(this.camera);
+    return {
+      x: rect.left + ((v.x + 1) / 2) * rect.width,
+      y: rect.top + ((1 - v.y) / 2) * rect.height,
+      behind: v.z > 1,
+    };
   }
 
   raycastTerrain(clientX: number, clientY: number): THREE.Vector3 | null {

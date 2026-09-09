@@ -83,10 +83,17 @@ export const POD_RADIUS = 8;
 export const ROVER_CHARGE_THRESHOLD = 0.2;
 export const ROVER_DISABLED_THRESHOLD = 0.01;
 
-/** Charger output per rover (kW). Draws from the colony power grid. */
-export const ROVER_CHARGE_RATE_KW = 20;
-/** A Rover Garage charges at this rate instead (kW). */
-export const GARAGE_CHARGE_RATE_KW = 40;
+/**
+ * Charger output per rover (kW). Draws from the colony power grid.
+ *
+ * Sized so ONE rover charging at noon doesn't eat the whole daytime surplus:
+ * a single array plus the pod must still have leftover to fill the batteries
+ * for the night. Two rovers charging at once remains a strain the player
+ * builds their way out of — that pressure is the game.
+ */
+export const ROVER_CHARGE_RATE_KW = 16;
+/** A Rover Garage charges at this rate instead (kW) — always 2× the pod rate. */
+export const GARAGE_CHARGE_RATE_KW = 32;
 
 /** Power priority tier that rover charging sits on (lowest). */
 export const ROVER_CHARGE_TIER = 3;

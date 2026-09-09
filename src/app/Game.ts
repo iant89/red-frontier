@@ -318,6 +318,7 @@ export class Game {
       return;
     }
     if (e.key === 'Escape') {
+      if (this.hud.closeAlertHistory() || this.hud.closeBuildInfo()) return;
       if (this.pendingBuild) this.setPendingBuild(null);
       else this.selected = null;
       return;
@@ -333,6 +334,15 @@ export class Game {
     }
     if (key === 'f') {
       this.centerOnSelected();
+      return;
+    }
+    if (key === 'h') {
+      this.hud.openAlertHistory();
+      return;
+    }
+    if (key === '.') {
+      this.cycleIdle();
+      this.syncUI(true);
       return;
     }
     // Number keys select build blueprints in palette order.
@@ -356,6 +366,10 @@ export class Game {
       this.sim.issueMove(this.selected.id, pt.x, pt.z, this.shiftHeld);
     } else if (this.selected?.type === 'colonist') {
       this.sim.orderColonist({ type: 'moveTo', x: pt.x, z: pt.z });
+    } else if (this.selected?.type === 'building') {
+      // Right-clicking empty ground with a structure selected clears it.
+      this.selected = null;
+      this.syncUI(true);
     }
   }
 
@@ -375,6 +389,9 @@ export class Game {
         const target = this.sim.roverById(pick.id);
         if (rv && target && target.id !== rv.id && target.phase === 'disabled') {
           this.sim.issueRecover(rv.id, target.id, this.shiftHeld);
+        } else if (this.selected?.type === 'rover' && this.selected.id === pick.id) {
+          // Tapping the selected rover again deselects it.
+          this.selected = null;
         } else {
           this.selected = { type: 'rover', id: pick.id };
         }
@@ -387,11 +404,18 @@ export class Game {
         if (rv && job) {
           if (job === 'repair') this.sim.issueRepair(rv.id, pick.id, this.shiftHeld);
           else this.sim.issueClean(rv.id, pick.id, this.shiftHeld);
+        } else if (this.selected?.type === 'building' && this.selected.id === pick.id) {
+          // Tapping the selected structure again deselects it.
+          this.selected = null;
         } else {
           this.selected = { type: 'building', id: pick.id };
         }
       } else if (pick.type === 'colonist') {
-        this.selected = { type: 'colonist', id: pick.id };
+        if (this.selected?.type === 'colonist' && this.selected.id === pick.id) {
+          this.selected = null;
+        } else {
+          this.selected = { type: 'colonist', id: pick.id };
+        }
       } else if (pick.type === 'deposit') {
         if (this.selected?.type === 'rover') {
           this.sim.issueMine(this.selected.id, pick.id, this.shiftHeld);
@@ -412,6 +436,11 @@ export class Game {
     if (!pt) return;
     if (this.selected?.type === 'rover') {
       this.sim.issueMove(this.selected.id, pt.x, pt.z, this.shiftHeld);
+    } else if (this.selected) {
+      // Tapping empty ground with a structure or the colonist selected
+      // clears the selection (a rover instead takes it as a move order).
+      this.selected = null;
+      this.syncUI(true);
     }
   }
 
@@ -446,10 +475,22 @@ export class Game {
       this.syncUI(true);
       return;
     }
+    if (a === 'cycle-idle') {
+      this.cycleIdle();
+      this.syncUI(true);
+      return;
+    }
     if (!this.selected) return;
     switch (a) {
+      case 'deselect':
+        this.selected = null;
+        break;
       case 'stop':
         if (this.selected.type === 'rover') this.sim.stopRover(this.selected.id);
+        break;
+      case 'unload':
+        if (this.selected.type === 'rover')
+          this.sim.issueUnload(this.selected.id, this.shiftHeld);
         break;
       case 'wait':
         if (this.selected.type === 'rover')
@@ -514,6 +555,21 @@ export class Game {
     this.syncUI(true);
   }
 
+  /** Jump to the next rover with nothing to do (`.` hotkey + HUD button). */
+  private idleCycleIdx = 0;
+  private cycleIdle(): void {
+    if (!this.sim) return;
+    const idle = this.sim.idleRovers();
+    if (idle.length === 0) {
+      this.hud.flashSave('No idle rovers');
+      return;
+    }
+    const r = idle[this.idleCycleIdx % idle.length];
+    this.idleCycleIdx = (this.idleCycleIdx + 1) % idle.length;
+    this.selected = { type: 'rover', id: r.id };
+    this.centerOnSelected();
+  }
+
   private centerOnSelected(): void {
     if (!this.rig || !this.selected || !this.sim) return;
     const e =
@@ -574,6 +630,8 @@ export class Game {
 
     this.updateGhost();
     this.updateSelectionVisual();
+    const renderer = this.renderer;
+    this.hud.updateMarkers(this.sim, (x, z) => renderer.project(x, z));
     this.syncUI(false);
     this.renderer.render();
 
@@ -679,7 +737,7 @@ export class Game {
     this.lastInspector = now;
 
     this.hud.updateVitals(this.sim);
-    this.hud.updateAlerts(this.sim.alerts.list());
+    this.hud.updateAlerts(this.sim.alerts.list(), this.sim.alerts);
     this.hud.updateAffordability(this.sim);
 
     if (this.selected) {

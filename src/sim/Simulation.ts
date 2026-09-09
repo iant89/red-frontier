@@ -118,6 +118,7 @@ export type RoverTask =
   | { type: 'clean'; buildingId: number }
   | { type: 'repair'; buildingId: number }
   | { type: 'recover'; roverId: number; give?: number; given?: number }
+  | { type: 'unload' }
   | { type: 'wait'; seconds: number };
 
 /** Kept as an alias so older call sites read naturally. */
@@ -524,6 +525,22 @@ export class Simulation {
     return this.buildings.filter((b) => b.state === 'online');
   }
 
+  /**
+   * Rovers with nothing to do: no task, no queue, not charging up after a
+   * low-battery return, not storm-sheltering, not stranded. The `.` hotkey
+   * and the HUD's idle button cycle through these.
+   */
+  idleRovers(): Rover[] {
+    return this.rovers.filter(
+      (r) =>
+        r.phase !== 'disabled' &&
+        !r.recharge &&
+        !r.sheltered &&
+        r.command.type === 'idle' &&
+        r.pending.length === 0,
+    );
+  }
+
   onlineWarehouses(): Building[] {
     return this.buildings.filter(
       (b) => this.runnable(b) && BUILDINGS[b.kind].storagePerResourceKg > 0,
@@ -752,6 +769,21 @@ export class Simulation {
     this.giveTask(r, { type: 'mine', depositId }, queued);
     // A player order outranks any auto-run holding the seam.
     this.claimDeposit(r, depositId, true);
+  }
+
+  /**
+   * Drive to the nearest depot and pour out whatever fits (GDD §5 UNLOAD).
+   * Queued behind a mining run it closes the loop explicitly; ordered plain
+   * it interrupts the rover now. An empty hold is a no-op with a log line.
+   */
+  issueUnload(roverId: number, queued = false): void {
+    const r = this.roverById(roverId);
+    if (!r || r.phase === 'disabled') return;
+    if (!queued && cargoMass(r) <= 0.01) {
+      this.event('info', `${r.label}'s hold is already empty.`);
+      return;
+    }
+    this.giveTask(r, { type: 'unload' }, queued);
   }
 
   /** Hold position for a while (GDD §5 WAIT — usually queued between jobs). */
@@ -2087,6 +2119,10 @@ export class Simulation {
         this.doRecover(r, cmd);
         break;
       }
+      case 'unload': {
+        this.doUnload(r);
+        break;
+      }
       case 'wait': {
         r.goal = 'idle';
         r.phase = 'idle';
@@ -2144,6 +2180,10 @@ export class Simulation {
 
   private doRecharge(r: Rover): void {
     const def = ROVERS[r.kind];
+    // A rover that limps home with a full hold empties it while it charges:
+    // every charger sits on a depot, so there is no detour involved. Whatever
+    // the silos have room for goes in now; whatever doesn't rides back out.
+    this.unloadWhileCharging(r);
     if (r.battery >= def.maxBatteryKWh * 0.98 && !r.sheltered) {
       r.recharge = false;
       r.phase = 'idle';
@@ -2165,6 +2205,38 @@ export class Simulation {
     } else if (r.goal !== 'toCharge') {
       const pt = this.nearestChargerPoint(r.x, r.z);
       this.setTravel(r, pt.x, pt.z, 'toCharge');
+    }
+  }
+
+  /**
+   * Pour whatever fits out of a recharging rover's hold. Runs every tick the
+   * rover spends heading in or plugged in, so cargo that arrives while the
+   * silo is full still drains away the moment consumption frees some room —
+   * the rover always rolls back out to its job as empty as the colony allows.
+   */
+  private unloadWhileCharging(r: Rover): void {
+    if (cargoMass(r) <= 0.01 || !this.nearDepot(r.x, r.z)) return;
+    let moved = 0;
+    let blocked = false;
+    for (const res of ALL_RESOURCES) {
+      if (r.cargo[res] <= 0) continue;
+      const room = this.storageRoom(res);
+      if (room <= 0.01) {
+        blocked = true;
+        continue;
+      }
+      const take = Math.min(r.cargo[res], room);
+      r.cargo[res] -= take;
+      this.storage[res] += take;
+      moved += take;
+    }
+    if (moved > 0.01) {
+      this.event('ok', `${r.label} delivered ${Math.round(moved)} kg to storage.`);
+      r.blockNotified = false;
+    }
+    if (blocked && cargoMass(r) > 0.01 && !r.blockNotified) {
+      this.event('warn', `${r.label} still holds cargo — those silos are full.`);
+      r.blockNotified = true;
     }
   }
 
@@ -2507,6 +2579,24 @@ export class Simulation {
       );
       r.recharge = true;
       this.finishTask(r);
+    }
+  }
+
+  /**
+   * The UNLOAD task: drive in and pour out whatever the silos have room for.
+   * tryUnload does the pouring (and the log lines); a non-mine command falls
+   * straight through to finishTask there. Cargo that doesn't fit — full silos
+   * — rides on: the idle fallback keeps offering it as room frees up.
+   */
+  private doUnload(r: Rover): void {
+    if (cargoMass(r) <= 0.01) {
+      this.finishTask(r);
+      return;
+    }
+    if (this.nearDepot(r.x, r.z)) {
+      this.tryUnload(r);
+    } else if (r.goal !== 'toDepot' || r.phase === 'idle') {
+      this.beginUnload(r);
     }
   }
 
@@ -3342,6 +3432,8 @@ function coerceTask(t: any): RoverTask | null {
             ...(Number.isFinite(t.give) ? { give: t.give, given: t.given ?? 0 } : {}),
           }
         : null;
+    case 'unload':
+      return { type: 'unload' };
     case 'wait':
       return { type: 'wait', seconds: Math.max(0, Number(t.seconds) || 0) };
     default:
