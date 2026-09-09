@@ -22,14 +22,31 @@ mkdirSync(OUT, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const shot = (page, name) => page.screenshot({ path: join(OUT, name) });
 
+/**
+ * Screenshot a loading screen mid-flight: wait until the percent readout hits
+ * one of the target beats, falling back to "whatever is on screen" so a fast
+ * runner degrades to an early shot instead of a timeout failure.
+ */
+async function snapProgress(page, name, beats, timeoutMs) {
+  try {
+    await page.waitForFunction(
+      (list) => list.includes(document.querySelector('.rf-progress-pct')?.textContent ?? ''),
+      beats,
+      { timeout: timeoutMs },
+    );
+  } catch {
+    /* runner was too fast (or too slow) — shoot the current frame */
+  }
+  await shot(page, name);
+}
+
 const browser = await chromium.launch();
 try {
   // ---------------------------------------------------------- menu flow ----
   const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 } });
   const page = await ctx.newPage();
   await page.goto(BASE, { waitUntil: 'domcontentloaded' });
-  await sleep(650);
-  await shot(page, '01-splash.png');
+  await snapProgress(page, '01-splash.png', ['30%', '58%', '82%'], 8000);
 
   await page.waitForSelector('.rf-menu', { timeout: 20000 });
   await page.waitForSelector('.rf-loading', { state: 'detached', timeout: 20000 });
@@ -70,8 +87,9 @@ try {
   // then the live colony as a bonus.
   await page.click('[data-act="next"]');
   await page.waitForSelector('.rf-loading', { timeout: 15000 });
-  await sleep(1500);
-  await shot(page, '07-worldgen.png');
+  // '68%' is the "Building terrain mesh" beat — it persists through the slow
+  // first render, so it is the most reliable mid-load frame to catch.
+  await snapProgress(page, '07-worldgen.png', ['56%', '68%', '87%'], 15000);
   try {
     await page.waitForSelector('.rf-loading', { state: 'detached', timeout: 180000 });
     await sleep(2500);
