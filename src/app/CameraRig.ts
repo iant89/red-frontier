@@ -12,7 +12,7 @@ export class CameraRig {
   private readonly minPhi = 0.12;
   private readonly maxPhi = 1.42;
   private readonly minRadius = 16;
-  private readonly maxRadius = 950;
+  private readonly maxRadius = 1600;
 
   constructor(camera: THREE.PerspectiveCamera) {
     this.camera = camera;

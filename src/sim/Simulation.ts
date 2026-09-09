@@ -199,6 +199,9 @@ export interface Rover {
   lightsOn: boolean;
   /** Runtime: headlights + rear strobe are lit right now and drawing power. */
   lightsActive: boolean;
+  /** Runtime nav waypoints (not saved — recomputed on the next setTravel). */
+  navPath: Array<{ x: number; z: number }>;
+  navI: number;
 }
 
 export type RoverGoal =
@@ -436,6 +439,8 @@ export class Simulation {
       sheltered: false,
       lightsOn: true,
       lightsActive: false,
+      navPath: [],
+      navI: 0,
     };
     this.rovers.push(r);
     return r;
@@ -654,6 +659,8 @@ export class Simulation {
     z2: number,
     def: { cruiseSpeed: number; movePowerKw: number },
   ): number {
+    // Planner heuristic — actual drain is tick-by-tick along the nav path.
+    // A* here would re-plan every rover every tick (home-cost + auto-haul).
     return (Math.hypot(x2 - x1, z2 - z1) / def.cruiseSpeed) * def.movePowerKw * HOURS_PER_SEC;
   }
 
@@ -1149,9 +1156,10 @@ export class Simulation {
   canPlace(kind: BuildingKind, x: number, z: number): string | null {
     if (!this.world.inBounds(x, z)) return 'Outside the playable region.';
     const def = BUILDINGS[kind];
+    if (!this.world.canDrive(x, z)) return 'No safe approach — drop-off or unreachable.';
     const slope = this.world.slopeAt(x, z);
     const maxSlope = def.pressurized ? 0.15 : 0.24;
-    if (slope > maxSlope) return 'Terrain too steep here.';
+    if (slope > maxSlope || !this.world.canBuild(x, z)) return 'Terrain too steep here.';
     if (Math.hypot(SPAWN_X - x, SPAWN_Z - z) < def.radius + POD_RADIUS + 1.5)
       return 'Too close to the landing pod.';
     for (const b of this.buildings) {
@@ -2027,8 +2035,7 @@ export class Simulation {
        */
       const rd = ROVERS[rover.kind];
       const canMakeRun = (dep: Deposit, res: ResourceId): boolean => {
-        const dist = Math.hypot(dep.x - rover.x, dep.z - rover.z);
-        const oneWayKWh = (dist / rd.cruiseSpeed) * rd.movePowerKw * HOURS_PER_SEC;
+        const oneWayKWh = this.travelKWh(rover.x, rover.z, dep.x, dep.z, rd);
         const roundTripKWh = oneWayKWh * 2;
         const loadTimeS = 60 / (RESOURCES[res].mineRateKg * rd.mineSpeedMul);
         const digKWh = rd.workPowerKw * HOURS_PER_SEC * loadTimeS;
@@ -2199,7 +2206,7 @@ export class Simulation {
   private doMoveTo(r: Rover, x: number, z: number): void {
     const dist = Math.hypot(x - r.x, z - r.z);
     if (dist > ARRIVE_EPS) {
-      this.setTravel(r, x, z, 'move');
+      if (r.goal !== 'move' || r.phase !== 'moving') this.setTravel(r, x, z, 'move');
     } else {
       this.finishTask(r);
       r.statusText = 'Idle';
@@ -2303,10 +2310,24 @@ export class Simulation {
   }
 
   private setTravel(r: Rover, tx: number, tz: number, goal: RoverGoal): void {
-    r.gx = tx;
-    r.gz = tz;
+    // Keep an in-flight path: callers (beginUnload, doMine) used to rewrite
+    // gx/gz every tick, which was fine for a straight line and fatal once
+    // the first A* waypoint is the current cell centre.
+    if (
+      r.phase === 'moving' &&
+      r.goal === goal &&
+      r.navPath.length > 0 &&
+      Math.hypot((r.navPath[r.navPath.length - 1]?.x ?? tx) - tx, (r.navPath[r.navPath.length - 1]?.z ?? tz) - tz) < 2
+    ) {
+      return;
+    }
     r.goal = goal;
     r.phase = 'moving';
+    r.navPath = this.world.findPath(r.x, r.z, tx, tz) ?? [{ x: tx, z: tz }];
+    r.navI = 0;
+    const last = r.navPath[r.navPath.length - 1] ?? { x: tx, z: tz };
+    r.gx = last.x;
+    r.gz = last.z;
     r.statusText = roverStatusText(r);
   }
 
@@ -2314,11 +2335,19 @@ export class Simulation {
     if (r.phase !== 'moving' || r.goal === 'idle') return;
     const def = ROVERS[r.kind];
     const hours = SIM_TICK * HOURS_PER_SEC;
-    const dx = r.gx - r.x;
-    const dz = r.gz - r.z;
+    const dest = r.navPath[r.navI] ?? { x: r.gx, z: r.gz };
+    const dx = dest.x - r.x;
+    const dz = dest.z - r.z;
     const dist = Math.hypot(dx, dz);
     const step = def.cruiseSpeed * SIM_TICK;
     if (dist <= step + ARRIVE_EPS) {
+      r.x = dest.x;
+      r.z = dest.z;
+      if (r.navI + 1 < r.navPath.length) {
+        r.navI++;
+        r.y = this.world.heightAt(r.x, r.z);
+        return;
+      }
       r.x = r.gx;
       r.z = r.gz;
       r.phase = 'working';
@@ -2417,7 +2446,7 @@ export class Simulation {
     const reach = dep.radius + 2.6;
     const dist = Math.hypot(dep.x - r.x, dep.z - r.z);
     if (dist > reach) {
-      this.setTravel(r, dep.x, dep.z, 'mine');
+      if (r.goal !== 'mine' || r.phase !== 'moving') this.setTravel(r, dep.x, dep.z, 'mine');
       return;
     }
     this.claimDeposit(r, dep.id);
@@ -3401,6 +3430,8 @@ export class Simulation {
         sheltered: !!r.sheltered,
         lightsOn: r.lightsOn !== false,
         lightsActive: false,
+        navPath: [],
+        navI: 0,
       };
     });
 

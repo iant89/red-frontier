@@ -12,6 +12,7 @@ import { RESOURCES, ROVERS, BUILDINGS, ALL_FLUIDS } from '../sim/defs';
 import type { SunState } from '../sim/clock';
 import { sunDirection } from '../sim/clock';
 import type { Colonist } from '../sim/lifesupport';
+import { makeMarsFallbackMaterial, makeMarsTerrainMaterial } from './marsTerrain';
 
 export type OverlayMode = 'none' | 'power' | 'life' | 'weather';
 
@@ -35,7 +36,17 @@ export interface PickTarget {
   id: number;
 }
 
-const TERRAIN_SEGS = 200;
+const TERRAIN_SEGS = 280;
+
+/** Albedo tints matching the 2×3 atlas tiles, used as vertex colour. */
+const MAT_TINT = [
+  new THREE.Color(0xc4a07a), // dust
+  new THREE.Color(0xb56a3c), // sand
+  new THREE.Color(0x5c3228), // bedrock
+  new THREE.Color(0x8a6a4e), // layered
+  new THREE.Color(0x3a322c), // basalt
+  new THREE.Color(0xcbb89a), // pale
+];
 
 export class GameRenderer {
   scene = new THREE.Scene();
@@ -94,13 +105,15 @@ export class GameRenderer {
     this.renderer.toneMappingExposure = 1.05;
 
     const aspect = canvas.clientWidth / canvas.clientHeight || 1;
-    this.camera = new THREE.PerspectiveCamera(55, aspect, 0.5, 2600);
+    this.camera = new THREE.PerspectiveCamera(55, aspect, 0.5, 4200);
     this.camera.position.set(120, 110, 150);
     this.camera.lookAt(SPAWN_X, 0, SPAWN_Z);
 
     this.buildEnvironment();
     this.terrain = this.buildTerrain();
     this.scene.add(this.terrain);
+    this.buildRocks();
+    this.loadMarsPbr();
     this.scene.add(this.roverRoot);
     this.scene.add(this.buildingRoot);
     this.scene.add(this.depositRoot);
@@ -130,7 +143,7 @@ export class GameRenderer {
 
   private buildEnvironment(): void {
     this.scene.background = SKY_DAY.clone();
-    this.scene.fog = new THREE.Fog(FOG_DAY.clone(), 380, 1700);
+    this.scene.fog = new THREE.Fog(FOG_DAY.clone(), 520, 2800);
 
     this.hemi = new THREE.HemisphereLight(0xffe0b0, 0x441f0e, 0.75);
     this.scene.add(this.hemi);
@@ -140,12 +153,12 @@ export class GameRenderer {
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
     const cam = this.sun.shadow.camera;
-    cam.left = -360;
-    cam.right = 360;
-    cam.top = 360;
-    cam.bottom = -360;
+    cam.left = -720;
+    cam.right = 720;
+    cam.top = 720;
+    cam.bottom = -720;
     cam.near = 50;
-    cam.far = 1400;
+    cam.far = 2200;
     this.sun.shadow.bias = -0.0006;
     this.scene.add(this.sun);
     this.scene.add(this.sun.target);
@@ -161,7 +174,7 @@ export class GameRenderer {
     this.padLight.position.set(SPAWN_X, 14, SPAWN_Z);
     this.scene.add(this.padLight);
 
-    const skyGeo = new THREE.SphereGeometry(2200, 32, 16);
+    const skyGeo = new THREE.SphereGeometry(3600, 32, 16);
     this.skyMat = new THREE.MeshBasicMaterial({
       color: SKY_DAY.clone(),
       side: THREE.BackSide,
@@ -203,8 +216,8 @@ export class GameRenderer {
     fog.color.copy(hazed.lerp(DUST_HAZE, Math.min(0.85, dust * 0.9)));
     // Visibility closes the fog in — a severe storm pulls the horizon to your feet.
     const stormy = 1 - visibility;
-    fog.near = 380 - 330 * stormy;
-    fog.far = 1700 - 1330 * stormy;
+    fog.near = 520 - 430 * stormy;
+    fog.far = 2800 - 2100 * stormy;
 
     this.hemi.intensity = (0.1 + 0.68 * day) * (0.55 + 0.45 * transmission);
     this.hemi.color.copy(SUN_LOW).lerp(SUN_HIGH, day);
@@ -287,37 +300,107 @@ export class GameRenderer {
     geo.rotateX(-Math.PI / 2);
     const pos = geo.attributes.position;
     const colors = new Float32Array(pos.count * 3);
-    const cBase = new THREE.Color(0xc07348);
-    const cDark = new THREE.Color(0x7a3d26);
-    const cHi = new THREE.Color(0xd9a066);
+    const uv = geo.attributes.uv;
     const c = new THREE.Color();
+    const tint = new THREE.Color();
+    const uvScale = 0.0072;
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
       const z = pos.getZ(i);
-      const h = this.world.heightAt(x, z);
-      pos.setY(i, h);
-      const slope = this.world.slopeAt(x, z);
-      const r = Math.hypot(x - SPAWN_X, z - SPAWN_Z);
-      // land colour, dustier near base, darker on slopes, lighter on crests
-      c.copy(cBase).lerp(cDark, Math.min(1, slope * 2.4));
-      c.lerp(cHi, Math.min(0.5, Math.max(0, h * 0.06)));
-      const dust = 1 - Math.min(1, Math.max(0, (r - 20) / 400));
-      c.lerp(new THREE.Color(0x8a5a36), dust * 0.5);
+      const s = this.world.sampleSurface(x, z);
+      pos.setY(i, s.height);
+      uv.setXY(i, x * uvScale, z * uvScale);
+      tint.setRGB(0, 0, 0);
+      for (let k = 0; k < 6; k++) {
+        tint.r += MAT_TINT[k].r * s.mat[k];
+        tint.g += MAT_TINT[k].g * s.mat[k];
+        tint.b += MAT_TINT[k].b * s.mat[k];
+      }
+      c.copy(tint);
+      c.lerp(MAT_TINT[2], s.steep * 0.28);
+      c.multiplyScalar(1 - s.crater * 0.08 * s.craterAge);
       colors[i * 3] = c.r;
       colors[i * 3 + 1] = c.g;
       colors[i * 3 + 2] = c.b;
     }
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geo.setAttribute('uv2', uv.clone());
     geo.computeVertexNormals();
-    const mat = new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      roughness: 1,
-      metalness: 0.05,
-    });
-    const mesh = new THREE.Mesh(geo, mat);
+    const mesh = new THREE.Mesh(geo, makeMarsFallbackMaterial());
     mesh.receiveShadow = true;
     mesh.userData.pickableTerrain = true;
     return mesh;
+  }
+
+  private loadMarsPbr(): void {
+    const base = `${import.meta.env.BASE_URL}textures/pbr`;
+    const loader = new THREE.TextureLoader();
+    const names = ['albedo', 'normal', 'roughness', 'metallic', 'ao', 'height'] as const;
+    const loaded: Partial<Record<(typeof names)[number], THREE.Texture>> = {};
+    let pending = names.length;
+    const finish = (): void => {
+      if (--pending > 0) return;
+      const anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+      const mat = makeMarsTerrainMaterial(
+        {
+          albedo: loaded.albedo!,
+          normal: loaded.normal!,
+          roughness: loaded.roughness!,
+          metallic: loaded.metallic!,
+          ao: loaded.ao!,
+          height: loaded.height!,
+        },
+        anisotropy,
+      );
+      const old = this.terrain.material as THREE.Material;
+      this.terrain.material = mat;
+      old.dispose();
+    };
+    for (const name of names) {
+      loader.load(`${base}/${name}.jpg`, (tex) => {
+        loaded[name] = tex;
+        finish();
+      });
+    }
+  }
+
+  private buildRocks(): void {
+    const list = this.world.rocks();
+    if (list.length === 0) return;
+    const geos: THREE.BufferGeometry[] = [
+      new THREE.DodecahedronGeometry(1, 0),
+      new THREE.BoxGeometry(1.5, 0.42, 1.15),
+      new THREE.IcosahedronGeometry(0.72, 0),
+    ];
+    const mats = [
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92, metalness: 0.06 }),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, metalness: 0.04 }),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.98, metalness: 0.03 }),
+    ];
+    const dummy = new THREE.Object3D();
+    const color = new THREE.Color();
+    for (let kind = 0; kind < 3; kind++) {
+      const subset = list.filter((r) => r.kind === kind);
+      if (subset.length === 0) continue;
+      const mesh = new THREE.InstancedMesh(geos[kind], mats[kind], subset.length);
+      mesh.castShadow = kind === 0;
+      mesh.receiveShadow = true;
+      mesh.frustumCulled = true;
+      for (let i = 0; i < subset.length; i++) {
+        const r = subset[i];
+        dummy.position.set(r.x, r.y + r.sy * 0.35, r.z);
+        dummy.rotation.set(r.rotX, r.rotY, 0);
+        dummy.scale.set(r.sx, r.sy, r.sz);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i, dummy.matrix);
+        color.copy(MAT_TINT[2]).lerp(MAT_TINT[4], kind === 0 ? 0.35 : 0.15);
+        color.multiplyScalar(0.55 + r.shade * 0.55);
+        mesh.setColorAt(i, color);
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      this.scene.add(mesh);
+    }
   }
 
   private buildSpawnPad(): void {
