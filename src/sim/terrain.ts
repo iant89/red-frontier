@@ -11,7 +11,7 @@
 import { Noise2D } from '../lib/noise';
 import { mulberry32, hash2, clamp, lerp, smoothstep, norm } from '../lib/rng';
 import { WORLD_HALF, SPAWN_RADIUS } from './config';
-import { pickLandingSite, worldToLatLon, marsElevationKm } from './marsGlobe';
+import { pickLandingSite, pickLandingSiteInRegion, worldToLatLon, marsElevationKm } from './marsGlobe';
 import type { LandingSite } from './marsGlobe';
 
 export type { LandingSite };
@@ -72,23 +72,35 @@ interface Crater {
 const PAD_INNER = SPAWN_RADIUS;
 const PAD_OUTER = SPAWN_RADIUS + 48;
 
+export interface TerrainOptions {
+  /** Force the landing site into this named region (globe picker). */
+  region?: string | null;
+  /** Half-extent of the playable square, in metres. */
+  worldHalf?: number;
+}
+
 export class MartianTerrain {
   readonly seed: number;
   readonly site: LandingSite;
   readonly craters: Crater[] = [];
   readonly rocks: ScatterRock[] = [];
+  readonly worldHalf: number;
 
   private noise: Noise2D;
   private n2: Noise2D;
   private rng: () => number;
   private padDatum = 0;
 
-  constructor(seed: number) {
+  constructor(seed: number, opts: TerrainOptions = {}) {
     this.seed = seed >>> 0;
+    this.worldHalf = opts.worldHalf ?? WORLD_HALF;
     this.noise = new Noise2D(this.seed);
     this.n2 = new Noise2D(this.seed ^ 0x51ed2e3);
     this.rng = mulberry32(this.seed ^ 0x9e3779b9);
-    this.site = pickLandingSite(this.seed);
+    this.site =
+      opts.region != null && opts.region !== ''
+        ? pickLandingSiteInRegion(this.seed, opts.region)
+        : pickLandingSite(this.seed);
     this.generate();
   }
 
@@ -180,7 +192,7 @@ export class MartianTerrain {
     const tryPlace = (radius: number, ageBias: number, tries: number): void => {
       for (let t = 0; t < tries; t++) {
         const ang = this.rand(0, Math.PI * 2);
-        const dist = this.rand(70 + radius, WORLD_HALF - radius * 0.5);
+        const dist = this.rand(70 + radius, this.worldHalf - radius * 0.5);
         const x = Math.cos(ang) * dist;
         const z = Math.sin(ang) * dist;
         if (!this.awayFromSpawn(x, z, radius * 0.2)) continue;
@@ -399,7 +411,7 @@ export class MartianTerrain {
       yOpt?: number,
     ): void => {
       if (Math.hypot(x, z) < SPAWN_RADIUS + 10) return;
-      if (Math.abs(x) > WORLD_HALF - 8 || Math.abs(z) > WORLD_HALF - 8) return;
+      if (Math.abs(x) > this.worldHalf - 8 || Math.abs(z) > this.worldHalf - 8) return;
       const y = yOpt ?? this.heightAt(x, z);
       rocks.push({
         x,
@@ -432,8 +444,9 @@ export class MartianTerrain {
     }
 
     const step = 24;
-    for (let x = -WORLD_HALF + 16; x < WORLD_HALF - 16; x += step) {
-      for (let z = -WORLD_HALF + 16; z < WORLD_HALF - 16; z += step) {
+    const half = this.worldHalf;
+    for (let x = -half + 16; x < half - 16; x += step) {
+      for (let z = -half + 16; z < half - 16; z += step) {
         const jx = x + (hash2(x | 0, z | 0, this.seed) - 0.5) * step;
         const jz = z + (hash2((x | 0) + 19, z | 0, this.seed ^ 7) - 0.5) * step;
         const s = this.sample(jx, jz);

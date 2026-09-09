@@ -51,7 +51,7 @@ export interface LandingSite {
   basalt: number;
 }
 
-interface NamedRegion {
+export interface NamedRegion {
   name: string;
   lat: number;
   lon: number;
@@ -59,8 +59,8 @@ interface NamedRegion {
   biome: MarsBiome;
 }
 
-/** Prefer landable, inhabited-looking ground — not Olympus or the canyon floor. */
-const REGIONS: NamedRegion[] = [
+/** Every landable region the mission wizard can offer on the globe. */
+export const LANDABLE_REGIONS: NamedRegion[] = [
   { name: 'Amazonis Planitia', lat: 10, lon: 200, jitterDeg: 9, biome: 'plains' },
   { name: 'Chryse Planitia', lat: 27, lon: 322, jitterDeg: 7, biome: 'plains' },
   { name: 'Acidalia Planitia', lat: 46, lon: 338, jitterDeg: 6, biome: 'plains' },
@@ -80,6 +80,9 @@ const REGIONS: NamedRegion[] = [
   { name: 'Gusev crater', lat: -14.5, lon: 175.4, jitterDeg: 0.4, biome: 'crater' },
   { name: 'Oxia Planum', lat: 18.2, lon: 335.5, jitterDeg: 1.2, biome: 'plains' },
 ];
+
+/** Prefer landable, inhabited-looking ground — not Olympus or the canyon floor. */
+const REGIONS: NamedRegion[] = LANDABLE_REGIONS;
 
 function wrapLon(lon: number): number {
   return ((lon % 360) + 360) % 360;
@@ -287,6 +290,61 @@ export function pickLandingSite(seed: number): LandingSite {
     lon: 200,
     name: 'Amazonis Planitia',
     biome: 'plains',
+    elevKm: g.elevKm,
+    dEdx: sl.dEdx,
+    dEdz: sl.dEdz,
+    ...stats,
+  };
+}
+
+function hashStr(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+/**
+ * Seed → a landable patch inside one *chosen* region (the globe picker in the
+ * mission wizard). The seed still jitters the exact touchdown point, so two
+ * colonies in Gale crater with different seeds land on different ground —
+ * deterministically.
+ */
+export function pickLandingSiteInRegion(seed: number, regionName: string): LandingSite {
+  const region =
+    REGIONS.find((r) => r.name.toLowerCase() === regionName.toLowerCase()) ?? REGIONS[0];
+  const rng = mulberry32((seed ^ hashStr(region.name)) >>> 0);
+  for (let t = 0; t < 48; t++) {
+    const lat = clamp(region.lat + (rng() * 2 - 1) * region.jitterDeg, -55, 55);
+    const lon = wrapLon(region.lon + (rng() * 2 - 1) * region.jitterDeg);
+    if (!siteOk(lat, lon) && t < 40) continue;
+    const g = sampleGlobe(lat, lon);
+    const sl = globeSlope(lat, lon);
+    const stats = biomeStats(region.biome);
+    return {
+      lat,
+      lon,
+      name: region.name,
+      biome: region.biome,
+      elevKm: g.elevKm,
+      dEdx: sl.dEdx,
+      dEdz: sl.dEdz,
+      craterDensity: stats.craterDensity,
+      rockiness: stats.rockiness,
+      dust: stats.dust,
+      basalt: stats.basalt,
+    };
+  }
+  const g = sampleGlobe(region.lat, region.lon);
+  const sl = globeSlope(region.lat, region.lon);
+  const stats = biomeStats(region.biome);
+  return {
+    lat: region.lat,
+    lon: region.lon,
+    name: region.name,
+    biome: region.biome,
     elevKm: g.elevKm,
     dEdx: sl.dEdx,
     dEdz: sl.dEdz,

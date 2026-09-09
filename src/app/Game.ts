@@ -16,20 +16,19 @@ import { HUD } from '../ui/HUD';
 import type { BuildingKind, RoverKind } from '../sim/defs';
 import { BUILDINGS, BUILDING_ORDER, ROVERS } from '../sim/defs';
 import { SPEEDS, AUTOSAVE_INTERVAL_S, SAVE_VERSION } from '../sim/config';
+import { SaveStore } from '../ui/SaveStore';
+import { LoadingScreen, nextFrame, delay } from '../ui/LoadingScreen';
+import { MainMenu } from '../ui/MainMenu';
+import { NewGameWizard } from '../ui/NewGameWizard';
+import { LoadGameScreen } from '../ui/LoadGameScreen';
+import { WORLD_SIZES, DEFAULT_WORLD_OPTIONS, hashSeed } from '../sim/difficulty';
+import type { NewGameConfig } from '../sim/difficulty';
 
-const SAVE_KEY = 'red-frontier-save-v4';
+void SAVE_VERSION;
+
 const TAP_TRAVEL = 8; // px before a press becomes a camera drag
 const DRAG_START = 5; // px before a press counts as a drag at all
 const LONG_PRESS_MS = 480;
-
-function hashSeed(s: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
-}
 
 interface ActivePointer {
   id: number;
@@ -55,7 +54,9 @@ export class Game {
   rig: CameraRig | null = null;
   hud: HUD;
 
-  private seed = 0;
+  private store!: SaveStore;
+  private saveId: string | null = null;
+  private menu: { unmount(): void } | null = null;
   private selected: Selection = null;
   private pendingBuild: BuildingKind | null = null;
   private mouse = { x: -1, y: -1, in: false };
@@ -81,9 +82,13 @@ export class Game {
       },
       onPickBuild: (k) => this.setPendingBuild(k),
       onAction: (a, arg) => this.handleAction(a, arg),
-      onStart: (seedText, near) => this.begin(seedText, near),
+      onStart: (seedText, near) => this.quickStart(seedText, near),
       onOverlay: (m) => this.renderer?.setOverlay(m),
+      onMenu: () => this.returnToMenu(),
     });
+    this.store = new SaveStore();
+    // The mission menu owns the pre-game screen; the HUD owns everything after.
+    this.hud.hideStartOverlay();
     this.attachInput();
     window.addEventListener('resize', () => this.resize());
 
@@ -92,61 +97,186 @@ export class Game {
       if (document.visibilityState === 'hidden' && this.started) this.save(true);
     });
 
-    this.offerResume();
+    this.showMainMenu();
     this.loop(performance.now());
   }
 
-  private offerResume(): void {
-    const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) return;
-    let label = '▶ Resume last save';
-    try {
-      const data = JSON.parse(raw);
-      if (data?.clock) label = `▶ Resume — Sol ${(data.clock.sol ?? 0) + 1}`;
-    } catch {
-      /* a corrupt save still gets a button; restore() will report the problem */
+  // ------------------------------------------------------- menus ----
+  private closeMenu(): void {
+    if (this.menu) {
+      this.menu.unmount();
+      this.menu = null;
     }
-    const holder = document.querySelector('#start-overlay .actions');
-    if (!holder) return;
-    const btn = document.createElement('button');
-    btn.className = 'btn';
-    btn.textContent = label;
-    btn.addEventListener('pointerdown', (e) => {
-      e.stopPropagation();
-      this.resume();
+  }
+
+  private showMainMenu(): void {
+    this.closeMenu();
+    const menu = new MainMenu({
+      saves: this.store.list(),
+      onNewGame: () => this.openNewGame(),
+      onLoadGame: () => this.openLoadGame(),
+      onContinue: (id) => void this.loadSave(id),
     });
-    holder.appendChild(btn);
+    this.menu = menu;
+    menu.mount();
+  }
+
+  private openNewGame(): void {
+    this.closeMenu();
+    const wiz = new NewGameWizard({
+      onCancel: () => this.showMainMenu(),
+      onBegin: (config) => void this.startNewGame(config),
+    });
+    this.menu = wiz;
+    wiz.mount();
+  }
+
+  private openLoadGame(): void {
+    this.closeMenu();
+    const loads = new LoadGameScreen({
+      store: this.store,
+      onLaunch: (id) => void this.loadSave(id),
+      onNewGame: () => this.openNewGame(),
+      onBack: () => this.showMainMenu(),
+    });
+    this.menu = loads;
+    loads.mount();
+  }
+
+  /** Fallback if the legacy start overlay ever fires (it is hidden in play). */
+  private quickStart(seedText: string, near: number): void {
+    void this.startNewGame({
+      saveName: 'Ares Expedition',
+      seedText: seedText || 'mars2066',
+      difficulty: 'pioneer',
+      worldSize: 'medium',
+      region: null,
+      options: { ...DEFAULT_WORLD_OPTIONS, nearDeposits: near },
+    });
   }
 
   // ------------------------------------------------------ mission start ----
-  private begin(seedText: string, near: number): void {
-    this.seed = hashSeed(seedText || 'mars2066');
-    this.launch(new Simulation({ seed: this.seed, nearDeposits: near }));
-    this.hud.addLog(
-      'ok',
-      'Descent stage down and stable. Two rovers deployed. You have a few sols of air, water and rations.',
-    );
-    this.hud.addLog(
-      'info',
-      'Priority one: ice → Water Extractor → Oxygen Generator. Solar dies at night, so build batteries too.',
-    );
+  private async startNewGame(config: NewGameConfig): Promise<void> {
+    this.closeMenu();
+    const size = WORLD_SIZES[config.worldSize];
+    const seed = hashSeed(config.seedText || 'mars2066');
+    const loader = new LoadingScreen({
+      kicker: 'Descent sequence',
+      title: (config.saveName || 'RED FRONTIER').toUpperCase().slice(0, 26),
+      steps: ['Charting landing site', 'Generating world', 'Building terrain', 'Deploying colony'],
+    });
+    loader.mount();
+    try {
+      loader.setActiveStep(0);
+      loader.setProgress(0.05, `Plotting descent to ${config.region ?? 'a surveyed site'}…`);
+      await nextFrame();
+      await delay(140);
+
+      loader.setActiveStep(1);
+      loader.setProgress(0.2, 'Seeding Martian geology…');
+      await nextFrame();
+      const sim = new Simulation({
+        seed,
+        difficulty: config.difficulty,
+        worldHalf: size.worldHalf,
+        region: config.region,
+        worldOptions: config.options,
+      });
+      loader.setProgress(0.56, 'Surveying deposits and weather…');
+      await nextFrame();
+
+      loader.setActiveStep(2);
+      loader.setProgress(0.68, 'Building terrain mesh…');
+      await nextFrame();
+      this.launch(sim);
+      loader.setActiveStep(3);
+      loader.setProgress(0.87, 'Deploying rovers…');
+      await nextFrame();
+
+      this.renderer?.sync(sim);
+      this.renderer?.render();
+      this.saveId = this.store.create(
+        {
+          name: config.saveName,
+          difficulty: config.difficulty,
+          worldSize: config.worldSize,
+          region: config.region,
+          seedText: config.seedText,
+        },
+        sim.snapshot(),
+        1,
+      );
+      loader.markAllDone();
+      loader.setProgress(1, 'Touchdown confirmed.');
+      await delay(340);
+
+      const site = sim.world.landingSite();
+      this.hud.addLog(
+        'ok',
+        `Descent stage down at ${site.name} — ${size.label} claim, ${config.seedText} seed. Two rovers deployed.`,
+      );
+      this.hud.addLog(
+        'info',
+        config.difficulty === 'survivor'
+          ? 'Survivor protocol: stores are lean and the storms will be cruel. Ice → water → oxygen, and hurry.'
+          : 'Priority one: ice → Water Extractor → Oxygen Generator. Solar dies at night, so build batteries too.',
+      );
+    } catch (err) {
+      console.error(err);
+      loader.setProgress(1, `World generation failed: ${(err as Error).message}`);
+      await delay(2000);
+      this.showMainMenu();
+    } finally {
+      loader.unmount();
+    }
   }
 
-  private resume(): void {
-    const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) return;
+  private async loadSave(id: string): Promise<void> {
+    const record = this.store.read(id);
+    if (!record) {
+      this.showMainMenu();
+      return;
+    }
+    this.closeMenu();
+    const meta = record.meta;
+    const loader = new LoadingScreen({
+      kicker: 'Colony records',
+      title: (meta.name || 'RED FRONTIER').toUpperCase().slice(0, 26),
+      steps: ['Reading colony record', 'Restoring world', 'Rebuilding terrain', 'Resuming mission'],
+    });
+    loader.mount();
     try {
-      const data = JSON.parse(raw);
+      loader.setActiveStep(0);
+      loader.setProgress(0.07, `Reading \u201c${meta.name}\u201d…`);
+      await nextFrame();
+      await delay(140);
+      const data = record.data as { seed?: number };
       const sim = new Simulation({ seed: data?.seed ?? 1 });
-      sim.restore(data);
+      loader.setActiveStep(1);
+      loader.setProgress(0.32, 'Restoring terrain and deposits…');
+      await nextFrame();
+      sim.restore(record.data);
+      loader.setActiveStep(2);
+      loader.setProgress(0.68, 'Rebuilding terrain mesh…');
+      await nextFrame();
       this.launch(sim);
+      this.saveId = meta.id;
+      loader.setActiveStep(3);
+      loader.setProgress(0.9, `Resuming Sol ${sim.clock.sol + 1}…`);
+      await nextFrame();
+      this.renderer?.sync(sim);
+      this.renderer?.render();
+      loader.markAllDone();
+      loader.setProgress(1, 'Welcome back, Commander.');
+      await delay(320);
       this.hud.addLog('ok', `Save restored — ${sim.clock.format()}.`);
-    } catch (e) {
-      console.error(e);
-      this.hud.addLog(
-        'warn',
-        `Could not restore that save (${(e as Error).message}). Starting fresh is safest.`,
-      );
+    } catch (err) {
+      console.error(err);
+      loader.setProgress(1, `Could not restore that save (${(err as Error).message}).`);
+      await delay(2200);
+      this.showMainMenu();
+    } finally {
+      loader.unmount();
     }
   }
 
@@ -159,12 +289,10 @@ export class Game {
     this.lastAuto = performance.now();
     this.renderer = new GameRenderer(this.canvas, sim.world);
     this.renderer.setOverlay(this.hud.overlay as OverlayMode);
-    this.rig = new CameraRig(this.renderer.camera);
+    this.rig = new CameraRig(this.renderer.camera, sim.world.half);
     this.resize();
     this.hud.updateVitals(sim);
     this.syncUI(true);
-    const ov = document.getElementById('start-overlay');
-    if (ov) ov.style.display = 'none';
     this.started = true;
   }
 
@@ -587,15 +715,25 @@ export class Game {
   }
 
   private save(quiet = false): void {
-    if (!this.sim) return;
+    if (!this.sim || !this.saveId) return;
     try {
-      localStorage.setItem(SAVE_KEY, JSON.stringify(this.sim.snapshot()));
+      this.store.update(this.saveId, this.sim.snapshot(), this.sim.clock.sol + 1);
       if (!quiet) this.hud.flashSave(`Saved · ${this.sim.clock.format()}`);
     } catch (e) {
       // Quota is the realistic failure here; say so rather than failing silently.
       this.hud.flashSave('Save failed — browser storage full?');
       console.error(e);
     }
+  }
+
+  /** Persist the colony and hand control back to the main menu. */
+  private returnToMenu(): void {
+    if (!this.started) return;
+    this.save(true);
+    this.hud.flashSave('Saved — returning to menu…');
+    // A clean boot is the only honest teardown for a WebGL colony: the menu
+    // (and its splash) rebuilds in under a second.
+    window.setTimeout(() => window.location.reload(), 700);
   }
 
   // -------------------------------------------------------- per-frame ----

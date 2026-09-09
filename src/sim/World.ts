@@ -29,6 +29,12 @@ export interface WorldGenParams {
   seed: number;
   // fraction of generated deposits that appear in the "near" ring around spawn
   nearDeposits: number;
+  /** Half-extent of the playable square, in metres (world size). */
+  worldHalf?: number;
+  /** Forced landing region name (globe picker), or null for random. */
+  region?: string | null;
+  /** Multiplier on deposit yields (richness option). */
+  richness?: number;
 }
 
 /**
@@ -38,6 +44,10 @@ export interface WorldGenParams {
  */
 export class World {
   seed: number;
+  /** Half-extent of the playable square, in metres. */
+  half: number;
+  /** Landing region name chosen on the globe, or null for a random site. */
+  region: string | null;
   private terrain: MartianTerrain;
   private nav: NavGrid;
   deposits: Deposit[] = [];
@@ -46,8 +56,13 @@ export class World {
 
   constructor(params: WorldGenParams) {
     this.seed = params.seed >>> 0;
-    this.terrain = new MartianTerrain(this.seed);
-    this.nav = new NavGrid((x, z) => this.terrain.heightAt(x, z));
+    this.half = params.worldHalf ?? WORLD_HALF;
+    this.region = params.region ?? null;
+    this.terrain = new MartianTerrain(this.seed, {
+      region: this.region,
+      worldHalf: this.half,
+    });
+    this.nav = new NavGrid((x, z) => this.terrain.heightAt(x, z), this.half);
     this.depositRng = mulberry32(this.seed ^ 0x9e3779b9);
     this.generateDeposits(params);
   }
@@ -81,7 +96,7 @@ export class World {
   }
 
   inBounds(x: number, z: number): boolean {
-    return Math.abs(x) < WORLD_HALF - 8 && Math.abs(z) < WORLD_HALF - 8;
+    return Math.abs(x) < this.half - 8 && Math.abs(z) < this.half - 8;
   }
 
   /** Rovers may drive here: not a rim drop-off, and reachable from the pad. */
@@ -111,7 +126,10 @@ export class World {
   }
 
   private generateDeposits(params: WorldGenParams): void {
-    const total = 42;
+    // Deposit counts scale with surveyed area so larger claims stay rich.
+    const areaScale = Math.min(4, Math.max(0.6, (this.half / WORLD_HALF) ** 2));
+    const total = Math.round(42 * areaScale);
+    const richness = params.richness ?? 1;
     const nearCount = Math.max(5, Math.round(total * params.nearDeposits));
     const weight: Record<ResourceId, number> = {
       regolith: 3,
@@ -145,7 +163,7 @@ export class World {
           x = Math.cos(ang) * rad;
           z = Math.sin(ang) * rad;
         } else {
-          const d = this.randIn(90, WORLD_HALF - 20);
+          const d = this.randIn(90, this.half - 20);
           const ang = rng() * Math.PI * 2;
           x = Math.cos(ang) * d;
           z = Math.sin(ang) * d;
@@ -155,7 +173,8 @@ export class World {
       if (!placed) continue;
 
       const table = DEPOSIT_TABLE[res];
-      const amount = table.amountKg * (1 + (rng() * 2 - 1) * table.amountVariance);
+      const amount =
+        table.amountKg * (1 + (rng() * 2 - 1) * table.amountVariance) * richness;
       this.deposits.push({
         id: this.nextId++,
         resource: res,

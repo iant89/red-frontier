@@ -37,9 +37,9 @@ export class NavGrid {
   private readonly reach: Uint8Array;
   private readonly slope: Float32Array;
 
-  constructor(heightAt: (x: number, z: number) => number) {
-    this.n = Math.round((WORLD_HALF * 2) / this.cell);
-    this.origin = -WORLD_HALF;
+  constructor(heightAt: (x: number, z: number) => number, worldHalf: number = WORLD_HALF) {
+    this.n = Math.round((worldHalf * 2) / this.cell);
+    this.origin = -worldHalf;
     const n = this.n;
     const h = new Float32Array(n * n);
     this.walk = new Uint8Array(n * n);
