@@ -25,6 +25,8 @@ permissions:
   id-token: write
   # Lets the smoke job post its failure output on the PR for visibility.
   pull-requests: write
+  # Lets it file an issue with the output when main itself goes red.
+  issues: write
 
 # Only one deploy at a time; a newer run cancels an in-flight one.
 concurrency:
@@ -103,6 +105,15 @@ jobs:
           [ -f smoke-output.txt ] || echo '(no output captured)' > smoke-output.txt
           { echo "Mobile smoke failed on ${GITHUB_SHA::7}. Output:"; echo '```'; cat smoke-output.txt; echo '```'; } > smoke-comment.md
           gh pr comment ${{ github.event.pull_request.number }} --body-file smoke-comment.md
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Open an issue on main failure
+        if: failure() && github.event_name != 'pull_request'
+        run: |
+          [ -f smoke-output.txt ] || echo '(no output captured)' > smoke-output.txt
+          { echo "The mobile smoke gate failed on \`main@${GITHUB_SHA::7}\` — deploy skipped."; echo; echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"; echo; echo '```'; cat smoke-output.txt; echo '```'; } > smoke-issue.md
+          gh issue create --title "Smoke gate failed on main@${GITHUB_SHA::7}" --body-file smoke-issue.md
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

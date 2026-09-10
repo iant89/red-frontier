@@ -297,22 +297,27 @@ try {
   await sleep(1200);
   // Raycast picking can land between spinning markers, so sweep a grid
   // until a zone catches and Next enables (same recipe as the screenshots).
-  const globe = await page.$('.rf-globe-wrap canvas');
-  const box = await globe.boundingBox();
+  // Two passes: on a slow frame a click can fall between markers twice over.
   let picked = false;
-  outer: for (let gy = 0; gy < 7; gy++) {
-    for (let gx = 0; gx < 9; gx++) {
-      await page.click('.rf-globe-wrap canvas', {
-        position: { x: (box.width * (gx + 0.5)) / 9, y: (box.height * (gy + 0.5)) / 7 },
-      });
-      await sleep(120);
-      if (await page.$eval('[data-act="next"]', (b) => !b.disabled)) {
-        picked = true;
-        break outer;
+  for (let pass = 0; pass < 2 && !picked; pass++) {
+    const box = await page.locator('.rf-globe-wrap canvas').boundingBox();
+    if (!box) break;
+    outer: for (let gy = 0; gy < 7; gy++) {
+      for (let gx = 0; gx < 9; gx++) {
+        await page.click('.rf-globe-wrap canvas', {
+          position: { x: (box.width * (gx + 0.5)) / 9, y: (box.height * (gy + 0.5)) / 7 },
+        });
+        await sleep(120);
+        if (await page.$eval('[data-act="next"]', (b) => !b.disabled)) {
+          picked = true;
+          break outer;
+        }
       }
     }
   }
   if (!picked) throw new Fatal('no landing zone could be picked on the globe');
+  const zone = await page.locator('.rf-site-name').first().textContent().catch(() => null);
+  console.log(`info - landing zone: ${zone ?? '(unread)'}`);
   await page.click('[data-act="next"]'); // → launch review
   await page.waitForSelector('.rf-summary');
   await page.click('.rf-advanced-toggle');
@@ -382,32 +387,7 @@ try {
   const roster = await rf(page, () =>
     window.__rf.game.sim.rovers.map((r) => ({ id: r.id, label: r.label })),
   );
-  // Test setup, not a gesture: frame the first rover so the tap below has
-  // a real on-screen target at a tappable size.
-  await rf(page, () => {
-    const g = window.__rf.game;
-    const r = g.sim.rovers[0];
-    g.rig.target.set(r.x, 4, r.z);
-    g.rig.radius = 60;
-    g.rig.update();
-  });
-  await sleep(400);
-  const target = await rf(page, () => {
-    const g = window.__rf.game;
-    const r = g.sim.rovers[0];
-    const p = g.renderer.project(r.x, r.z);
-    return { x: p.x, y: p.y, behind: p.behind };
-  });
-  const onScreen =
-    !target.behind && target.x > 0 && target.x < VIEW.width && target.y > 0 && target.y < VIEW.height;
-  let selectedId = null;
-  if (!check('first rover projects on-screen', onScreen, JSON.stringify(target))) {
-    fail('tap selects the rover', 'precondition failed');
-    fail('a tap never rotates the camera', 'precondition failed');
-  } else {
-    const before = await rigState(page);
-    await tapCanvas(page, target.x, target.y);
-    await sleep(300);
+  const readSelection = async () => {
     const title = await rf(
       page,
       () => document.querySelector('#inspector .i-head h3')?.textContent ?? null,
@@ -421,9 +401,54 @@ try {
       page,
       () => document.querySelector('#inspector .i-id')?.textContent ?? null,
     );
-    selectedId = idText?.startsWith('#') ? Number(idText.slice(1)) : null;
-    if (!roster.some((r) => r.id === selectedId)) selectedId = null;
-    check('tap selects the rover', kind === 'Rover' && selectedId !== null, `kind=${kind} title=${title} id=${idText}`);
+    const id = idText?.startsWith('#') ? Number(idText.slice(1)) : null;
+    return { title, kind, idText, id: roster.some((r) => r.id === id) ? id : null };
+  };
+  const frameRover = (idx) =>
+    rf(page, (i) => {
+      const g = window.__rf.game;
+      const r = g.sim.rovers[i];
+      g.rig.target.set(r.x, 4, r.z);
+      g.rig.radius = 60;
+      g.rig.update();
+    }, idx);
+  const projectRover = (idx) =>
+    rf(page, (i) => {
+      const g = window.__rf.game;
+      const r = g.sim.rovers[i];
+      const p = g.renderer.project(r.x, r.z);
+      return { x: p.x, y: p.y, behind: p.behind };
+    }, idx);
+  // Test setup, not a gesture: frame the first rover so the tap below has
+  // a real on-screen target at a tappable size.
+  await frameRover(0);
+  await sleep(400);
+  const target = await projectRover(0);
+  const onScreen =
+    !target.behind && target.x > 0 && target.x < VIEW.width && target.y > 0 && target.y < VIEW.height;
+  let selectedId = null;
+  if (!check('first rover projects on-screen', onScreen, JSON.stringify(target))) {
+    fail('tap selects the rover', 'precondition failed');
+    fail('a tap never rotates the camera', 'precondition failed');
+  } else {
+    const before = await rigState(page);
+    await tapCanvas(page, target.x, target.y);
+    await sleep(300);
+    let sel = await readSelection();
+    // One retry on the twin: in some landing layouts a building or deposit
+    // photobombs rover 0's exact screen centre and eats the tap.
+    if ((sel.kind !== 'Rover' || sel.id === null) && roster.length > 1) {
+      await frameRover(1);
+      await sleep(400);
+      const t2 = await projectRover(1);
+      if (!t2.behind && t2.x > 0 && t2.x < VIEW.width && t2.y > 0 && t2.y < VIEW.height) {
+        await tapCanvas(page, t2.x, t2.y);
+        await sleep(300);
+        sel = await readSelection();
+      }
+    }
+    selectedId = sel.id;
+    check('tap selects the rover', sel.kind === 'Rover' && selectedId !== null, `kind=${sel.kind} title=${sel.title} id=${sel.idText}`);
     const after = await rigState(page);
     check(
       'a tap never rotates the camera',
