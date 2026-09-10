@@ -1,15 +1,6 @@
-# Build the static bundle and publish it to GitHub Pages at
-# https://<user>.github.io/red-frontier/. Deploys on every push to main and on
-# demand from the Actions tab. Free for public repos, no card required.
-#
-# `vite.config.ts` already sets `base: './'`, so the hashed assets resolve
-# relative to the page URL and the game loads under the /red-frontier/
-# subpath without any extra configuration.
-#
-# The mobile smoke test (scripts/mobile-smoke.mjs) boots the built game in a
-# phone-size touch viewport and drives the touch-only input paths. It runs on
-# pull requests as an early signal, and the deploy waits for it: a red smoke
-# test blocks the publish.
+# Verify the production bundle in a real mobile browser, then publish that exact
+# bundle to GitHub Pages. Pull requests run the same gate but never upload or
+# deploy a Pages artifact.
 name: pages
 
 on:
@@ -23,37 +14,15 @@ permissions:
   contents: read
   pages: write
   id-token: write
-  # Lets the smoke job post its failure output on the PR for visibility.
   pull-requests: write
-  # Lets it file an issue with the output when main itself goes red.
   issues: write
 
-# Only one deploy at a time; a newer run cancels an in-flight one.
 concurrency:
   group: pages
   cancel-in-progress: true
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - run: npm ci
-      - run: npm run build
-
-      - uses: actions/configure-pages@v5
-
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: dist
-
-  smoke:
+  verify:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -64,6 +33,8 @@ jobs:
           node-version: 22
           cache: npm
 
+      # Install and build once. The smoke test and deployed artifact now use the
+      # same dist/ tree instead of separate jobs repeating npm ci + build.
       - run: npm ci
 
       - name: Install headless Chromium
@@ -97,6 +68,7 @@ jobs:
           path: |
             smoke-failure.png
             smoke-output.txt
+            preview.log
           if-no-files-found: ignore
 
       - name: Post failure output to the PR
@@ -117,9 +89,18 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Configure Pages
+        if: github.event_name != 'pull_request'
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
   deploy:
-    needs: [build, smoke]
-    # Pull requests get the smoke signal but must never publish.
+    needs: verify
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment:

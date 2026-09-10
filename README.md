@@ -26,7 +26,8 @@ npm run build           # type-check + production build to dist/
 npm run preview         # serve the production build
 npm run typecheck       # type-check src and tests
 
-npm test                # the full test: every suite, linked, ~3 min
+npm test                # every suite in isolated parallel workers, ~1 min
+npm run test:serial     # same coverage in one linked process, useful for debugging
 npm run test:affected   # only the suites your working changes touch (seconds)
 npm run test:watch      # …and again on every save
 
@@ -34,7 +35,7 @@ npm run test:sim        # every tests/sim suite
 npm run test:hud        # every tests/hud suite
 npm run test:unit       # the fast formula-level suites
 npm test -- power       # any suite whose name/desc matches "power"
-npm run test:list       # all 26 suites, what each covers, and how long it is
+npm run test:list       # all 33 suites and what each covers
 ```
 
 ## How to survive
@@ -228,8 +229,8 @@ src/
     particles/      true particle system (wind, storm grit, dust devils, rover trails)
   ui/               DOM HUD (vitals, alerts, inspectors, build palette)
   lib/              deterministic RNG + simplex noise
-tests/              31 headless suites (sim/*, hud/*, render/*) + the linked full test
-scripts/            esbuild test runner: filters, --affected, --watch
+tests/              33 headless suites (sim/*, hud/*, render/*, ui/*) + linked serial test
+scripts/            esbuild test runner: parallel scheduling, filters, --affected, --watch
 ```
 
 ## Architecture
@@ -261,15 +262,16 @@ scripts/            esbuild test runner: filters, --affected, --watch
 
 ### Testing
 
-The tests are split into **29 small suites** that each pin one corner of the
-game, plus one **full test** that links them all. A suite is a plain module that
+The tests are split into **33 small suites** that each pin one corner of the
+game, plus one linked serial entry point. A suite is a plain module that
 registers cases with `test()` and finishes with `await finish()`; `scripts/run-tests.mjs`
-bundles and runs any subset of them in its own process.
+bundles and runs any subset in isolated processes. Full runs schedule the
+historically slowest suites first across the available CPU workers.
 
 ```
 tests/
   harness.ts          test()/group()/finish(), the per-suite report, the roll-up
-  full.test.ts        the full test: imports all 26 suites, prints the total
+  full.test.ts        optional serial run: imports all 33 suites, prints the total
   fixtures/sim.ts     shared sim setup (place a building, run N sols, find a seam)
   fixtures/hud.ts     jsdom bootstrap, one mounted HUD + sim per suite
   sim/                power · clock · life-support · colony · soak · build · grid
@@ -283,7 +285,7 @@ Run the piece you touched, not the whole planet:
 
 ```bash
 npm test -- sim/power            # 0.5 s   — the grid maths, no Simulation built
-npm test -- sim/storms           # ~25 s   — storm damage, sheltering, recovery
+npm test -- sim/storms           # ~12 s   — storm damage, sheltering, recovery
 npm run test:affected            # seconds — whatever `git diff` implies
 npm test -- sim/life-support --case suit   # one case, inside its suite
 ```
@@ -304,11 +306,10 @@ or when the suite imports it — so editing `tests/fixtures/sim.ts` re-runs ever
 suite that shares it. `src/sim/**` appears in the determinism and soak suites,
 which is honest: a change that can move a tick can move those.
 
-Adding a suite means dropping a `*.test.ts` in `tests/sim/` or `tests/hud/` with
-that header, and importing it in `tests/full.test.ts`. `npm run test:check`
-(which `npm test` runs first, silently) fails if a suite on disk is not linked,
-or if a suite declares no `@covers` and could therefore never be picked by
-`--affected`.
+Adding a suite means dropping a `*.test.ts` under `tests/` with that header and
+importing it in `tests/full.test.ts`. `npm run test:check` fails if a suite on
+disk is not linked, or if a suite declares no `@covers` and could therefore
+never be picked by `--affected`; `npm test` performs the same layout guard.
 
 What is covered, by TDD §21's categories:
 
@@ -337,9 +338,10 @@ What is covered, by TDD §21's categories:
   callback fires, the inspectors, the mobile collapse and dismiss gestures, the
   alert history, autopause and the off-screen markers.
 
-`npm test` (the linked run) takes about 3 minutes; `npm run test:all` runs the
-same 133 checks as parallel child processes, roughly halving that. The renderer
-needs a GPU and is not covered headlessly.
+`npm test` runs all 231 checks in isolated parallel child processes, with the
+longest suites launched first; on a two-worker machine it takes about one minute.
+`npm run test:serial` keeps the linked single-process run available for debugging.
+The renderer needs a GPU and is covered separately by the mobile smoke test.
 
 ## Next milestones (per GDD §16 / TDD §25)
 

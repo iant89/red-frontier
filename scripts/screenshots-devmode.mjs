@@ -27,7 +27,24 @@ const BASE = process.env.BASE_URL ?? 'http://127.0.0.1:5173';
 const OUT = join(dirname(fileURLToPath(import.meta.url)), '..', 'screenshots');
 mkdirSync(OUT, { recursive: true });
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** Wait for finite UI animation and actual painted frames, not wall-clock guesses. */
+async function settle(page) {
+  await page.evaluate(() => document.fonts.ready);
+  await page
+    .waitForFunction(() =>
+      document
+        .getAnimations()
+        .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
+        .every((animation) => animation.playState === 'finished' || animation.playState === 'idle'),
+      undefined,
+      { timeout: 1500 },
+    )
+    .catch(() => {});
+  await page.evaluate(async () => {
+    await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+    await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  });
+}
 
 const execPath = await sparticuz.executablePath();
 const browser = await chromium.launch({
@@ -52,7 +69,7 @@ try {
   await page.fill('#rf-save-name', 'Dev Lab');
   await page.click('[data-act="next"]'); // → world size
   await page.click('[data-act="next"]'); // → globe
-  await sleep(1200);
+  await settle(page);
   // Pick a landing region: raycast picking can land between spinning
   // markers, so sweep a grid until Next enables.
   const box = await (await page.$('.rf-globe-wrap canvas')).boundingBox();
@@ -61,22 +78,22 @@ try {
       await page.click('.rf-globe-wrap canvas', {
         position: { x: (box.width * (gx + 0.5)) / 9, y: (box.height * (gy + 0.5)) / 7 },
       });
-      await sleep(120);
+      await settle(page);
       if (await page.$eval('[data-act="next"]', (b) => !b.disabled)) break outer;
     }
   }
-  await sleep(800);
+  await settle(page);
   await page.click('[data-act="next"]'); // → summary
   await page.waitForSelector('.rf-summary');
   await page.click('.rf-advanced-toggle');
   await page.fill('#rf-seed', 'OLYMPUS-1');
   await page.click('[data-act="next"]'); // launch
   await page.waitForSelector('.rf-loading', { state: 'detached', timeout: 180000 });
-  await sleep(2500);
+  await settle(page);
 
   // -------------------------------------------------------- panel, as shipped
   await page.click('#dev-btn');
-  await sleep(400);
+  await settle(page);
   await shot('17-developer-panel.png');
 
   // Jump the sun to local noon, then conjure a severe storm (a forecast
@@ -86,12 +103,13 @@ try {
     tod.value = '48';
     tod.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  await sleep(300);
+  await settle(page);
   await page.click('[data-storm="severe"]');
-  await sleep(3000);
+  await page.waitForFunction(() => window.__rf.game.sim.weather.stormIntensity > 0.05, undefined, { timeout: 15000 });
+  await settle(page);
   await shot('18-developer-storm.png');
   await page.click('#dv-wx-clear');
-  await sleep(400);
+  await settle(page);
 
   // Fabricate a battery bank by tap: siting rules apply, so sweep terrain
   // taps (re-arming after each refusal) until one lands.
@@ -103,22 +121,22 @@ try {
   ]) {
     if (placed) break;
     await page.click('#dv-arm-building');
-    await sleep(150);
+    await settle(page);
     await page.click('#game-canvas', { position: pos });
-    await sleep(350);
+    await settle(page);
     placed = await page.evaluate(() => Boolean(document.querySelector('#dvs-mk')));
   }
   if (!placed) throw new Error('could not fabricate a battery bank in 8 taps');
   // Walk it to Mk 3 — the inspector picks up the "(unsaved)" badge row.
   await page.click('#dvs-mk-up');
   await page.click('#dvs-mk-up');
-  await sleep(400);
+  await settle(page);
   await shot('20-developer-upgrade.png');
 
   // Fabricate a mining rover, pin its battery and load its hopper with ice.
   await page.selectOption('#dv-spawn-rover', 'mining');
   await page.click('#dv-now-rover');
-  await sleep(300);
+  await settle(page);
   await page.evaluate(() => {
     const keep = document.querySelector('#dvs-keep');
     if (keep) {
@@ -131,7 +149,7 @@ try {
     if (kg) kg.value = '700';
   });
   await page.click('#dvs-cargo-set');
-  await sleep(400);
+  await settle(page);
   await shot('19-developer-rover.png');
 
   // A fabricated fleet in frame (plus the two deposits below).
@@ -141,14 +159,14 @@ try {
   await page.selectOption('#dv-spawn-dep', 'ice');
   await page.fill('#dv-dep-kg', '3000');
   await page.click('#dv-now-dep');
-  await sleep(800);
+  await settle(page);
   await shot('21-developer-fleet.png');
 
   // ----------------------------------------------------- save purity, live --
   await page.keyboard.down('Control');
   await page.keyboard.press('s');
   await page.keyboard.up('Control');
-  await sleep(600);
+  await settle(page);
   const purity = await page.evaluate(() => {
     const metas = JSON.parse(localStorage.getItem('red-frontier-saves-v1') ?? '[]');
     return metas.map((m) => {

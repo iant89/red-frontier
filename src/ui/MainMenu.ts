@@ -7,6 +7,7 @@
 import type { SaveMeta } from './SaveStore';
 import { timeAgo } from './SaveStore';
 import { DIFFICULTIES } from '../sim/difficulty';
+import { assessBuild, BUILD_COMMIT, latestMainCommit, shortSha } from './BuildStatus';
 
 export interface MainMenuOptions {
   saves: SaveMeta[];
@@ -60,6 +61,10 @@ export class MainMenu {
           </button>
           <div class="rf-menu-foot">Prototype 5 · deterministic sim · autosaves locally</div>
         </div>
+      </div>
+      <div class="rf-build-status" data-state="checking" role="status" aria-live="polite">
+        <span class="rf-build-dot" aria-hidden="true"></span>
+        <span data-build-label>Checking build…</span>
       </div>`;
     this.root = root;
 
@@ -76,6 +81,36 @@ export class MainMenu {
 
   mount(parent: HTMLElement = document.body): void {
     parent.appendChild(this.root);
+    void this.updateBuildStatus();
+  }
+
+  private async updateBuildStatus(): Promise<void> {
+    const badge = this.root.querySelector('.rf-build-status') as HTMLElement;
+    const label = badge.querySelector('[data-build-label]') as HTMLElement;
+
+    if (!BUILD_COMMIT) {
+      badge.dataset.state = 'unknown';
+      label.textContent = 'Build status unavailable';
+      badge.title = 'This build does not contain a valid commit identifier.';
+      return;
+    }
+
+    try {
+      const latest = await latestMainCommit();
+      const result = assessBuild(BUILD_COMMIT, latest);
+      badge.dataset.state = result.state;
+      if (result.state === 'latest') {
+        label.textContent = `Latest build · ${shortSha(result.current)}`;
+        badge.title = `Running the latest commit on main (${result.current}).`;
+      } else {
+        label.textContent = `Old build · ${shortSha(result.current)}`;
+        badge.title = `Running ${result.current}; latest on main is ${result.latest}.`;
+      }
+    } catch (error) {
+      badge.dataset.state = 'unknown';
+      label.textContent = `Could not verify build · ${shortSha(BUILD_COMMIT)}`;
+      badge.title = error instanceof Error ? error.message : 'The GitHub build check failed.';
+    }
   }
 
   unmount(): void {

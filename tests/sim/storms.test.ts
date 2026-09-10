@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { Simulation } from '../../src/sim/Simulation';
 import { Weather } from '../../src/sim/weather';
 import { SOL_SECONDS } from '../../src/sim/config';
-import { nearDeposit, run, buildAndWait } from '../fixtures/sim';
+import { nearDeposit, run, buildOnline } from '../fixtures/sim';
 import { group, test, finish } from '../harness';
 
 group('Storm impacts');
@@ -18,7 +18,7 @@ group('Storm impacts');
 test('a storm cuts solar output at the same time of sol', () => {
   const clear = new Simulation({ seed: 11, nearDeposits: 0.2 });
   const dusty = new Simulation({ seed: 11, nearDeposits: 0.2 });
-  for (const s of [clear, dusty]) buildAndWait(s, 'solar');
+  for (const s of [clear, dusty]) buildOnline(s, 'solar');
   for (const s of [clear, dusty]) {
     s.clock.frac = 0.5; // local noon in both worlds
     s.step(1 / 20);
@@ -38,7 +38,7 @@ test('a storm cuts solar output at the same time of sol', () => {
 
 test('dust buries panels over a storm, and a rover scrubbing them restores output', () => {
   const sim = new Simulation({ seed: 13, nearDeposits: 0.2 });
-  const panel = buildAndWait(sim, 'solar');
+  const panel = buildOnline(sim, 'solar');
   assert.ok(panel.cleanliness > 0.9, 'a fresh array should be nearly clean');
   // Only the forced storm may interfere — this tests the storm/repair loop,
   // not seed 13's particular storm calendar.
@@ -69,16 +69,16 @@ test('dust buries panels over a storm, and a rover scrubbing them restores outpu
 
 test('idle rovers clean badly dusted arrays on their own', () => {
   const sim = new Simulation({ seed: 17, nearDeposits: 0.2 });
-  const panel = buildAndWait(sim, 'solar');
+  const panel = buildOnline(sim, 'solar');
   panel.cleanliness = 0.4;
-  run(sim, 1);
+  run(sim, 0.3);
   assert.ok(panel.cleanliness > 0.9, `auto-clean should have visited the array (${panel.cleanliness.toFixed(2)})`);
 });
 
 test('storm damage bruises exposed structures and trips the most battered offline', () => {
   const sim = new Simulation({ seed: 19, nearDeposits: 0.2 });
-  const panel = buildAndWait(sim, 'solar');
-  const habitat = buildAndWait(sim, 'habitat');
+  const panel = buildOnline(sim, 'solar');
+  const habitat = buildOnline(sim, 'habitat');
   sim.weather.debugSuppressRolls();
 
   sim.weather.debugScheduleStorm('severe', sim.simTime, 0);
@@ -105,7 +105,7 @@ test('storm damage bruises exposed structures and trips the most battered offlin
   assert.ok(minHabitat < 100, 'even the habitat should feel a severe storm');
 
   // And the colony heals itself: its own rovers repair without being asked.
-  run(sim, 3);
+  run(sim, 0.5);
   assert.ok(!panel.damaged && !habitat.damaged, 'damaged structures should be repaired');
   assert.ok(panel.health > 90, `repair should have restored the array (${panel.health.toFixed(1)})`);
 });
@@ -156,9 +156,9 @@ test('a storm refuses new EVAs and recalls anyone already outside', () => {
 
 test('the full cascading failure: storm → solar collapse → battery drain → recovery', () => {
   const sim = new Simulation({ seed: 41, nearDeposits: 0.2 });
-  buildAndWait(sim, 'solar');
-  buildAndWait(sim, 'battery');
-  buildAndWait(sim, 'extractor');
+  buildOnline(sim, 'solar');
+  buildOnline(sim, 'battery');
+  buildOnline(sim, 'extractor');
   sim.storage.ice = 300;
   sim.clock.frac = 0.5;
   sim.step(1 / 20);
@@ -183,8 +183,15 @@ test('the full cascading failure: storm → solar collapse → battery drain →
   );
   assert.ok(!sim.gameOver, 'a prepared colony survives the storm');
 
-  // Recovery: dust settles, rovers clean and repair, output returns.
-  run(sim, 4);
+  // Recovery: let the storm finish and give the rovers time to service the array.
+  run(sim, 0.8);
+  // Battery recovery needs sunlight, not repeated night cycles. Start a clean
+  // daylight sample instead of waiting several whole sols to encounter one.
+  sim.clock.frac = 0.35;
+  run(sim, 0.35);
+  // Compare output at the same noon angle used for the healthy baseline.
+  sim.clock.frac = 0.5;
+  sim.step(1 / 20);
   assert.ok(panel.cleanliness > 0.65, `the rovers should have re-cleaned the array (${panel.cleanliness.toFixed(2)})`);
   assert.ok(
     panel.genKw > healthyPanelKw * 0.5,

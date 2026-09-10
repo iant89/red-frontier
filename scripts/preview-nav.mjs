@@ -3,7 +3,7 @@
  *   yellow 50%  — cannot drive
  *   red    50%  — cannot place buildings
  */
-import { build } from 'esbuild';
+import { build, version as esbuildVersion } from 'esbuild';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,18 +11,52 @@ import { spawnSync } from 'node:child_process';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const bundled = path.join(root, 'node_modules', '.test-dist', 'nav-preview-lib.mjs');
+const bundleMeta = `${bundled}.cache.json`;
 
-await build({
-  entryPoints: [path.join(root, 'src/sim/World.ts')],
-  bundle: true,
-  platform: 'node',
-  format: 'esm',
-  target: 'node20',
-  outfile: bundled,
-  logLevel: 'warning',
-});
+function fileStamp(file) {
+  try {
+    const stat = fs.statSync(file);
+    return `${Math.round(stat.mtimeMs)}:${stat.size}`;
+  } catch {
+    return 'missing';
+  }
+}
 
-const { World } = await import(bundled);
+function cachedBundleIsFresh() {
+  if (!fs.existsSync(bundled) || !fs.existsSync(bundleMeta)) return false;
+  try {
+    const cache = JSON.parse(fs.readFileSync(bundleMeta, 'utf8'));
+    return (
+      cache.esbuildVersion === esbuildVersion &&
+      cache.inputs &&
+      Object.entries(cache.inputs).every(([file, stamp]) => fileStamp(path.resolve(root, file)) === stamp)
+    );
+  } catch {
+    return false;
+  }
+}
+
+if (cachedBundleIsFresh()) {
+  console.log('nav preview bundle unchanged — using cached simulation');
+} else {
+  const result = await build({
+    absWorkingDir: root,
+    entryPoints: ['src/sim/World.ts'],
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    target: 'node20',
+    outfile: bundled,
+    metafile: true,
+    logLevel: 'warning',
+  });
+  const inputs = Object.fromEntries(
+    Object.keys(result.metafile.inputs).map((file) => [file, fileStamp(path.resolve(root, file))]),
+  );
+  fs.writeFileSync(bundleMeta, JSON.stringify({ esbuildVersion, inputs }, null, 2));
+}
+
+const { World } = await import(`${bundled}?v=${fileStamp(bundled)}`);
 
 const SEED = 42;
 const HALF = 640;

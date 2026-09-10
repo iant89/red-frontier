@@ -53,6 +53,18 @@ export function buildAndWait(sim: Simulation, kind: BuildingKind, maxSols = 25) 
   throw new Error(`${kind} never came online within ${maxSols} sols`);
 }
 
+/**
+ * Place an already-online building for tests whose subject is not construction.
+ * Keeping construction setup out of power, weather and persistence tests makes
+ * those suites both faster and more isolated; sim/build still exercises the
+ * complete live construction path through buildAndWait.
+ */
+export function buildOnline(sim: Simulation, kind: BuildingKind) {
+  const b = build(sim, kind);
+  assert.ok(sim.devCompleteBuilding(b.id), `${kind} could not be completed for setup`);
+  return b;
+}
+
 /** The opening move most integration suites need: a working, stocked base. */
 export function bootstrap(
   sim: Simulation,

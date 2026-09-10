@@ -8,8 +8,8 @@
 
 import assert from 'node:assert/strict';
 import { Simulation } from '../../src/sim/Simulation';
-import { Weather } from '../../src/sim/weather';
-import { nearDeposit, run, buildAndWait } from '../fixtures/sim';
+import { SOL_SECONDS } from '../../src/sim/config';
+import { nearDeposit, run, buildOnline } from '../fixtures/sim';
 import { group, test, finish } from '../harness';
 
 group('Saves & round-trips');
@@ -17,7 +17,8 @@ group('Saves & round-trips');
 test('snapshot / restore round-trips exactly', () => {
   const sim = new Simulation({ seed: 99, nearDeposits: 0.18 });
   sim.issueMove(sim.rovers[0].id, 30, -20);
-  run(sim, 2);
+  // A few seconds is enough to capture non-trivial in-flight rover state.
+  run(sim, 0.05);
   const snap = sim.snapshot();
   const copy = new Simulation({ seed: 1 });
   copy.restore(JSON.parse(JSON.stringify(snap)));
@@ -26,14 +27,18 @@ test('snapshot / restore round-trips exactly', () => {
 
 test('a restored colony keeps simulating identically', () => {
   const sim = new Simulation({ seed: 55, nearDeposits: 0.2 });
-  buildAndWait(sim, 'warehouse');
-  buildAndWait(sim, 'solar');
-  run(sim, 1);
+  buildOnline(sim, 'warehouse');
+  buildOnline(sim, 'solar');
+  run(sim, 0.05);
 
   const copy = new Simulation({ seed: 1 });
   copy.restore(JSON.parse(JSON.stringify(sim.snapshot())));
-  run(sim, 2);
-  run(copy, 2);
+  const beforeContinuation = JSON.stringify(sim.snapshot());
+  // Continuation equality is tick-based, not sol-based. Twenty-four game
+  // seconds exercises weather, power, jobs and movement without idling here.
+  run(sim, 0.1);
+  run(copy, 0.1);
+  assert.notEqual(JSON.stringify(sim.snapshot()), beforeContinuation, 'precondition: the colony must advance');
   assert.equal(
     JSON.stringify(copy.snapshot()),
     JSON.stringify(sim.snapshot()),
@@ -61,9 +66,12 @@ group('Weather across a save');
 
 test('the storm survives a save / restore round-trip and continues identically', () => {
   const sim = new Simulation({ seed: 37, nearDeposits: 0.2 });
-  const panel = buildAndWait(sim, 'solar');
-  sim.weather.debugScheduleStorm('regional', sim.simTime + 30, 30);
-  run(sim, 1);
+  const panel = buildOnline(sim, 'solar');
+  sim.weather.debugScheduleStorm('regional', sim.simTime, 0);
+  // Save while the forced storm is active, rather than simulating most of a sol.
+  run(sim, 100 / SOL_SECONDS);
+  assert.ok(sim.weather.current(), 'precondition: save must be taken during the storm');
+  assert.ok(sim.weather.stormIntensity > 0, 'precondition: the storm must be affecting the colony');
   const snap = JSON.parse(JSON.stringify(sim.snapshot()));
   const copy = new Simulation({ seed: 1 });
   copy.restore(snap);
@@ -77,8 +85,10 @@ test('the storm survives a save / restore round-trip and continues identically',
   // state is re-derived, not saved), so whole-colony equality is not the
   // contract here. The weather and the structures it acts on are: they must
   // replay the same storm beat for beat.
-  run(sim, 2);
-  run(copy, 2);
+  const weatherBefore = JSON.stringify(sim.weather.snapshot());
+  run(sim, 30 / SOL_SECONDS);
+  run(copy, 30 / SOL_SECONDS);
+  assert.notEqual(JSON.stringify(sim.weather.snapshot()), weatherBefore, 'precondition: storm must advance');
   assert.equal(
     JSON.stringify(copy.weather.snapshot()),
     JSON.stringify(sim.weather.snapshot()),
@@ -95,7 +105,7 @@ group('Rover state across a save');
 
 test('v3 saves migrate to v4: queues, condition, rules and assembly slots appear', () => {
   const sim = new Simulation({ seed: 67, nearDeposits: 0.2 });
-  buildAndWait(sim, 'warehouse');
+  buildOnline(sim, 'warehouse');
   // Hand-craft a v3 save: single command, no queue/condition/rules, no slots.
   const v3 = JSON.parse(JSON.stringify(sim.snapshot())) as any;
   v3.version = 3;
@@ -125,7 +135,7 @@ test('v3 saves migrate to v4: queues, condition, rules and assembly slots appear
 
 test('a P4-heavy state round-trips through save and restore', () => {
   const sim = new Simulation({ seed: 68, nearDeposits: 0.2 });
-  buildAndWait(sim, 'warehouse');
+  buildOnline(sim, 'warehouse');
   const [a, b] = sim.rovers;
 
   // Queue with every task shape, a repeat route, custom rules, a reservation.
@@ -150,8 +160,8 @@ test('a P4-heavy state round-trips through save and restore', () => {
   );
 
   // And it keeps simulating identically afterwards.
-  run(sim, 0.5);
-  run(copy, 0.5);
+  run(sim, 0.05);
+  run(copy, 0.05);
   assert.equal(
     JSON.stringify(copy.snapshot()),
     JSON.stringify(sim.snapshot()),
