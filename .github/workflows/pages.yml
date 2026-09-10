@@ -23,6 +23,8 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  # Lets the smoke job post its failure output on the PR for visibility.
+  pull-requests: write
 
 # Only one deploy at a time; a newer run cancels an in-flight one.
 concurrency:
@@ -79,17 +81,30 @@ jobs:
           curl -sf http://127.0.0.1:5199/ > /dev/null
 
       - name: Run the mobile smoke test
-        run: node scripts/mobile-smoke.mjs
+        run: |
+          set -o pipefail
+          node scripts/mobile-smoke.mjs 2>&1 | tee smoke-output.txt
         env:
           BASE_URL: http://127.0.0.1:5199
 
-      - name: Upload failure screenshot
+      - name: Upload failure evidence
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: smoke-failure
-          path: smoke-failure.png
+          path: |
+            smoke-failure.png
+            smoke-output.txt
           if-no-files-found: ignore
+
+      - name: Post failure output to the PR
+        if: failure() && github.event_name == 'pull_request'
+        run: |
+          [ -f smoke-output.txt ] || echo '(no output captured)' > smoke-output.txt
+          { echo "Mobile smoke failed on ${GITHUB_SHA::7}. Output:"; echo '```'; cat smoke-output.txt; echo '```'; } > smoke-comment.md
+          gh pr comment ${{ github.event.pull_request.number }} --body-file smoke-comment.md
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   deploy:
     needs: [build, smoke]
