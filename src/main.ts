@@ -47,7 +47,11 @@ async function boot(): Promise<void> {
     await nextFrame();
 
     // The Game builds the HUD and raises the main menu behind the splash.
-    new Game();
+    // Exposed for the automated smoke test (scripts/mobile-smoke.mjs), which
+    // drives gestures through real input events and reads back sim/camera
+    // state here. No game code reads this handle.
+    const game = new Game();
+    (window as unknown as { __rf?: { game: Game } }).__rf = { game };
 
     splash.markAllDone();
     splash.setProgress(1, 'All systems nominal.');

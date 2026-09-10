@@ -1,0 +1,120 @@
+# Build the static bundle and publish it to GitHub Pages at
+# https://<user>.github.io/red-frontier/. Deploys on every push to main and on
+# demand from the Actions tab. Free for public repos, no card required.
+#
+# `vite.config.ts` already sets `base: './'`, so the hashed assets resolve
+# relative to the page URL and the game loads under the /red-frontier/
+# subpath without any extra configuration.
+#
+# The mobile smoke test (scripts/mobile-smoke.mjs) boots the built game in a
+# phone-size touch viewport and drives the touch-only input paths. It runs on
+# pull requests as an early signal, and the deploy waits for it: a red smoke
+# test blocks the publish.
+name: pages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+  # Lets the smoke job post its failure output on the PR for visibility.
+  pull-requests: write
+
+# Only one deploy at a time; a newer run cancels an in-flight one.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install headless Chromium
+        run: |
+          npm i --no-save playwright
+          npx playwright install --with-deps chromium
+
+      - run: npm run build
+
+      - name: Serve the build
+        run: |
+          npx vite preview --port 5199 --strictPort &> preview.log &
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:5199/ > /dev/null && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:5199/ > /dev/null
+
+      - name: Run the mobile smoke test
+        run: |
+          set -o pipefail
+          node scripts/mobile-smoke.mjs 2>&1 | tee smoke-output.txt
+        env:
+          BASE_URL: http://127.0.0.1:5199
+
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-failure
+          path: |
+            smoke-failure.png
+            smoke-output.txt
+          if-no-files-found: ignore
+
+      - name: Post failure output to the PR
+        if: failure() && github.event_name == 'pull_request'
+        run: |
+          [ -f smoke-output.txt ] || echo '(no output captured)' > smoke-output.txt
+          { echo "Mobile smoke failed on ${GITHUB_SHA::7}. Output:"; echo '```'; cat smoke-output.txt; echo '```'; } > smoke-comment.md
+          gh pr comment ${{ github.event.pull_request.number }} --body-file smoke-comment.md
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy:
+    needs: [build, smoke]
+    # Pull requests get the smoke signal but must never publish.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
