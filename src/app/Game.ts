@@ -13,8 +13,11 @@ import { GameRenderer } from '../render/Renderer';
 import type { OverlayMode } from '../render/Renderer';
 import { CameraRig } from './CameraRig';
 import { HUD } from '../ui/HUD';
-import type { BuildingKind, RoverKind } from '../sim/defs';
+import type { BuildingKind, ResourceId, RoverKind } from '../sim/defs';
 import { BUILDINGS, BUILDING_ORDER, ROVERS } from '../sim/defs';
+import { DevMode } from '../dev/DevMode';
+import type { SpawnSpec } from '../dev/DevMode';
+import { DevPanel } from '../dev/DevPanel';
 import { SPEEDS, AUTOSAVE_INTERVAL_S, SAVE_VERSION } from '../sim/config';
 import { SaveStore } from '../ui/SaveStore';
 import { LoadingScreen, nextFrame, delay } from '../ui/LoadingScreen';
@@ -54,6 +57,10 @@ export class Game {
   rig: CameraRig | null = null;
   hud: HUD;
 
+  /** Developer mode: runtime-only editor state (never reaches the save file). */
+  private dev: DevMode;
+  private devPanel: DevPanel;
+
   private store!: SaveStore;
   private saveId: string | null = null;
   private menu: { unmount(): void } | null = null;
@@ -85,6 +92,21 @@ export class Game {
       onStart: (seedText, near) => this.quickStart(seedText, near),
       onOverlay: (m) => this.renderer?.setOverlay(m),
       onMenu: () => this.returnToMenu(),
+      onDev: () => this.toggleDevMode(),
+    });
+    this.dev = new DevMode((sev, text) => this.hud.addLog(sev, text));
+    this.devPanel = new DevPanel(this.dev, {
+      getSim: () => this.sim,
+      getSelection: () => this.selected,
+      select: (sel) => {
+        this.selected = sel;
+        this.syncUI(true);
+      },
+      getSpawnPoint: () =>
+        this.rig ? { x: this.rig.target.x, z: this.rig.target.z } : { x: 0, z: 0 },
+      armSpawn: (spec) => this.setArmedSpawn(spec),
+      setHint: (t) => this.hud.hint(t),
+      onClose: () => this.toggleDevMode(false),
     });
     this.store = new SaveStore();
     // The mission menu owns the pre-game screen; the HUD owns everything after.
@@ -285,6 +307,11 @@ export class Game {
     this.selected = null;
     this.pendingBuild = null;
     this.endShown = false;
+    // A fresh colony starts clean: dev mode off, no armed spawns, no pins.
+    this.dev.disable();
+    this.devPanel.setVisible(false);
+    this.devPanel.setArmed(null);
+    this.hud.setDevActive(false);
     this.hud.setBuild(null);
     this.lastAuto = performance.now();
     this.renderer = new GameRenderer(this.canvas, sim.world);
@@ -440,13 +467,27 @@ export class Game {
     if (!this.started) return;
     const key = e.key.toLowerCase();
 
+    // Typing into a field (the dev panel's number boxes, a wizard input)
+    // must never trigger game hotkeys.
+    const tag = (e.target as HTMLElement | null)?.tagName;
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+
     if ((e.ctrlKey || e.metaKey) && key === 's') {
       e.preventDefault();
       this.save();
       return;
     }
+    if (e.code === 'Backquote') {
+      e.preventDefault();
+      this.toggleDevMode();
+      return;
+    }
     if (e.key === 'Escape') {
       if (this.hud.closeAlertHistory() || this.hud.closeBuildInfo()) return;
+      if (this.dev.armedSpawn) {
+        this.setArmedSpawn(null);
+        return;
+      }
       if (this.pendingBuild) this.setPendingBuild(null);
       else this.selected = null;
       return;
@@ -505,6 +546,12 @@ export class Game {
     if (!this.renderer || !this.sim) return;
     if (this.pendingBuild) {
       this.placeBuild(x, y);
+      return;
+    }
+    // A click-to-place spawn the developer panel armed consumes the tap.
+    if (this.dev.armedSpawn) {
+      const pt = this.renderer.raycastTerrain(x, y);
+      if (pt) this.placeDevSpawn(pt.x, pt.z);
       return;
     }
     const pick = this.renderer.pickTargetAt(x, y);
@@ -589,6 +636,91 @@ export class Game {
       // Shift-place keeps the blueprint armed for laying out solar farms.
       if (!this.shiftHeld) this.setPendingBuild(null);
     }
+  }
+
+  // ------------------------------------------------------- developer mode ----
+
+  /**
+   * Flip the developer panel and every live modifier it carries. Nothing the
+   * panel does is persisted — the mode itself lives outside the sim, and its
+   * upgrade levels are runtime-only by sim design.
+   */
+  private toggleDevMode(force?: boolean): void {
+    if (!this.started) return;
+    const on = force ?? !this.dev.enabled;
+    const changed = on !== this.dev.enabled;
+    if (on) {
+      this.dev.enabled = true;
+    } else {
+      // Every modifier stops dead: pins released, any armed spawn disarmed.
+      this.setArmedSpawn(null);
+      this.dev.disable();
+    }
+    this.devPanel.setVisible(on);
+    this.hud.setDevActive(on);
+    if (changed) {
+      this.hud.addLog(
+        'info',
+        on
+          ? '🛠 Developer mode ON — world edits are live and stay out of the save file.'
+          : '🛠 Developer mode OFF — modifiers released.',
+      );
+    }
+    this.syncUI(true);
+  }
+
+  /**
+   * Arm (or disarm) a click-to-place spawn from the developer panel. The next
+   * terrain tap fabricates it; Shift+taps keep placing, Esc cancels — the
+   * same grammar as the build palette.
+   */
+  private setArmedSpawn(spec: SpawnSpec | null): void {
+    this.dev.armedSpawn = spec;
+    if (spec && this.pendingBuild) {
+      this.pendingBuild = null;
+      this.hud.setBuild(null);
+    }
+    this.devPanel.setArmed(spec);
+    if (spec) {
+      const what =
+        spec.type === 'deposit'
+          ? `${spec.kind} deposit (${Math.round(spec.amountKg ?? 0)} kg)`
+          : spec.type === 'building'
+            ? BUILDINGS[spec.kind as BuildingKind].label
+            : ROVERS[spec.kind as RoverKind].label;
+      this.hud.hint(
+        `<b>Developer spawn</b> — click terrain to fabricate a ${what}, Shift+click for several, Esc to cancel.`,
+      );
+    } else if (!this.pendingBuild) {
+      this.hud.hint(null);
+    }
+  }
+
+  /** Execute the armed click-to-place spawn at a tapped world point. */
+  private placeDevSpawn(x: number, z: number): void {
+    const spec = this.dev.armedSpawn;
+    if (!spec || !this.sim) return;
+    if (spec.type === 'rover') {
+      const id = this.dev.spawnRover(this.sim, spec.kind as RoverKind, x, z);
+      this.selected = { type: 'rover', id };
+      this.devPanel.setStatus(`${ROVERS[spec.kind as RoverKind].label} #${id} fabricated`);
+    } else if (spec.type === 'building') {
+      const id = this.dev.spawnBuilding(this.sim, spec.kind as BuildingKind, x, z);
+      if (id !== null) {
+        this.selected = { type: 'building', id };
+        this.devPanel.setStatus(`${BUILDINGS[spec.kind as BuildingKind].label} #${id} fabricated online`);
+      } else {
+        this.devPanel.setStatus('Cannot fabricate there — see the colony log for why');
+      }
+    } else {
+      this.dev.spawnDeposit(this.sim, spec.kind as ResourceId, x, z, spec.amountKg ?? 2500);
+      this.devPanel.setStatus(
+        `${spec.kind} deposit surveyed in — ${Math.round(spec.amountKg ?? 2500)} kg`,
+      );
+    }
+    // Shift-place keeps the spawn armed, exactly like the build palette.
+    if (!this.shiftHeld) this.setArmedSpawn(null);
+    this.syncUI(true);
   }
 
   private handleAction(a: string, arg?: number | string): void {
@@ -759,6 +891,10 @@ export class Game {
     const speed = SPEEDS[this.hud.speedIdx];
     if (speed > 0 && !this.sim.gameOver) this.sim.step(dt * speed);
 
+    // Developer-mode modifiers ride on top of the sim, never inside it —
+    // which is why they're saved nowhere.
+    this.dev.applyTo(this.sim);
+
     for (const ev of this.sim.drainEvents()) {
       this.hud.addLog(ev.severity, ev.text, ev.stamp);
     }
@@ -898,6 +1034,9 @@ export class Game {
     }
     if (!this.selected) this.hud.clearInspector();
 
-    if (!this.pendingBuild && force) this.hud.hint(null);
+    // The dev panel reflects live sim state on the same throttled cadence.
+    this.devPanel.update();
+
+    if (!this.pendingBuild && force && !this.dev.armedSpawn) this.hud.hint(null);
   }
 }

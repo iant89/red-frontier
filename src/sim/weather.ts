@@ -383,6 +383,31 @@ export class Weather {
     this.nextRollAt = Infinity;
   }
 
+  /**
+   * Developer-mode hook: let the scheduler roll again right away. Pairs with
+   * {@link debugSuppressRolls}; the unlock-sol gates still apply, so early
+   * colonies stay in their calm window.
+   */
+  debugResumeRolls(now: number): void {
+    this.nextRollAt = now;
+  }
+
+  /** True while the storm scheduler is switched off (developer mode). */
+  get rollsSuppressed(): boolean {
+    return !Number.isFinite(this.nextRollAt);
+  }
+
+  /**
+   * Developer-mode hook: clear every storm, on the map or merely forecast,
+   * right now. The airborne dust then settles on its own natural timescale.
+   */
+  debugClearStorms(): void {
+    this.active = null;
+    this.scheduled = null;
+    this.stormIntensity = 0;
+    this.storm = 'calm';
+  }
+
   // -------------------------------------------------------- persistence ----
   snapshot(): object {
     return {

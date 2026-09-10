@@ -1716,6 +1716,209 @@ body {
   pointer-events: auto;
 }
 
+/* ------------------------------------------------- developer mode ------ */
+/* The developer panel is a floating editor, bottom-right. Cyan accents mark
+   it as a tool, and an "unsaved" badge carries the persistence contract. */
+.dev-panel {
+  position: fixed;
+  right: 8px;
+  bottom: 8px;
+  width: 318px;
+  max-height: min(62vh, 660px);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  z-index: 25;
+  font-size: 12.5px;
+  border-color: var(--ui-border-lit);
+}
+
+.dev-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  letter-spacing: 0.4px;
+}
+
+.dev-head .dev-ic {
+  font-size: 15px;
+}
+
+.dev-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: #0d1c22;
+  background: var(--cyan);
+}
+
+.dev-note {
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--ui-text-faint);
+  border-left: 2px solid var(--cyan);
+  padding-left: 7px;
+}
+
+.dev-status {
+  font-size: 11.5px;
+  color: var(--cyan);
+  background: rgba(111, 211, 255, 0.09);
+  border: 1px solid rgba(111, 211, 255, 0.3);
+  border-radius: 6px;
+  padding: 5px 9px;
+  animation: alert-in 0.22s ease-out;
+}
+
+.dev-sec {
+  border: 1px solid var(--ui-border);
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.22);
+  padding: 3px 8px 8px;
+}
+
+.dev-sec summary {
+  cursor: pointer;
+  user-select: none;
+  font-size: 11px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--ui-text-dim);
+  padding: 6px 0 2px;
+  list-style: none;
+}
+
+.dev-sec summary::before {
+  content: '▸ ';
+  font-size: 10px;
+}
+
+.dev-sec[open] summary::before {
+  content: '▾ ';
+}
+
+.dev-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 4px;
+}
+
+.dev-panel .sub {
+  font-size: 11px;
+  color: var(--ui-text-dim);
+  line-height: 1.4;
+}
+
+.dev-panel .sub.sm {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--ui-text-faint);
+  margin: 8px 0 2px;
+}
+
+.dev-panel .sub.sm .dim {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.dev-panel .empty {
+  font-size: 11.5px;
+  color: var(--ui-text-dim);
+  line-height: 1.5;
+  padding: 2px 0 6px;
+}
+
+.dev-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.dev-row .btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 5px 8px;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.dev-lab,
+.dev-num {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  color: var(--ui-text-dim);
+  margin-top: 4px;
+}
+
+.dev-num input,
+.dev-panel select {
+  background: #1d1710;
+  color: var(--ui-text);
+  border: 1px solid var(--ui-border);
+  border-radius: 5px;
+  padding: 5px 6px;
+  font-family: inherit;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.dev-panel select {
+  flex: 1;
+}
+
+.dev-num input {
+  width: 64px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.dev-panel .slider-row {
+  margin: 6px 0 2px;
+}
+
+.dev-panel .slider-row b {
+  font-variant-numeric: tabular-nums;
+}
+
+.dev-mkrow {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+}
+
+.dev-mk {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--cyan);
+}
+
+.dev-panel .note.dim {
+  margin-top: 4px;
+}
+
+@media (max-width: 680px) {
+  .dev-panel {
+    left: 8px;
+    right: 8px;
+    width: auto;
+    bottom: 8px;
+    max-height: 58vh;
+  }
+}
+
 /* -------------------------------------------------- mobile icon-only --- */
 /* Phones get icon-only controls: labels cost horizontal space the panels
    don't have, while the glyph + tap target stays fully usable. */
