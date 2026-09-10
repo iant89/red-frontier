@@ -13,13 +13,12 @@ import type { SunState } from '../sim/clock';
 import { sunDirection } from '../sim/clock';
 import type { Colonist } from '../sim/lifesupport';
 import { makeMarsFallbackMaterial, makeMarsTerrainMaterial } from './marsTerrain';
+import { WeatherFX } from './WeatherFX';
 
 export type OverlayMode = 'none' | 'power' | 'life' | 'weather';
 
 /** Sky tint the dust drags everything toward during a storm. */
 const DUST_HAZE = new THREE.Color(0x9a5f33);
-/** Side length of the (camera-following) airborne-dust particle box. */
-const DUST_FIELD = 240;
 
 /** Sky/light keyframes across a sol. The renderer reads the sim's sun only. */
 const SKY_NIGHT = new THREE.Color(0x07070f);
@@ -83,8 +82,8 @@ export class GameRenderer {
   private routeMarks = new Map<number, THREE.Mesh>();
   private routeGroup = new THREE.Group();
 
-  private dustField: THREE.Points | null = null;
-  private dustPositions: Float32Array | null = null;
+  /** True particle system + weather FX controller (wind, storms, devils, trails). */
+  readonly weatherFx: WeatherFX;
   private lastSimT = 0;
 
   private sun!: THREE.DirectionalLight;
@@ -138,7 +137,8 @@ export class GameRenderer {
     this.ghostGroup.add(this.ghostBody);
     this.scene.add(this.routeGroup);
     this.buildSpawnPad();
-    this.buildDustField();
+    this.weatherFx = new WeatherFX(this.scene);
+    this.weatherFx.setViewport(canvas.clientHeight || 800, this.camera.fov);
   }
 
   private buildEnvironment(): void {
@@ -229,70 +229,24 @@ export class GameRenderer {
   }
 
   // ---------------- weather atmosphere ----------------
-  /** Grit in the wind: a cheap wrapped particle field driven by the sim. */
-  private buildDustField(): void {
-    const N = 900;
-    const pos = new Float32Array(N * 3);
-    for (let i = 0; i < N; i++) {
-      pos[i * 3] = (Math.random() - 0.5) * DUST_FIELD;
-      pos[i * 3 + 1] = Math.random() * 46;
-      pos[i * 3 + 2] = (Math.random() - 0.5) * DUST_FIELD;
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    this.dustPositions = pos;
-    this.dustField = new THREE.Points(
-      geo,
-      new THREE.PointsMaterial({
-        color: 0xc49a6c,
-        size: 1.15,
-        transparent: true,
-        opacity: 0,
-        depthWrite: false,
-        sizeAttenuation: true,
-      }),
-    );
-    this.dustField.frustumCulled = false;
-    this.scene.add(this.dustField);
-  }
-
-  private syncDustField(sim: Simulation): void {
-    const wx = sim.weather;
-    const pts = this.dustField;
-    if (!pts || !this.dustPositions) return;
-    const mat = pts.material as THREE.PointsMaterial;
-    // Nearly invisible on a clear sol; a storm becomes a wall of flying grit.
-    mat.opacity = Math.min(0.66, Math.max(0, wx.dust * 0.95 - 0.03));
-
-    // Sim seconds advanced since last frame (frozen while paused — weather is
-    // sim state, not a screen effect).
+  /**
+   * Drive the true particle system from the sim: ambient wind dust, storm
+   * grit, dust devils and rover wheel trails. FX runs on sim time — frozen
+   * while paused, because weather is sim state, not a screen effect.
+   */
+  private syncWeatherFx(sim: Simulation): void {
     const dt = Math.min(0.5, Math.max(0, sim.simTime - this.lastSimT));
     this.lastSimT = sim.simTime;
-
-    // Wind vector from the sim's speed/bearing.
-    const wv = wx.windSpeed * 0.45;
-    const vx = Math.sin(wx.windDirRad) * wv;
-    const vz = Math.cos(wx.windDirRad) * wv;
-
-    // Keep the field centred near the camera and wrap particles through it.
-    const c = this.camera;
-    const cx = Math.round(c.position.x / DUST_FIELD) * DUST_FIELD;
-    const cz = Math.round(c.position.z / DUST_FIELD) * DUST_FIELD;
-    pts.position.set(cx, 0, cz);
-
-    const pos = this.dustPositions;
-    const drift = vx * dt;
-    const driftZ = vz * dt;
-    const half = DUST_FIELD / 2;
-    for (let i = 0; i < pos.length; i += 3) {
-      pos[i] += drift + Math.sin(sim.simTime * 0.9 + i) * 0.4 * dt;
-      pos[i + 2] += driftZ + Math.cos(sim.simTime * 0.8 + i) * 0.4 * dt;
-      if (pos[i] > half) pos[i] -= DUST_FIELD;
-      else if (pos[i] < -half) pos[i] += DUST_FIELD;
-      if (pos[i + 2] > half) pos[i + 2] -= DUST_FIELD;
-      else if (pos[i + 2] < -half) pos[i + 2] += DUST_FIELD;
-    }
-    (pts.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
+    this.weatherFx.sync(
+      {
+        time: sim.simTime,
+        weather: sim.weather,
+        rovers: sim.rovers,
+        heightAt: (x, z) => this.world.heightAt(x, z),
+      },
+      this.camera,
+      dt,
+    );
   }
 
   private buildTerrain(): THREE.Mesh {
@@ -447,7 +401,7 @@ export class GameRenderer {
       z: -(Math.PI / 2 - el) * 0.55,
     };
     this.applySun(sim.sun, sim.weather.dust, sim.weather.visibility);
-    this.syncDustField(sim);
+    this.syncWeatherFx(sim);
     this.syncRovers(sim.rovers);
     this.syncBuildings(sim.buildings);
     this.syncDeposits(sim.world.deposits);
@@ -1437,6 +1391,8 @@ export class GameRenderer {
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    // World-size → pixel projection for the particle shader (buffer height).
+    this.weatherFx.setViewport(this.renderer.domElement.height || h, this.camera.fov);
   }
 
   render(): void {

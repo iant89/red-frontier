@@ -18,7 +18,8 @@
     "test:watch": "node scripts/run-tests.mjs --watch --affected",
     "test:all": "node scripts/run-tests.mjs --all",
     "test:list": "node scripts/run-tests.mjs --list",
-    "test:check": "node scripts/run-tests.mjs --check"
+    "test:check": "node scripts/run-tests.mjs --check",
+    "setup:playwright": "node scripts/setup-playwright.mjs"
   },
   "devDependencies": {
     "@types/jsdom": "^21.1.7",
