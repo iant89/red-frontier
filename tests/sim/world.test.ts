@@ -155,8 +155,24 @@ test('rovers can drive the pad and reach deposits without dropping off rims', ()
   const stats = w.navStats();
   assert.ok(stats.reachable > 80, `pad flood should open the plains, got ${stats.reachable}`);
   assert.ok(stats.reachable <= stats.walkable);
-  // Isolated bowls / sharp lips stay off the drive map.
-  assert.ok(stats.blocked > 0 || stats.reachable < stats.walkable, 'some cells should be off-limits');
+  // The world must not be a billiard table: craters, dunes and the MOLA
+  // mesoscale have to leave measurable relief. Sharp lips that do occur stay
+  // off the drive map by construction (blocked cells never flood).
+  let minH = Infinity;
+  let maxH = -Infinity;
+  let maxSlope = 0;
+  for (let x = -280; x <= 280; x += 35) {
+    for (let z = -280; z <= 280; z += 35) {
+      const h = w.sampleSurface(x, z).height;
+      minH = Math.min(minH, h);
+      maxH = Math.max(maxH, h);
+      const gx = w.sampleSurface(x + 17.5, z).height - w.sampleSurface(x - 17.5, z).height;
+      const gz = w.sampleSurface(x, z + 17.5).height - w.sampleSurface(x, z - 17.5).height;
+      maxSlope = Math.max(maxSlope, Math.hypot(gx, gz) / 35);
+    }
+  }
+  assert.ok(maxH - minH > 2, `landing terrain should have relief, got ${(maxH - minH).toFixed(1)} m`);
+  assert.ok(maxSlope > 0.03, `terrain should not be flat paste, max slope ${maxSlope.toFixed(3)}`);
   assert.ok(w.deposits.length >= 8, `expected a field of seams, got ${w.deposits.length}`);
   for (const d of w.deposits) {
     assert.ok(w.canDrive(d.x, d.z), `deposit ${d.id} ${d.resource} at ${d.x.toFixed(1)},${d.z.toFixed(1)} is not reachable`);

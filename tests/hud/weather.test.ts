@@ -31,11 +31,25 @@ test('an active storm names itself in the badge and status line', () => {
   for (let i = 0; i < 20 * 20; i++) sim.step(1 / 20); // 20 s: storm ramped up
   hud.updateVitals(sim);
   assert.match(doc.getElementById('wx-badge')!.textContent!, /Regional dust storm/);
-  assert.match(doc.getElementById('wx-status')!.textContent!, /passing in/);
+  assert.match(doc.getElementById('wx-status')!.textContent!, /overhead — clearing in/);
   // clean up so later tests run in calm weather
-  (wx as any).active = null;
-  wx.stormIntensity = 0;
-  wx.storm = 'calm';
+  wx.debugClearStorms();
+  wx.dust = 0.08;
+});
+
+test('an approaching storm reports its distance and bearing', () => {
+  const wx: any = sim.weather;
+  // A long forecast lead keeps the system well over the horizon.
+  wx.debugScheduleStorm('severe', sim.simTime, 200);
+  wx.tick(1 / 20, sim.simTime + 1 / 20, sim.clock.sol);
+  hud.updateVitals(sim);
+  assert.match(
+    doc.getElementById('wx-status')!.textContent!,
+    /km (N|NE|E|SE|S|SW|W|NW)/,
+    'the forecast should give a real range and compass bearing',
+  );
+  wx.debugClearStorms();
+  wx.dust = 0.08;
 });
 
 await finish('hud/weather');

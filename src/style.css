@@ -76,6 +76,27 @@ body {
   pointer-events: auto;
 }
 
+/*
+ * Every visible piece of chrome is a solid input surface: a click on a panel
+ * must never fall through to the game canvas underneath. Without this, tapping
+ * the padding around a button raycasts the terrain *behind* the HUD and the
+ * selected rover drives off to wherever the camera was looking.
+ */
+.panel,
+.build-info,
+.alert,
+.alerts-restore,
+.res-chip,
+.dev-panel {
+  pointer-events: auto;
+}
+
+/* The alert stack itself is an invisible column — only its rows are solid,
+   so the map stays tappable in the gaps between alerts. */
+#alerts {
+  pointer-events: none;
+}
+
 .panel {
   position: absolute;
   background: var(--ui-bg);
@@ -1919,6 +1940,94 @@ body {
   }
 }
 
+/* ----------------------------------------------- floating panel chrome --- */
+/*
+ * Every info panel is a proper window: drag it by its header, resize it from
+ * the corner grip, fold it to its bar, or banish the whole HUD with the peek
+ * button. Geometry persists across sessions (localStorage).
+ */
+.hud-drag {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.hud-drag:active {
+  cursor: grabbing;
+}
+
+/* A subtle grab-dots mark so the handle reads as draggable. */
+.hud-drag::before {
+  content: '⠿';
+  font-size: 10px;
+  color: var(--ui-text-faint);
+  margin-right: 6px;
+  opacity: 0.7;
+}
+
+.panel-grip {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 22px;
+  height: 22px;
+  cursor: nwse-resize;
+  touch-action: none;
+  opacity: 0.55;
+  background:
+    linear-gradient(
+      135deg,
+      transparent 0 55%,
+      var(--ui-text-faint) 55% 62%,
+      transparent 62% 72%,
+      var(--ui-text-faint) 72% 79%,
+      transparent 79% 100%
+    );
+  border-radius: 0 0 7px 0;
+}
+
+.panel-grip:hover {
+  opacity: 1;
+}
+
+.panel-dragging {
+  opacity: 0.92;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.65);
+  transition: none;
+}
+
+/* The peek button: one tap clears every panel off the map, one tap brings
+   them all back. It sits above the build bar, out of the thumb's way. */
+#hud-peek {
+  position: fixed;
+  right: 10px;
+  bottom: 100px;
+  z-index: 12;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: var(--ui-bg);
+  color: var(--ui-text);
+  border: 1px solid var(--ui-border-lit);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+  font-size: 16px;
+  cursor: pointer;
+  pointer-events: auto;
+  font-family: inherit;
+}
+
+#hud-peek:hover {
+  background: #31251a;
+}
+
+.hud.hud-hidden #vitals,
+.hud.hud-hidden #inspector,
+.hud.hud-hidden #log,
+.hud.hud-hidden #hintbar {
+  display: none !important;
+}
+
 /* -------------------------------------------------- mobile icon-only --- */
 /* Phones get icon-only controls: labels cost horizontal space the panels
    don't have, while the glyph + tap target stays fully usable. */
@@ -1956,5 +2065,149 @@ body {
 
   .brand {
     min-width: 0;
+  }
+}
+
+/* =================================================== mobile HUD redesign ===
+ * On phones the HUD stops being a frame around the map and becomes a set of
+ * compact floating cards: everything starts folded, everything is draggable
+ * and resizable, and one tap on the peek button clears the screen entirely
+ * so the player can command the colony without fighting the chrome. */
+@media (max-width: 760px), (pointer: coarse) and (max-width: 1024px) {
+  /* Above the docked panels so it never hides behind the inspector. */
+  #hud-peek {
+    bottom: 150px;
+  }
+
+  /* One compact top strip: clock, sun, speed and menu — nothing else. */
+  #topbar {
+    top: 4px;
+    left: 4px;
+    right: 4px;
+    padding: 4px 6px;
+    gap: 6px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  #topbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .brand {
+    min-width: 0;
+    flex: none;
+  }
+
+  .brand b {
+    display: none;
+  }
+
+  .brand span {
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .sunwrap {
+    display: none;
+  }
+
+  /* Resources ride the strip as tiny chips, scrollable sideways. */
+  .resources {
+    order: 9;
+    flex: none;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+  }
+
+  .res-chip {
+    min-width: 0;
+    padding: 2px 6px;
+  }
+
+  .res-chip .mini-bar {
+    display: none;
+  }
+
+  #idle-btn,
+  #dev-btn,
+  #history-btn,
+  #menu-btn {
+    flex: none;
+  }
+
+  #idle-btn .btn-t {
+    display: none;
+  }
+
+  /* Panels become floating cards anchored above the build bar. They start
+     collapsed (see HUD.initCollapseDefaults) and the player drags them
+     anywhere on screen. */
+  #vitals,
+  #inspector {
+    top: auto;
+    bottom: 92px;
+    max-height: 46vh;
+    width: min(var(--panel-w), calc(100vw - 12px));
+    font-size: 12px;
+  }
+
+  #vitals {
+    left: 6px;
+  }
+
+  #inspector {
+    right: 6px;
+  }
+
+  #vitals.collapsed,
+  #inspector.collapsed {
+    min-width: 0;
+    width: auto;
+    max-width: calc(100vw - 12px);
+  }
+
+  #log {
+    display: none;
+  }
+
+  /* Alerts sit just under the top strip and never wider than the screen. */
+  #alerts {
+    top: 54px;
+    left: 6px;
+    right: 6px;
+    transform: none;
+    width: auto;
+  }
+
+  .alert {
+    padding: 6px 8px;
+  }
+
+  /* Build bar stays thumb-reachable at the bottom; the dossier pops above it. */
+  #buildbar {
+    bottom: 4px;
+    padding: 5px;
+    max-width: calc(100vw - 8px);
+  }
+
+  #hintbar {
+    bottom: 78px;
+    font-size: 11px;
+    padding: 5px 10px;
+  }
+
+  .build-info {
+    bottom: 132px;
+  }
+
+  #save-flash {
+    bottom: 150px;
+  }
+
+  /* The weather cell gets room to report the storm's position. */
+  .wx-status {
+    font-size: 10.5px;
   }
 }

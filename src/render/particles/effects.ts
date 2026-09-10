@@ -37,6 +37,12 @@ export interface FxContext {
   stormIntensity: number;
   /** Authoritative ground height (particles spawn above it, settle on it). */
   heightAt: (x: number, z: number) => number;
+  /**
+   * The terrain's own colour at a point, 0..1 RGB — a devil picks its dust up
+   * off *this* ground, so its particles wear the ground's tint. Optional; a
+   * null return (or no provider) falls back to the generic sand palette.
+   */
+  groundTint?: (x: number, z: number) => { r: number; g: number; b: number } | null;
   rand: Rand;
 }
 
@@ -198,10 +204,23 @@ export interface DevilOptions {
 }
 
 /**
- * One wandering dust devil: a spinning column plus a skirt of outflow dust at
- * its base. Particles spawn through the funnel with tangential + inward + rising
- * velocity, so the vortex shape emerges from motion, not sprites. `strength`
- * ramps toward `target`, so devils spin up and dissipate instead of popping.
+ * One wandering dust devil.
+ *
+ * Life cycle, the way real ones read from a distance:
+ *  - **Birth** — it starts on the ground. A skirt of dust bursts outward at
+ *    the surface while the column *grows upward* from zero height (`growth`
+ *    ramps over the first ~3 s), so the vortex visibly climbs into the air.
+ *  - **Maturity** — a tall, narrow funnel (48–84 m) whose diameter varies
+ *    along its body (a bulge profile modulated over time), whose particles
+ *    wear the colour of the ground they were picked up from, and whose top
+ *    wobbles sideways on its own — while staying anchored over the base, it
+ *    never tears loose from the lower half of the vortex.
+ *  - **Travel** — the devil walks downwind, laying down a lingering layer of
+ *    settled dust along its track: a snaking deposit trail that survives the
+ *    vortex itself.
+ *  - **Death** — it does not pop. `strength` bleeds off slowly; emission rate,
+ *    funnel diameter and skirt all shrink with it, until the last motes fade
+ *    out of a column too thin to see.
  */
 export class DustDevil {
   x: number;
@@ -214,20 +233,67 @@ export class DustDevil {
   /** 0..1 — eased toward `target` every update. */
   strength = 0;
   target = 1;
+  /** 0..1 — the column grows upward from the ground while this ramps. */
+  growth = 0;
+  /** Horizontal radius multiplier; collapses toward a thread as it dies. */
+  radiusScale = 1;
 
   private readonly wanderA: number;
+  private readonly wobA: number;
+  private readonly wobB: number;
+  private readonly wobF1: number;
+  private readonly wobF2: number;
+  private readonly bulgePhase: number;
+  /** The ground's tint where the devil spawned — refreshed as it travels. */
+  private tint = { ...DEVIL_TINT };
+  private tintAt = -1;
   private colAcc = 0;
   private skirtAcc = 0;
+  private depositAcc = 0;
+  private spawned = false;
 
   constructor(o: DevilOptions, rand: Rand = Math.random) {
     this.x = o.x;
     this.z = o.z;
     this.groundY = o.groundY;
-    this.baseR = o.baseRadius ?? 3.2 + rand() * 2.4;
-    this.height = o.height ?? 26 + rand() * 14;
+    // Every devil is a different size: narrow whips and fat churns alike.
+    this.baseR = o.baseRadius ?? 2.7 + rand() * 3.1;
+    this.height = o.height ?? 48 + rand() * 36;
     this.spin = o.spin ?? 2.6 + rand() * 1.4;
     this.dir = o.spinDir ?? (rand() < 0.5 ? 1 : -1);
     this.wanderA = rand() * Math.PI * 2;
+    // Wobble: two incommensurate sines so the top never repeats its path.
+    this.wobA = rand() * Math.PI * 2;
+    this.wobB = rand() * Math.PI * 2;
+    this.wobF1 = 0.5 + rand() * 0.4;
+    this.wobF2 = 1.1 + rand() * 0.7;
+    this.bulgePhase = rand() * Math.PI * 2;
+  }
+
+  /** Dead once it has fully dissipated (manager removes it then). */
+  get dead(): boolean {
+    return this.target === 0 && this.strength < 0.02;
+  }
+
+  /**
+   * The funnel axis at a given height fraction: the base stays planted at
+   * (x, z) while the top leans away on the wobble offsets — clamped so the
+   * crown always hangs over the lower half of the vortex.
+   */
+  private axisAt(h01: number, t: number): { x: number; z: number } {
+    const lean = Math.pow(h01, 1.25);
+    // Amplitude grows toward the top but can never exceed the footprint:
+    // the top wanders, yet never leaves the lower half behind.
+    const amp = this.baseR * (0.75 + 0.35 * Math.sin(t * 0.21 + this.wobB));
+    let ox = Math.sin(t * this.wobF1 + this.wobA) * amp + Math.sin(t * this.wobF2 + this.wobB) * amp * 0.45;
+    let oz = Math.cos(t * this.wobF1 * 0.83 + this.wobB) * amp + Math.cos(t * this.wobF2 + this.wobA) * amp * 0.45;
+    const mag = Math.hypot(ox, oz);
+    const cap = this.baseR * 1.7;
+    if (mag > cap) {
+      ox *= cap / mag;
+      oz *= cap / mag;
+    }
+    return { x: this.x + ox * lean, z: this.z + oz * lean };
   }
 
   update(ctx: FxContext, pool: ParticlePool): void {
@@ -237,60 +303,134 @@ export class DustDevil {
     this.z += (ctx.windZ * 0.22 + Math.sin(t * 0.23 + this.wanderA * 1.7) * 1.6) * ctx.dt;
     this.groundY = ctx.heightAt(this.x, this.z);
 
-    this.strength += (this.target - this.strength) * Math.min(1, ctx.dt * 0.9);
-    if (this.strength < 0.02) return;
+    // The dust a devil carries is the dust it stands on — keep the palette
+    // tracking the ground beneath it (refreshed at most every 0.4 s).
+    if (ctx.groundTint && t - this.tintAt > 0.4) {
+      this.tintAt = t;
+      const g = ctx.groundTint(this.x, this.z);
+      if (g) this.tint = { r: g.r, g: g.g, b: g.b };
+    }
 
-    this.colAcc += 220 * this.strength * ctx.dt;
+    // Spin-up is quick; dissipation is a slow wind-down — the funnel thins
+    // and starves before it disappears rather than winking out.
+    const rate = this.target > this.strength ? 0.9 : 0.32;
+    this.strength += (this.target - this.strength) * Math.min(1, ctx.dt * rate);
+    if (this.target === 0 && this.strength < 0.02) {
+      this.strength = 0;
+      return;
+    }
+    this.growth = Math.min(1, this.growth + ctx.dt / 3.1);
+    // While dying, the funnel's diameter follows the dying strength straight
+    // down — thinning all the way to a thread instead of holding its girth.
+    const ref = this.target > 0 ? Math.max(0.2, this.target) : 1;
+    this.radiusScale = 0.3 + 0.7 * Math.min(1, this.strength / ref);
+
+    if (!this.spawned) {
+      this.spawned = true;
+      this.burstGround(ctx, pool);
+    }
+
+    const vigour = Math.pow(Math.max(0, this.strength), 1.15) * this.radiusScale;
+
+    this.colAcc += 330 * vigour * ctx.dt;
     while (this.colAcc >= 1) {
       this.colAcc -= 1;
-      this.emitColumn(ctx, pool);
+      this.emitColumn(ctx, pool, t);
     }
-    if (this.colAcc > 10) this.colAcc = 10;
+    if (this.colAcc > 12) this.colAcc = 12;
 
-    this.skirtAcc += 42 * this.strength * ctx.dt;
+    this.skirtAcc += 90 * vigour * ctx.dt;
     while (this.skirtAcc >= 1) {
       this.skirtAcc -= 1;
       this.emitSkirt(ctx, pool);
     }
-    if (this.skirtAcc > 6) this.skirtAcc = 6;
+    if (this.skirtAcc > 8) this.skirtAcc = 8;
+
+    // The deposit layer: settled dust left along the track as it travels.
+    this.depositAcc += 14 * vigour * ctx.dt;
+    while (this.depositAcc >= 1) {
+      this.depositAcc -= 1;
+      this.emitDeposit(ctx, pool);
+    }
+    if (this.depositAcc > 4) this.depositAcc = 4;
   }
 
-  private emitColumn(ctx: FxContext, pool: ParticlePool): void {
+  /** Birth: dust rips off the ground in a ring before the column exists. */
+  private burstGround(ctx: FxContext, pool: ParticlePool): void {
+    const R = ctx.rand;
+    for (let i = 0; i < 46; i++) {
+      const a = R() * Math.PI * 2;
+      const r = this.baseR * (0.3 + R() * 1.6);
+      const speed = 3.5 + R() * 5;
+      pool.spawn({
+        x: this.x + Math.cos(a) * r,
+        y: this.groundY + 0.25 + R() * 0.6,
+        z: this.z + Math.sin(a) * r,
+        vx: Math.cos(a) * speed,
+        vy: 1.4 + R() * 2.6,
+        vz: Math.sin(a) * speed,
+        life: 0.7 + R() * 0.7,
+        size0: 1.4 + R() * 1.2,
+        size1: 3.4 + R() * 2.2,
+        ...dustTint(R, this.tint, 0.07),
+        alpha: 0.4,
+        fadeIn: 0.08,
+        fadeOut: 0.6,
+        gravity: 1.6,
+        drag: 1.4,
+        turbulence: 2.2,
+        groundY: this.groundY + 0.12,
+        kind: PKind.Devil,
+      });
+    }
+  }
+
+  private emitColumn(ctx: FxContext, pool: ParticlePool, t: number): void {
     const R = ctx.rand;
     // Bias spawns low: the funnel is densest where it touches the ground.
-    const h01 = Math.pow(R(), 1.5);
+    // While the devil is still growing, the column only reaches as high as
+    // it has climbed — the vortex visibly rises out of the ground.
+    const grow = this.growth * this.growth * (3 - 2 * this.growth);
+    const h01 = Math.pow(R(), 1.35) * Math.max(0.06, grow);
     const h = h01 * this.height;
-    // The funnel widens with altitude.
-    const r = this.baseR * (0.35 + 1.5 * h01) * (0.75 + R() * 0.5);
+    // Diameter varies along the body: the classic widening funnel plus a
+    // slow-moving bulge, so the column breathes instead of reading as a cone.
+    const bulge = 1 + 0.18 * Math.sin(h01 * 6.5 + t * 0.9 + this.bulgePhase);
+    const r =
+      this.baseR *
+      this.radiusScale *
+      (0.3 + 1.7 * Math.pow(h01, 0.9)) *
+      bulge *
+      (0.72 + R() * 0.55);
     const a = R() * Math.PI * 2;
     const ca = Math.cos(a);
     const sa = Math.sin(a);
-    const tint = dustTint(R, DEVIL_TINT, 0.07);
-    // Tangential rim speed plus a centripetal anchor on the funnel: without
-    // the anchor the throw would fly off on straight tangents and the column
-    // would dissolve into haze. Rim speed grows with radius while the spring
-    // is uniform, so the funnel naturally flares with height.
+    const axis = this.axisAt(h01, t);
+    // Tangential rim speed plus a centripetal anchor on the (wobbling) axis:
+    // without the anchor the throw would fly off on straight tangents and the
+    // column would dissolve into haze. The anchor follows the lean, so the
+    // funnel bends with the wobble instead of shearing apart.
     const rim = this.spin * r * 0.3 * this.dir;
     pool.spawn({
-      x: this.x + ca * r,
+      x: axis.x + ca * r,
       y: this.groundY + 0.3 + h,
-      z: this.z + sa * r,
+      z: axis.z + sa * r,
       vx: -sa * rim,
-      vy: 5 + 3.5 * (1 - h01) + R() * 1.5,
+      vy: 5.5 + 4 * (1 - h01) + R() * 1.8,
       vz: ca * rim,
-      life: 0.9 + R() * 0.7,
-      size0: 1.8 + R() * 1.4,
-      size1: 3.5 + R() * 2.0,
-      ...tint,
-      alpha: 0.6 * this.strength,
+      life: 0.95 + R() * 0.75,
+      size0: 1.9 + R() * 1.5,
+      size1: 3.8 + R() * 2.2,
+      ...dustTint(R, this.tint, 0.07),
+      alpha: 0.62 * Math.min(1, this.strength * 1.4),
       fadeIn: 0.15,
       fadeOut: 0.5,
       gravity: 0,
       drag: 0.4,
       turbulence: 1.4,
       kind: PKind.Devil,
-      pullX: this.x,
-      pullZ: this.z,
+      pullX: axis.x,
+      pullZ: axis.z,
       pullK: 5,
     });
   }
@@ -298,21 +438,20 @@ export class DustDevil {
   private emitSkirt(ctx: FxContext, pool: ParticlePool): void {
     const R = ctx.rand;
     const a = R() * Math.PI * 2;
-    const r = this.baseR * (1.2 + R() * 1.1);
-    const tint = dustTint(R, DEVIL_TINT, 0.08);
-    const speed = 6 + R() * 4;
+    const r = this.baseR * this.radiusScale * (1.2 + R() * 1.2);
+    const speed = 6 + R() * 4.5;
     pool.spawn({
       x: this.x + Math.cos(a) * r,
-      y: this.groundY + 0.3 + R() * 0.8,
+      y: this.groundY + 0.3 + R() * 0.9,
       z: this.z + Math.sin(a) * r,
       vx: Math.cos(a) * speed + ctx.windX * 0.2,
-      vy: 0.8 + R() * 1.2,
+      vy: 0.9 + R() * 1.4,
       vz: Math.sin(a) * speed + ctx.windZ * 0.2,
-      life: 0.5 + R() * 0.4,
-      size0: 1.1 + R() * 0.9,
-      size1: 2.8 + R() * 1.2,
-      ...tint,
-      alpha: 0.3 * this.strength,
+      life: 0.55 + R() * 0.45,
+      size0: 1.2 + R() * 1.0,
+      size1: 3.2 + R() * 1.6,
+      ...dustTint(R, this.tint, 0.08),
+      alpha: 0.34 * Math.min(1, this.strength * 1.4),
       fadeIn: 0.1,
       fadeOut: 0.6,
       gravity: 1.2,
@@ -322,13 +461,47 @@ export class DustDevil {
       kind: PKind.Devil,
     });
   }
+
+  /**
+   * The layer a devil leaves behind: slow, long-lived motes that settle onto
+   * the ground along its track, spread and fade over many seconds — a visible
+   * deposit snaking across the terrain after the vortex has moved on.
+   */
+  private emitDeposit(ctx: FxContext, pool: ParticlePool): void {
+    const R = ctx.rand;
+    const a = R() * Math.PI * 2;
+    const r = this.baseR * (0.2 + R() * 1.1);
+    const g = ctx.heightAt(this.x + Math.cos(a) * r, this.z + Math.sin(a) * r);
+    pool.spawn({
+      x: this.x + Math.cos(a) * r,
+      y: g + 0.18 + R() * 0.5,
+      z: this.z + Math.sin(a) * r,
+      vx: ctx.windX * 0.1 + (R() - 0.5) * 0.5,
+      vy: 0.12 + R() * 0.25,
+      vz: ctx.windZ * 0.1 + (R() - 0.5) * 0.5,
+      life: 11 + R() * 9,
+      size0: 2.0 + R() * 1.6,
+      size1: 6.5 + R() * 4,
+      ...dustTint(R, this.tint, 0.05),
+      alpha: 0.16 * Math.min(1, this.strength * 1.5),
+      fadeIn: 0.12,
+      fadeOut: 0.8,
+      gravity: 0.35,
+      drag: 0.9,
+      turbulence: 0.3,
+      groundY: g + 0.12,
+      kind: PKind.Devil,
+    });
+  }
 }
 
 /**
- * Owns the live devils. A dust-devil storm spins up one (two in a strong one)
- * near the camera; anything else lets them dissipate and removes them. Devils
- * never spawn for regional/severe/planetary storms — those are grit walls, not
- * vortices.
+ * Owns the live devils. Devils are the vortex children of moving storm
+ * systems: a devil outbreak spins up one (two in a strong one), and the big
+ * grit storms carry devils in their fronts once they are properly blowing —
+ * the wind and the devils arrive together. Planetary events are a uniform
+ * wall of dust with no coherent vortices inside. Anything else lets the
+ * devils wind down slowly and removes them once fully dissipated.
  */
 export class DevilManager {
   devils: DustDevil[] = [];
@@ -339,8 +512,17 @@ export class DevilManager {
   }
 
   wantedFor(ctx: FxContext): number {
-    if (ctx.storm !== 'devil' || ctx.stormIntensity <= 0.05) return 0;
-    return ctx.stormIntensity > 0.55 ? 2 : 1;
+    const k = ctx.stormIntensity;
+    switch (ctx.storm) {
+      case 'devil':
+        return k <= 0.05 ? 0 : k > 0.55 ? 2 : 1;
+      case 'regional':
+        return k > 0.8 ? 2 : k > 0.5 ? 1 : 0;
+      case 'severe':
+        return k > 0.85 ? 2 : k > 0.6 ? 1 : 0;
+      default:
+        return 0;
+    }
   }
 
   update(ctx: FxContext, pool: ParticlePool): void {
@@ -350,15 +532,22 @@ export class DevilManager {
       this.devils[i].target = i < want ? 1 : 0;
       this.devils[i].update(ctx, pool);
     }
-    this.devils = this.devils.filter((d) => d.target > 0 || d.strength > 0.02);
+    this.devils = this.devils.filter((d) => !d.dead);
   }
 
+  /**
+   * New devils form upwind of the view and ride in with the storm's wind —
+   * they arrive with the weather, not out of a clear sky.
+   */
   private spawnNear(ctx: FxContext): DustDevil {
     const R = ctx.rand;
-    const bearing = R() * Math.PI * 2;
-    const dist = 30 + R() * 40;
-    const x = ctx.camX + Math.cos(bearing) * dist;
-    const z = ctx.camZ + Math.sin(bearing) * dist;
+    const windMag = Math.hypot(ctx.windX, ctx.windZ);
+    // Upwind bearing (where the wind comes from), fanned out ±60°.
+    const upwind = windMag > 0.5 ? Math.atan2(-ctx.windX, -ctx.windZ) : R() * Math.PI * 2;
+    const bearing = upwind + (R() - 0.5) * (Math.PI / 1.5);
+    const dist = 28 + R() * 44;
+    const x = ctx.camX + Math.sin(bearing) * dist;
+    const z = ctx.camZ + Math.cos(bearing) * dist;
     return new DustDevil({ x, z, groundY: ctx.heightAt(x, z) }, R);
   }
 }

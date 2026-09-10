@@ -2,10 +2,13 @@
  * Playable terrain is a 1280 m window of real Mars.
  *
  * A seed picks a landable site on the globe (Amazonis, Arabia, Gale, …).
- * Continental elevation is the MOLA-like areoid sampled across that window
- * (a gentle regional tilt). Local geology is HiRISE-scale: round craters of
- * mixed age, a little grit, rocks on rims — not a single noise field, and
- * not star-shaped ejecta.
+ * The *landscaping* is the MOLA-like areoid itself: the window samples the
+ * real elevation model over a several-kilometre stretch and folds it down
+ * into playable scale, so hills, swales and the regional tilt sit where the
+ * planet's actual topography puts them — the landing site's own gradient,
+ * curvature and neighbours decide the shape of the ground. On top of that
+ * sits HiRISE-scale local geology: round craters of mixed age, a little
+ * grit, rocks on rims — not a single noise field, and not star-shaped ejecta.
  */
 
 import { Noise2D } from '../lib/noise';
@@ -90,6 +93,12 @@ export class MartianTerrain {
   private n2: Noise2D;
   private rng: () => number;
   private padDatum = 0;
+  /** MOLA window compression: how many real km fit across the play window. */
+  private mesoK: number;
+  /** Vertical amplification applied to the compressed areoid. */
+  private mesoAmp: number;
+  /** Areoid value at the window centre (meso heights are relative to it). */
+  private mesoDatum = 0;
 
   constructor(seed: number, opts: TerrainOptions = {}) {
     this.seed = seed >>> 0;
@@ -101,7 +110,42 @@ export class MartianTerrain {
       opts.region != null && opts.region !== ''
         ? pickLandingSiteInRegion(this.seed, opts.region)
         : pickLandingSite(this.seed);
+    // The MOLA window: compress a seeded 3–7 km stretch of the real areoid
+    // into the play square so the planet's own topography does the
+    // landscaping. The vertical gain is then calibrated so the steepest
+    // resulting grade stays inside the driving/building slope budget.
+    this.mesoK = 3 + this.rand() * 4;
+    this.mesoDatum = marsElevationKm(this.site.lat, this.site.lon);
+    this.mesoAmp = this.calibrateMesoAmp();
     this.generate();
+  }
+
+  /**
+   * Measure the compressed areoid's worst grade across the window and pick
+   * the largest amplification that keeps it playable (broad ramps, never
+   * cliffs). Deterministic — it only ever samples the seeded globe.
+   */
+  private calibrateMesoAmp(): number {
+    const e = this.worldHalf / 9;
+    let maxSlope = 0;
+    const kmAt = (x: number, z: number): number => {
+      const { lat, lon } = worldToLatLon(this.site, x * this.mesoK, z * this.mesoK);
+      return marsElevationKm(lat, lon) - this.mesoDatum;
+    };
+    for (let gx = -1; gx <= 1; gx++) {
+      for (let gz = -1; gz <= 1; gz++) {
+        const x = gx * e * 2.6;
+        const z = gz * e * 2.6;
+        const dx = (kmAt(x + e, z) - kmAt(x - e, z)) * 1000;
+        const dz = (kmAt(x, z + e) - kmAt(x, z - e)) * 1000;
+        // Elevation change over window distance — the rendered grade at amp 1.
+        maxSlope = Math.max(maxSlope, Math.hypot(dx, dz) / (2 * e));
+      }
+    }
+    if (maxSlope <= 0.0001) return 1.6; // dead flat areoid — give it sculpting room
+    // Largest gain that keeps the steepest grade under the ~0.11 drive budget,
+    // capped so even a steep highlands window stays a landscape, not a cliff.
+    return clamp(0.11 / maxSlope, 0.2, 1.6);
   }
 
   heightAt(x: number, z: number): number {
@@ -154,8 +198,27 @@ export class MartianTerrain {
   }
 
   /**
-   * Areoid across the 1280 m window, in metres relative to the site centre,
-   * plus a couple of metres of rolling ground — not a second mountain range.
+   * The MOLA field doing the landscaping. The window compresses a several-km
+   * stretch of the real areoid (hills, swales, the regional tilt of the
+   * landing site itself) and amplifies it to visible relief — so where the
+   * ground rises and falls is where Mars says it does, not where one noise
+   * octave happens to.
+   */
+  private mesoElevation(x: number, z: number): number {
+    const { lat, lon } = worldToLatLon(this.site, x * this.mesoK, z * this.mesoK);
+    const hKm = marsElevationKm(lat, lon);
+    return (hKm - this.mesoDatum) * 1000 * this.mesoAmp;
+  }
+
+  /** Meso height relative to the site centre — drives material weighting. */
+  private mesoRelative(x: number, z: number): number {
+    return this.mesoElevation(x, z) - this.mesoElevation(0, 0);
+  }
+
+  /**
+   * Areoid across the 1280 m window, in metres relative to the site centre:
+   * the compressed MOLA landscape plus a couple of metres of rolling ground —
+   * not a second mountain range.
    */
   private macroElevation(x: number, z: number): number {
     const { lat, lon } = worldToLatLon(this.site, x, z);
@@ -163,7 +226,7 @@ export class MartianTerrain {
     const regional = (hKm - this.site.elevKm) * 1000;
     const roll =
       this.noise.fbm(x * 0.004 + 3.1, z * 0.004 - 1.7, 3, 2.0, 0.5) * 1.6 * (0.4 + this.site.rockiness);
-    return regional + roll;
+    return regional + roll + this.mesoElevation(x, z);
   }
 
   private regionalSteep(): number {
@@ -371,11 +434,12 @@ export class MartianTerrain {
     crater: { influence: number; age: number; rim: number; steep: number },
     world: number,
   ): [number, number, number, number, number, number] {
-    void x;
-    void z;
     const steep = crater.steep;
+    // MOLA relief steers the drift: dust ponds in the lows, highs get winnowed
+    // down to sand and bedrock.
+    const rel = clamp(this.mesoRelative(x, z) / Math.max(4, this.mesoAmp * 3), -1, 1);
     const dust =
-      this.site.dust * (0.8 - steep * 0.5) + crater.influence * crater.age * 0.25;
+      this.site.dust * (0.8 - steep * 0.5 - rel * 0.22) + crater.influence * crater.age * 0.25;
     const sand = (1 - this.site.basalt) * 0.25 * (1 - steep) + crater.influence * (1 - crater.age) * 0.3;
     const bedrock = steep * 0.85 + crater.rim * 0.85 + this.site.rockiness * 0.35;
     const layered = crater.steep * 0.2 * (this.site.biome === 'highlands' ? 1 : 0.3);

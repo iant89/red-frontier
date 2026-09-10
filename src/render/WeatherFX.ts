@@ -50,6 +50,11 @@ export interface WeatherFxInput {
   weather: WeatherFxWeather;
   rovers: WeatherFxRover[];
   heightAt: (x: number, z: number) => number;
+  /**
+   * Terrain colour at a point (0..1 RGB) — dust devils pick their dust up off
+   * the ground they stand on and wear its tint. Optional.
+   */
+  tintAt?: (x: number, z: number) => { r: number; g: number; b: number } | null;
 }
 
 export interface WeatherFxOptions {
@@ -86,7 +91,7 @@ export class WeatherFX {
 
   constructor(scene: THREE.Scene, opts: WeatherFxOptions = {}) {
     this.rand = opts.rand ?? Math.random;
-    this.pool = new ParticlePool(opts.maxParticles ?? 6000, this.rand);
+    this.pool = new ParticlePool(opts.maxParticles ?? 9000, this.rand);
     this.points = new ParticlePoints(this.pool.capacity);
     scene.add(this.points.points);
   }
@@ -143,6 +148,7 @@ export class WeatherFX {
       storm: w.storm,
       stormIntensity: w.stormIntensity,
       heightAt: input.heightAt,
+      groundTint: input.tintAt,
       rand: this.rand,
     };
 

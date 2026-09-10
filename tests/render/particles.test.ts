@@ -268,14 +268,20 @@ test('the devil funnel holds together instead of blowing apart', () => {
   assert.ok(mean < 18, `the funnel hugs its devil, mean radius=${mean.toFixed(2)}`);
 });
 
-test('the devil manager only wants devils during devil storms', () => {
+test('the devil manager wants devils inside storms — they travel with the weather', () => {
   const mgr = new DevilManager();
   assert.equal(mgr.wantedFor(makeCtx({ storm: 'calm' })), 0);
-  assert.equal(mgr.wantedFor(makeCtx({ storm: 'regional', stormIntensity: 0.8 })), 0, 'grit walls are not vortices');
+  assert.equal(mgr.wantedFor(makeCtx({ storm: 'planetary', stormIntensity: 1 })), 0, 'a uniform wall has no vortices');
   assert.equal(mgr.wantedFor(makeCtx({ storm: 'devil', stormIntensity: 0.3 })), 1);
   assert.equal(mgr.wantedFor(makeCtx({ storm: 'devil', stormIntensity: 0.8 })), 2);
+  // Big storms carry devils in their fronts once properly blowing…
+  assert.equal(mgr.wantedFor(makeCtx({ storm: 'regional', stormIntensity: 0.4 })), 0, 'not yet in the wall');
+  assert.equal(mgr.wantedFor(makeCtx({ storm: 'regional', stormIntensity: 0.6 })), 1, 'the front spins devils up');
+  assert.equal(mgr.wantedFor(makeCtx({ storm: 'regional', stormIntensity: 0.9 })), 2);
+  assert.equal(mgr.wantedFor(makeCtx({ storm: 'severe', stormIntensity: 0.7 })), 1);
+  assert.equal(mgr.wantedFor(makeCtx({ storm: 'severe', stormIntensity: 0.95 })), 2);
 
-  const pool = new ParticlePool(3000, mulberry32(15));
+  const pool = new ParticlePool(4000, mulberry32(15));
   runEmitter((c, p) => mgr.update(c, p), makeCtx({ storm: 'calm' }), pool, 1);
   assert.equal(mgr.activeCount, 0, 'clear skies, no devils');
   const stormy = makeCtx({ windX: 3, windZ: 1, windSpeed: 8, storm: 'devil', stormIntensity: 0.7 });
@@ -283,6 +289,125 @@ test('the devil manager only wants devils during devil storms', () => {
   assert.ok(mgr.activeCount >= 1, 'a devil storm spins devils up');
   runEmitter((c, p) => mgr.update(c, p), makeCtx({ time: stormy.time, storm: 'calm' }), pool, 12);
   assert.equal(mgr.activeCount, 0, 'devils dissipate once the storm passes');
+});
+
+test('a devil is born on the ground and climbs into the air', () => {
+  const pool = new ParticlePool(6000, mulberry32(25));
+  const devil = new DustDevil({ x: 0, z: 0, groundY: 0 }, mulberry32(25));
+  const ctx = makeCtx({ windX: 2, windZ: 1, windSpeed: 6, storm: 'devil', stormIntensity: 0.6 });
+  runEmitter((c, p) => devil.update(c, p), ctx, pool, 0.6);
+  assert.ok(devil.growth < 0.3, `still young, growth=${devil.growth.toFixed(2)}`);
+  const early = renderArrays(pool);
+  const nEarly = pool.writeRender(early.pos, early.col, early.size, early.alpha);
+  assert.ok(nEarly > 20, 'the birth burst is already throwing dust');
+  let maxEarly = 0;
+  for (let i = 0; i < nEarly; i++) maxEarly = Math.max(maxEarly, early.pos[i * 3 + 1]);
+  assert.ok(
+    maxEarly < devil.height * 0.45,
+    `a newborn devil hugs the ground (top at ${maxEarly.toFixed(1)} of ${devil.height.toFixed(0)})`,
+  );
+  runEmitter((c, p) => devil.update(c, p), ctx, pool, 4);
+  assert.ok(devil.growth >= 0.99, 'the column reaches full height');
+  const late = renderArrays(pool);
+  const nLate = pool.writeRender(late.pos, late.col, late.size, late.alpha);
+  let maxLate = 0;
+  for (let i = 0; i < nLate; i++) maxLate = Math.max(maxLate, late.pos[i * 3 + 1]);
+  assert.ok(maxLate > devil.height * 0.55, `a mature devil towers (${maxLate.toFixed(1)} m)`);
+});
+
+test('a devil wears the colour of the ground it picks its dust up from', () => {
+  const drive = (tint: { r: number; g: number; b: number }): { r: number; g: number; b: number } => {
+    const pool = new ParticlePool(6000, mulberry32(26));
+    const devil = new DustDevil({ x: 0, z: 0, groundY: 0 }, mulberry32(26));
+    const ctx = makeCtx({
+      windX: 2, windZ: 1, windSpeed: 6, storm: 'devil', stormIntensity: 0.6,
+      groundTint: () => tint,
+    });
+    runEmitter((c, p) => devil.update(c, p), ctx, pool, 2);
+    const a = renderArrays(pool);
+    const n = pool.writeRender(a.pos, a.col, a.size, a.alpha);
+    let r = 0, g = 0, b = 0;
+    for (let i = 0; i < n; i++) {
+      r += a.col[i * 3]; g += a.col[i * 3 + 1]; b += a.col[i * 3 + 2];
+    }
+    return { r: r / n, g: g / n, b: b / n };
+  };
+  const red = drive({ r: 0.9, g: 0.3, b: 0.2 });
+  const pale = drive({ r: 0.85, g: 0.8, b: 0.65 });
+  assert.ok(red.r > red.g && red.r > red.b, `red ground, red dust (${JSON.stringify(red)})`);
+  assert.ok(pale.g > 0.55 && pale.b > 0.45, `pale ground, pale dust (${JSON.stringify(pale)})`);
+  assert.ok(
+    Math.abs(red.r - pale.r) > 0.02 || Math.abs(red.g - pale.g) > 0.02,
+    'different ground, different devil',
+  );
+});
+
+test('a travelling devil lays down a lingering dust layer along its track', () => {
+  const pool = new ParticlePool(8000, mulberry32(27));
+  const devil = new DustDevil({ x: 0, z: 0, groundY: 0 }, mulberry32(27));
+  const ctx = makeCtx({ windX: 9, windZ: 0, windSpeed: 20, storm: 'devil', stormIntensity: 0.6 });
+  runEmitter((c, p) => devil.update(c, p), ctx, pool, 7);
+  const moved = devil.x;
+  assert.ok(moved > 6, `the devil should have travelled downwind (${moved.toFixed(1)} m)`);
+  const a = renderArrays(pool);
+  const n = pool.writeRender(a.pos, a.col, a.size, a.alpha);
+  let behind = 0;
+  for (let i = 0; i < n; i++) {
+    const x = a.pos[i * 3];
+    const y = a.pos[i * 3 + 1];
+    // Settled, slow, ground-hugging dust left in the devil's wake.
+    if (y < 1.6 && x < moved - 4 && x > moved - 40) behind++;
+  }
+  assert.ok(behind > 10, `a visible deposit trail behind the vortex (${behind} motes)`);
+});
+
+test('a dying devil winds down — thinner, calmer, gone without a pop', () => {
+  const pool = new ParticlePool(8000, mulberry32(28));
+  const devil = new DustDevil({ x: 0, z: 0, groundY: 0 }, mulberry32(28));
+  const ctx = makeCtx({ windX: 2, windZ: 1, windSpeed: 6, storm: 'devil', stormIntensity: 0.6 });
+  runEmitter((c, p) => devil.update(c, p), ctx, pool, 3);
+  assert.ok(devil.strength > 0.8, 'spun up first');
+  const fullR = devil.radiusScale;
+
+  // The storm drops it; it must decay slowly and shrink as it goes.
+  devil.target = 0;
+  let spawns = 0;
+  const origSpawn = pool.spawn.bind(pool);
+  pool.spawn = (o) => {
+    spawns++;
+    origSpawn(o);
+  };
+  const countOver = (secs: number): number => {
+    const before = spawns;
+    runEmitter((c, p) => devil.update(c, p), ctx, pool, secs);
+    return spawns - before;
+  };
+  const firstHalf = countOver(2);
+  const secondHalf = countOver(2);
+  assert.ok(devil.strength > 0.2, `no instant pop — still blowing (${devil.strength.toFixed(2)})`);
+  assert.ok(devil.radiusScale < fullR, `the funnel narrows as it dies (${devil.radiusScale.toFixed(2)})`);
+  assert.ok(secondHalf < firstHalf, `emission starves (${firstHalf} → ${secondHalf})`);
+  runEmitter((c, p) => devil.update(c, p), ctx, pool, 10);
+  assert.ok(devil.dead, 'fully faded out in the end');
+});
+
+test('the wobbling top wanders but never leaves the lower half of the vortex', () => {
+  const pool = new ParticlePool(8000, mulberry32(29));
+  const devil = new DustDevil({ x: 0, z: 0, groundY: 0, baseRadius: 4 }, mulberry32(29));
+  const ctx = makeCtx({ windX: 0, windZ: 0, windSpeed: 1, storm: 'devil', stormIntensity: 0.6 });
+  // Watch the crown of the funnel for a while; it must stay over the base.
+  let worst = 0;
+  for (let i = 0; i < 200; i++) {
+    ctx.time += 0.05;
+    devil.update(ctx, pool);
+    const axis = (devil as any).axisAt(1, ctx.time);
+    worst = Math.max(worst, Math.hypot(axis.x - devil.x, axis.z - devil.z));
+  }
+  assert.ok(
+    worst <= 4 * 1.7 + 1e-6,
+    `the top stays anchored over the footprint (worst lean ${worst.toFixed(2)} m)`,
+  );
+  assert.ok(worst > 0.5, `and it genuinely wobbles (lean ${worst.toFixed(2)} m)`);
 });
 
 test('rover trails ignore parked rovers', () => {
@@ -370,7 +495,7 @@ test('calm air carries ambient dust, but no storm and no devils', () => {
   assert.equal(fx.devilCount, 0);
 });
 
-test('a severe storm fills the sky far beyond calm air', () => {
+test('a severe storm fills the sky far beyond calm air — devils ride its front', () => {
   const still = makeFx(21);
   runFx(still.fx, still.cam, makeInput(calmWeather()), 4);
   const blowing = makeFx(21);
@@ -382,7 +507,10 @@ test('a severe storm fills the sky far beyond calm air', () => {
     blowing.fx.alive > still.fx.alive * 3,
     `storm air is far denser (${still.fx.alive} vs ${blowing.fx.alive})`,
   );
-  assert.equal(blowing.fx.devilCount, 0, 'severe storms are grit, not vortices');
+  assert.ok(
+    blowing.fx.devilCount >= 1,
+    `the wind and the devils arrive together (${blowing.fx.devilCount} spun up)`,
+  );
 });
 
 test('a devil storm spins up a devil near the camera', () => {
