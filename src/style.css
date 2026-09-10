@@ -569,6 +569,8 @@ body {
 #inspector.collapsed {
   width: auto;
   min-width: 176px;
+  /* A resized inline height must not make the folded bar a tall empty card. */
+  height: auto !important;
 }
 
 #inspector.collapsed .i-bar {
@@ -582,6 +584,8 @@ body {
 #vitals.collapsed {
   width: auto;
   min-width: 208px;
+  /* Keep the collapsed control to its header, even after resizing. */
+  height: auto !important;
 }
 
 .vitals-head {
