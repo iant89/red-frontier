@@ -419,6 +419,15 @@ try {
       const p = g.renderer.project(r.x, r.z);
       return { x: p.x, y: p.y, behind: p.behind };
     }, idx);
+  // Entity picking reads mesh world matrices, which normally refresh on
+  // render. Push sim state into the meshes and bake the matrices here so
+  // the taps below don't depend on rAF having ticked recently.
+  const convergeScene = () =>
+    rf(page, () => {
+      const g = window.__rf.game;
+      g.renderer.sync(g.sim);
+      g.renderer.scene.updateMatrixWorld(true);
+    });
   // Test setup, not a gesture: frame the first rover so the tap below has
   // a real on-screen target at a tappable size.
   await frameRover(0);
@@ -431,7 +440,10 @@ try {
     fail('tap selects the rover', 'precondition failed');
     fail('a tap never rotates the camera', 'precondition failed');
   } else {
+    const frames = await rf(page, () => window.__rf.game.renderer.renderer.info.render.frame);
+    console.log(`info - frames rendered: ${frames}`);
     const before = await rigState(page);
+    await convergeScene();
     await tapCanvas(page, target.x, target.y);
     await sleep(300);
     let sel = await readSelection();
@@ -442,6 +454,7 @@ try {
       await sleep(400);
       const t2 = await projectRover(1);
       if (!t2.behind && t2.x > 0 && t2.x < VIEW.width && t2.y > 0 && t2.y < VIEW.height) {
+        await convergeScene();
         await tapCanvas(page, t2.x, t2.y);
         await sleep(300);
         sel = await readSelection();
