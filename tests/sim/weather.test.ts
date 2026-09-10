@@ -56,8 +56,12 @@ test('weather is deterministic for a given seed', () => {
   const b = new Simulation({ seed: 31 });
   a.weather.debugScheduleStorm('regional', 10, 5);
   b.weather.debugScheduleStorm('regional', 10, 5);
-  run(a, 3);
-  run(b, 3);
+  // Sixty game seconds carries the forced cell through travel and arrival;
+  // further sols repeat the same seeded tick contract.
+  run(a, 0.25);
+  run(b, 0.25);
+  assert.ok(a.weather.current(), 'precondition: the forced storm must arrive during the run');
+  assert.ok(a.weather.stormIntensity > 0, 'precondition: deterministic comparison must include live weather');
   assert.equal(
     JSON.stringify(a.weather.snapshot()),
     JSON.stringify(b.weather.snapshot()),

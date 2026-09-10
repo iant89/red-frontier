@@ -9,16 +9,16 @@ import assert from 'node:assert/strict';
 import { Simulation } from '../../src/sim/Simulation';
 import { ROVERS } from '../../src/sim/defs';
 import { SOL_SECONDS } from '../../src/sim/config';
-import { run, buildAndWait } from '../fixtures/sim';
+import { run, buildOnline } from '../fixtures/sim';
 import { group, test, finish } from '../harness';
 
 group('The rover garage');
 
 test('a garage services drivetrains, fast-charges, and assembles rovers', () => {
   const sim = new Simulation({ seed: 65, nearDeposits: 0.2 });
-  buildAndWait(sim, 'warehouse');
-  buildAndWait(sim, 'solar');
-  const garage = buildAndWait(sim, 'garage');
+  buildOnline(sim, 'warehouse');
+  buildOnline(sim, 'solar');
+  const garage = buildOnline(sim, 'garage');
 
   // --- assembly: the line builds a cargo rover from stockpiled parts ---
   sim.storage.iron = 300;

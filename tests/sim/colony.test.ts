@@ -10,28 +10,32 @@ import assert from 'node:assert/strict';
 import { Simulation } from '../../src/sim/Simulation';
 import type { BuildingKind } from '../../src/sim/defs';
 import { ROVERS } from '../../src/sim/defs';
-import { run, buildAndWait } from '../fixtures/sim';
+import { run, buildOnline } from '../fixtures/sim';
 import { group, test, finish } from '../harness';
 
 group('Production chains');
 
 test('the ice → water → oxygen chain actually produces oxygen', () => {
   const sim = new Simulation({ seed: 42, nearDeposits: 0.2 });
-  buildAndWait(sim, 'warehouse');
-  buildAndWait(sim, 'solar');
-  buildAndWait(sim, 'battery');
-  buildAndWait(sim, 'extractor');
+  buildOnline(sim, 'warehouse');
+  buildOnline(sim, 'solar');
+  buildOnline(sim, 'battery');
+  buildOnline(sim, 'extractor');
+  // Logistics has its own suite. Feed this production-chain test directly so
+  // it measures conversion rather than waiting for several rover round trips.
+  sim.storage.ice = 500;
+  sim.weather.debugSuppressRolls();
 
   const waterBefore = sim.pools.amounts.water;
-  run(sim, 3);
+  run(sim, 0.25);
   assert.ok(
     sim.pools.amounts.water > waterBefore,
     `extractor should make water (${waterBefore.toFixed(1)} → ${sim.pools.amounts.water.toFixed(1)})`,
   );
 
-  buildAndWait(sim, 'oxygenator');
+  buildOnline(sim, 'oxygenator');
   const o2Before = sim.pools.amounts.oxygen;
-  run(sim, 4);
+  run(sim, 0.25);
   assert.ok(
     sim.pools.amounts.oxygen > o2Before,
     `oxygenator should make O₂ (${o2Before.toFixed(1)} → ${sim.pools.amounts.oxygen.toFixed(1)})`,
@@ -42,11 +46,11 @@ test('the ice → water → oxygen chain actually produces oxygen', () => {
 test('the greenhouse closes the food loop under stable conditions', () => {
   const sim = new Simulation({ seed: 42, nearDeposits: 0.2 });
   for (const k of ['warehouse', 'solar', 'battery', 'extractor', 'oxygenator'] as BuildingKind[]) {
-    buildAndWait(sim, k);
+    buildOnline(sim, k);
   }
-  buildAndWait(sim, 'greenhouse', 30);
-  buildAndWait(sim, 'solar');
-  buildAndWait(sim, 'battery');
+  buildOnline(sim, 'greenhouse');
+  buildOnline(sim, 'solar');
+  buildOnline(sim, 'battery');
 
   // Freeze the logistics layer: charged, idle rovers with no standing orders
   // draw no charge power, so the grid holds steady instead of swinging with
@@ -70,10 +74,11 @@ test('the greenhouse closes the food loop under stable conditions', () => {
   wx.storm = 'calm';
   sim.weather.debugSuppressRolls();
   // Hauling is another suite's subject; this one needs ice on hand, so stock
-  // the silo directly (three sols burn ~100 kg).
+  // the silo directly. A little over one sol fills the complete rolling-rate
+  // window and samples both day and night; extra sols only repeat that cycle.
   sim.storage.ice = 500;
 
-  run(sim, 3);
+  run(sim, 1.1);
 
   assert.ok(!sim.gameOver, 'the colony should survive');
   for (const f of ['water', 'oxygen', 'food'] as const) {
@@ -87,9 +92,9 @@ test('the greenhouse closes the food loop under stable conditions', () => {
 test('a greenhouse slows down at night and speeds up by day', () => {
   const sim = new Simulation({ seed: 42, nearDeposits: 0.2 });
   for (const k of ['warehouse', 'solar', 'battery', 'extractor'] as BuildingKind[]) {
-    buildAndWait(sim, k);
+    buildOnline(sim, k);
   }
-  const g = buildAndWait(sim, 'greenhouse', 30);
+  const g = buildOnline(sim, 'greenhouse');
 
   // Sample throughput at noon and at midnight.
   const at = (frac: number) => {

@@ -9,11 +9,11 @@
  *   @covers src/sim/power.ts …   sources this suite fails when they change
  *   @desc One line on what it is for.
  *
- * tests/full.test.ts imports every suite and links them into a single run, and
- * that is what `npm test` runs. Everything else here exists so that you rarely
- * need it:
+ * tests/full.test.ts imports every suite and links them into a single serial
+ * run. `npm test` uses the faster isolated/parallel mode; `npm run test:serial`
+ * keeps the linked run available for debugging shared-process behaviour:
  *
- *   node scripts/run-tests.mjs                   full linked run
+ *   node scripts/run-tests.mjs                   full linked serial run
  *   node scripts/run-tests.mjs --all             every suite, own process, in parallel
  *   node scripts/run-tests.mjs power storms      just the suites matching these words
  *   node scripts/run-tests.mjs --group unit      just the fast unit suites
@@ -97,13 +97,17 @@ function resolveLocal(fromRel, spec) {
   return null;
 }
 
-const IMPORT_RE = /(?:^|\n)\s*(?:import|export)[^'"\n]*?from\s*['"]([^'"]+)['"]|import\(\s*['"]([^'"]+)['"]\s*\)/g;
+// Static imports with bindings, side-effect-only imports (the full suite's
+// link list), and dynamic imports. Missing the side-effect form makes the full
+// bundle cache blind to edits in every linked test file.
+const IMPORT_RE =
+  /(?:^|\n)\s*(?:(?:import|export)[^'"\n]*?\bfrom\s*['"]([^'"]+)['"]|import\s*['"]([^'"]+)['"])|import\(\s*['"]([^'"]+)['"]\s*\)/g;
 
 function importsOf(rel) {
   const text = fs.readFileSync(path.join(root, rel), 'utf8');
   const out = [];
   for (const m of text.matchAll(IMPORT_RE)) {
-    const r = resolveLocal(rel, m[1] || m[2]);
+    const r = resolveLocal(rel, m[1] || m[2] || m[3]);
     if (r) out.push(r);
   }
   return out;
@@ -225,6 +229,7 @@ async function bundle(rel) {
 // ------------------------------------------------------------------- running --
 function runChild(outFile, { env = {}, capture = false, label }) {
   return new Promise((resolve, reject) => {
+    const startedAt = Date.now();
     const child = spawn(process.execPath, [outFile], {
       cwd: root,
       stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
@@ -242,7 +247,7 @@ function runChild(outFile, { env = {}, capture = false, label }) {
     child.on('error', reject);
     child.on('exit', (code) => {
       const summary = (buf.match(/\d+ checks passed[^\n]*/) || [''])[0];
-      resolve({ code: code ?? 1, output: buf, summary, label });
+      resolve({ code: code ?? 1, output: buf, summary, label, ms: Date.now() - startedAt });
     });
   });
 }
@@ -254,8 +259,33 @@ const indent = (s) => String(s).split('\n').map((l) => `      ${l}`).join('\n');
  * standalone suite (RF_LINKED unset) so it prints its own detail and fails its
  * own process; the runner owns the roll-up.
  */
+const TIMINGS_FILE = path.join(outDir, 'suite-timings.json');
+
+function readTimings() {
+  try {
+    return JSON.parse(fs.readFileSync(TIMINGS_FILE, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Longest-processing-time-first keeps every worker useful: in particular the
+ * 20-sol soak starts immediately instead of waiting behind the tiny HUD suites.
+ * Real timings from prior runs win; group/check estimates make a clean checkout
+ * schedule sensibly on its first run too.
+ */
+function estimatedMs(suite, timings) {
+  if (Number.isFinite(timings[suite.suite])) return timings[suite.suite];
+  const groupBase = { load: 30000, integration: 4000, determinism: 1500, unit: 700, hud: 100 };
+  return (groupBase[suite.group] ?? 500) + suite.checks * 25;
+}
+
 async function runSuites(selected, { jobs = 1, capture = false, env = {} } = {}) {
-  const queue = [...selected];
+  const timings = readTimings();
+  const queue = [...selected].sort(
+    (a, b) => estimatedMs(b, timings) - estimatedMs(a, timings) || a.suite.localeCompare(b.suite),
+  );
   const results = [];
   const worker = async () => {
     for (;;) {
@@ -274,6 +304,19 @@ async function runSuites(selected, { jobs = 1, capture = false, env = {} } = {})
     }
   };
   await Promise.all(Array.from({ length: Math.max(1, Math.min(jobs, selected.length)) }, worker));
+
+  // Smooth noisy runs rather than letting one contended process permanently
+  // distort the queue. This cache lives beside generated bundles, outside Git.
+  for (const { suite, res } of results) {
+    const old = Number(timings[suite.suite]);
+    timings[suite.suite] = Math.round(Number.isFinite(old) ? old * 0.35 + res.ms * 0.65 : res.ms);
+  }
+  try {
+    fs.mkdirSync(outDir, { recursive: true });
+    fs.writeFileSync(TIMINGS_FILE, JSON.stringify(timings, null, 2));
+  } catch {
+    // Timing history is an optimisation only; a read-only cache must not fail tests.
+  }
   return results;
 }
 
@@ -345,7 +388,7 @@ function printList() {
     );
   }
   const total = suites.reduce((n, s) => n + s.checks, 0);
-  console.log(`\n${suites.length} suites, ${total} checks. \`npm test\` runs them all through ${FULL_REL}.`);
+  console.log(`\n${suites.length} suites, ${total} checks. \`npm test\` runs them in isolated parallel processes.`);
   const quick = suites.find((s) => s.group === 'unit') ?? suites[0];
   if (quick) console.log(C.dim(`Run one area instead: npm test -- ${quick.suite}`));
   return 0;
@@ -402,7 +445,15 @@ async function once({ selected, forceSuites = false }) {
   const env = { RF_CASE: flags.case ? String(flags.case) : '' };
   if (env.RF_CASE === '') delete env.RF_CASE;
 
-  // No filters at all: the linked full test, in one process, streaming.
+  // Every unfiltered full run validates that the parallel discovery list and
+  // linked serial entry still contain exactly the same suites.
+  const isParallelBoard = !forceSuites && !words.length && !flags.group && flags.all && !flags.case;
+  if (isParallelBoard) {
+    const bad = checkLayoutQuiet();
+    if (bad) return bad;
+  }
+
+  // No flags at all: the linked full test, in one process, streaming.
   const isWholeBoard = !forceSuites && !words.length && !flags.group && !flags.all && !flags.case && !flags.verbose;
   if (isWholeBoard) {
     const bad = checkLayoutQuiet();

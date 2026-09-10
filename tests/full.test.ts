@@ -1,8 +1,8 @@
 /**
  * @suite full
  * @group link
- * @desc The full test: links every suite under tests/sim and tests/hud into one
- * run and prints the roll-up. This is what `npm test` executes.
+ * @desc The serial full test: links every suite into one process and prints the
+ * roll-up. `npm run test:serial` uses it; `npm test` runs suites in parallel.
  *
  * Nothing is implemented here but the import list, and that list is checked
  * against the files on disk by `npm run test:check` — a suite that exists but
@@ -33,7 +33,9 @@ import './sim/determinism.test';
 import './sim/persistence.test';
 import './sim/devtools.test';
 import './render/particles.test';
+import './ui/build-status.test';
 import './hud/chrome.test';
+import './hud/panels.test';
 import './hud/weather.test';
 import './hud/inspectors.test';
 import './hud/fleet.test';
@@ -47,4 +49,4 @@ import './hud/devpanel.test';
 
 // Each suite prints one line as it runs; `report` prints the total, every
 // failure, and exits non-zero if anything broke.
-report(31);
+report(33);

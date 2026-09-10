@@ -60,7 +60,14 @@ const SHOT = process.env.SMOKE_FAILURE_SHOT ?? join(ROOT, 'smoke-failure.png');
 // keys its mobile behaviour off pointerType and a 760px media query.
 const VIEW = { width: 390, height: 844 };
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** Wait for browser frames instead of guessing how fast this runner renders. */
+const settle = (page, frames = 2) =>
+  page.evaluate(async (count) => {
+    await document.fonts.ready;
+    for (let i = 0; i < count; i++) {
+      await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+    }
+  }, frames);
 
 const failures = [];
 const pass = (name) => console.log(`ok - ${name}`);
@@ -249,8 +256,8 @@ const rigState = (page) =>
 /**
  * Terrain raycast against the CONVERGED camera pose. Gesture handlers only
  * change rig params — position/quaternion follow on the next rendered
- * frame, which software rendering can delay past our sleeps. Converging
- * here (atomically, so no frame can interleave) reads the same pose the
+ * frame, which software rendering may deliver late. Converging here
+ * atomically (so no frame can interleave) reads the same pose the
  * gesture's own raycast will see after frames catch up.
  */
 const raycastSynced = (page, x, y) =>
@@ -317,7 +324,7 @@ try {
   await page.click('[data-grid="size"] .rf-pick:has-text("Outpost")');
   await page.click('[data-act="next"]'); // → landing globe
   await page.waitForSelector('.rf-globe-wrap canvas');
-  await sleep(1200);
+  await settle(page);
   // Raycast picking can land between spinning markers, so sweep a grid
   // until a zone catches and Next enables (same recipe as the screenshots).
   // Two passes: on a slow frame a click can fall between markers twice over.
@@ -330,7 +337,7 @@ try {
         await page.click('.rf-globe-wrap canvas', {
           position: { x: (box.width * (gx + 0.5)) / 9, y: (box.height * (gy + 0.5)) / 7 },
         });
-        await sleep(120);
+        await settle(page);
         if (await page.$eval('[data-act="next"]', (b) => !b.disabled)) {
           picked = true;
           break outer;
@@ -352,7 +359,7 @@ try {
   } catch {
     throw new Fatal('world generation never finished');
   }
-  await sleep(2500); // let the first frames render
+  await settle(page); // let the first frames render
   if (!(await rf(page, () => Boolean(window.__rf?.game?.sim)))) {
     throw new Fatal('reached no live simulation after worldgen');
   }
@@ -378,10 +385,10 @@ try {
     'expected #buildbar without .bar-hidden',
   );
   await touchTap(page, await centerOf(page, '#vitals-toggle'));
-  await sleep(200);
+  await settle(page);
   const expanded = (await page.locator('#vitals.collapsed').count()) === 0;
   await touchTap(page, await centerOf(page, '#vitals-toggle'));
-  await sleep(200);
+  await settle(page);
   const recollapsed = (await page.locator('#vitals.collapsed').count()) === 1;
   check('vitals toggle expands and re-collapses by tap', expanded && recollapsed);
 
@@ -394,7 +401,7 @@ try {
     rf(page, () => document.querySelectorAll('.build-btn.active').length);
   for (let i = 0; i < 3 && (await armedCount()) !== 1; i++) {
     await touchTap(page, await centerOf(page, '.build-btn'));
-    await sleep(250);
+    await settle(page);
   }
   const armed = await armedCount();
   check('tapping a blueprint arms it', armed === 1, `active=${armed}`);
@@ -402,7 +409,7 @@ try {
   const cx = canvasBox.x + canvasBox.width / 2;
   const cy = canvasBox.y + canvasBox.height / 2;
   await longPressCanvas(page, cx, cy);
-  await sleep(200);
+  await settle(page);
   const stillArmed = await rf(page, () => document.querySelectorAll('.build-btn.active').length);
   check('long-press cancels the armed blueprint', stillArmed === 0, `active=${stillArmed}`);
 
@@ -454,7 +461,7 @@ try {
   // Test setup, not a gesture: frame the first rover so the tap below has
   // a real on-screen target at a tappable size.
   await frameRover(0);
-  await sleep(400);
+  await settle(page);
   const target = await projectRover(0);
   const onScreen =
     !target.behind && target.x > 0 && target.x < VIEW.width && target.y > 0 && target.y < VIEW.height;
@@ -480,7 +487,7 @@ try {
       console.log(`info - pick at tap point (${Math.round(x)},${Math.round(y)}): ${probe}`);
       const before = await rigState(page);
       await tapCanvas(page, x, y);
-      await sleep(300);
+      await settle(page);
       const after = await rigState(page);
       return { before, after };
     };
@@ -492,7 +499,7 @@ try {
     // photobombs rover 0's exact screen centre and eats the tap.
     if ((sel.kind !== 'Rover' || sel.id === null) && roster.length > 1) {
       await frameRover(1);
-      await sleep(400);
+      await settle(page);
       const t2 = await projectRover(1);
       if (!t2.behind && t2.x > 0 && t2.x < VIEW.width && t2.y > 0 && t2.y < VIEW.height) {
         const r2 = await tapRoverAt(t2.x, t2.y);
@@ -513,7 +520,7 @@ try {
   {
     const before = await rigState(page);
     await dragCanvas(page, cx - 50, cy + 60, cx + 50, cy + 60);
-    await sleep(200);
+    await settle(page);
     const after = await rigState(page);
     check(
       'single-finger drag rotates the camera',
@@ -533,7 +540,7 @@ try {
     // verified to be bare canvas. elementFromPoint is the guard's own oracle,
     // so the synthetic dispatch can't drift from real hit-testing again.
     await touchTap(page, await centerOf(page, '#i-collapse'));
-    await sleep(200);
+    await settle(page);
     check(
       'inspector collapses by tap',
       (await page.locator('#inspector.collapsed').count()) === 1,
@@ -565,7 +572,7 @@ try {
       fail('long-press orders the selected rover to move', 'no bare-canvas terrain point found');
     } else {
       await longPressCanvas(page, press.sx, press.sy);
-      await sleep(150);
+      await settle(page);
       const cmd = await rf(page, (id) => window.__rf.game.sim.roverById(id)?.command ?? null, selectedId);
       const moved =
         cmd?.type === 'moveTo' &&
@@ -589,7 +596,7 @@ try {
       { x: cx - 85, y: cy + 60 },
       { x: cx + 85, y: cy + 60 },
     );
-    await sleep(200);
+    await settle(page);
     const after = await rigState(page);
     check(
       'pinch spread zooms the camera in',
@@ -606,7 +613,7 @@ try {
       { x: cx + 15, y: cy + 60 },
       { x: cx + 105, y: cy + 60 },
     );
-    await sleep(200);
+    await settle(page);
     const after = await rigState(page);
     const drift = Math.hypot(after.tx - before.tx, after.tz - before.tz);
     check('two-finger drag pans the camera', drift > 1, `drift=${drift.toFixed(2)}m`);

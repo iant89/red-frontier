@@ -23,8 +23,26 @@ const BASE = process.env.BASE_URL ?? 'http://127.0.0.1:5199';
 const OUT = join(dirname(fileURLToPath(import.meta.url)), '..', 'screenshots');
 mkdirSync(OUT, { recursive: true });
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const shot = (page, name) => page.screenshot({ path: join(OUT, name) });
+
+/** Wait for fonts, finite CSS transitions and two painted frames. */
+async function settle(page) {
+  await page.evaluate(() => document.fonts.ready);
+  await page
+    .waitForFunction(() =>
+      document
+        .getAnimations()
+        .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
+        .every((animation) => animation.playState === 'finished' || animation.playState === 'idle'),
+      undefined,
+      { timeout: 1500 },
+    )
+    .catch(() => {});
+  await page.evaluate(async () => {
+    await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+    await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  });
+}
 
 /**
  * Screenshot a loading screen mid-flight: wait until the percent readout hits
@@ -54,7 +72,7 @@ try {
 
   await page.waitForSelector('.rf-menu', { timeout: 20000 });
   await page.waitForSelector('.rf-loading', { state: 'detached', timeout: 20000 });
-  await sleep(400);
+  await settle(page);
   await shot(page, '02-menu.png');
 
   // ------------------------------------------------------- new-game wizard --
@@ -62,28 +80,28 @@ try {
   await page.waitForSelector('#rf-save-name');
   await page.fill('#rf-save-name', 'Ares Prime');
   await page.click('[data-grid="diff"] .rf-pick:has-text("Survivor")');
-  await sleep(300);
+  await settle(page);
   await shot(page, '03-wizard-mission.png');
 
   await page.click('[data-act="next"]');
   await page.waitForSelector('[data-grid="size"]');
   await page.click('[data-grid="size"] .rf-pick:has-text("Planetary Survey")');
-  await sleep(300);
+  await settle(page);
   await shot(page, '04-wizard-world.png');
 
   await page.click('[data-act="next"]');
   await page.waitForSelector('.rf-globe-wrap canvas', { timeout: 20000 });
-  await sleep(2500); // let the globe spin into a flattering angle
+  await settle(page); // globe texture and first frames are painted
   // Click the canvas middle — usually a zone; harmless when it is not.
   await page.click('.rf-globe-wrap canvas', { position: { x: 300, y: 180 } });
-  await sleep(800);
+  await settle(page);
   await shot(page, '05-wizard-landing.png');
 
   await page.click('[data-act="next"]');
   await page.waitForSelector('.rf-summary');
   await page.click('.rf-advanced-toggle');
   await page.fill('#rf-seed', 'OLYMPUS-1');
-  await sleep(400);
+  await settle(page);
   await shot(page, '06-wizard-launch.png');
 
   // ------------------------------------------------------- world generation -
@@ -96,7 +114,7 @@ try {
   await snapProgress(page, '07-worldgen.png', ['56%', '68%', '87%'], 15000);
   try {
     await page.waitForSelector('.rf-loading', { state: 'detached', timeout: 180000 });
-    await sleep(2500);
+    await settle(page);
     await shot(page, '08-colony.png');
   } catch (e) {
     console.warn('colony shot skipped:', e.message.split('\n')[0]);
@@ -141,11 +159,11 @@ try {
   await loads.waitForSelector('.rf-loading', { state: 'detached', timeout: 20000 });
   await loads.click('[data-act="load"]');
   await loads.waitForSelector('.rf-save-row');
-  await sleep(400);
+  await settle(page);
   await shot(loads, '09-loads.png');
   await loads.click('.rf-save-row .rf-dots');
   await loads.waitForSelector('.rf-menu-pop');
-  await sleep(300);
+  await settle(page);
   await shot(loads, '10-loads-popover.png');
   await ctx2.close();
 

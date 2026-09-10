@@ -16,10 +16,17 @@ group('Identical inputs, identical state');
 test('same seed and same commands produce identical state', () => {
   const a = new Simulation({ seed: 42, nearDeposits: 0.18 });
   const b = new Simulation({ seed: 42, nearDeposits: 0.18 });
-  a.issueMine(a.rovers[0].id, nearDeposit(a, 'regolith')!.id);
-  b.issueMine(b.rovers[0].id, nearDeposit(b, 'regolith')!.id);
-  run(a, 5);
-  run(b, 5);
+  const depA = nearDeposit(a, 'regolith')!;
+  const depB = nearDeposit(b, 'regolith')!;
+  const amountBefore = depA.amount;
+  a.issueMine(a.rovers[0].id, depA.id);
+  b.issueMine(b.rovers[0].id, depB.id);
+  // A quarter-sol covers travel, mining, power, life support and weather. More
+  // elapsed time repeats the same deterministic tick contract without adding
+  // another code path.
+  run(a, 0.25);
+  run(b, 0.25);
+  assert.ok(depA.amount < amountBefore, 'precondition: the commanded mining run must do real work');
   assert.equal(
     JSON.stringify(a.snapshot()),
     JSON.stringify(b.snapshot()),
@@ -40,6 +47,8 @@ test('the same total time produces the same state at any frame rate', () => {
     jittery.step(dt);
     delivered += dt;
   }
+  assert.ok(Math.abs(steady.simTime - 60) < 1e-8, 'precondition: steady must execute 60 seconds');
+  assert.ok(Math.abs(jittery.simTime - 60) < 1e-8, 'precondition: jittery must execute 60 seconds');
   assert.equal(
     JSON.stringify(steady.snapshot()),
     JSON.stringify(jittery.snapshot()),

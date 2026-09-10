@@ -569,6 +569,64 @@
   letter-spacing: 0.6px;
 }
 
+.rf-build-status {
+  position: fixed;
+  right: max(18px, env(safe-area-inset-right));
+  bottom: max(14px, env(safe-area-inset-bottom));
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: calc(100vw - 24px);
+  padding: 6px 10px;
+  border: 1px solid var(--rf-line);
+  border-radius: 999px;
+  background: rgba(10, 7, 5, 0.76);
+  color: var(--rf-dim);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 5px 20px rgba(0, 0, 0, 0.28);
+}
+
+.rf-build-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--rf-faint);
+  box-shadow: 0 0 8px currentColor;
+}
+
+.rf-build-status[data-state="checking"] .rf-build-dot {
+  background: var(--rf-warn);
+  animation: rf-build-pulse 1.2s ease-in-out infinite;
+}
+
+.rf-build-status[data-state="latest"] {
+  color: #a8d698;
+  border-color: rgba(127, 180, 106, 0.5);
+}
+
+.rf-build-status[data-state="latest"] .rf-build-dot {
+  background: var(--rf-ok);
+}
+
+.rf-build-status[data-state="old"] {
+  color: #efc56e;
+  border-color: rgba(217, 162, 58, 0.55);
+}
+
+.rf-build-status[data-state="old"] .rf-build-dot {
+  background: var(--rf-warn);
+}
+
+@keyframes rf-build-pulse {
+  50% { opacity: 0.35; }
+}
+
 /* --------------------------------------------------------------- wizard --- */
 .rf-wizard-head {
   display: flex;

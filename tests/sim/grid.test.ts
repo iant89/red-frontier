@@ -8,15 +8,15 @@
 
 import assert from 'node:assert/strict';
 import { Simulation } from '../../src/sim/Simulation';
-import { run, buildAndWait } from '../fixtures/sim';
+import { run, buildOnline } from '../fixtures/sim';
 import { group, test, finish } from '../harness';
 
 group('Grid behaviour in a live colony');
 
 test('solar output tracks the sun across a sol', () => {
   const sim = new Simulation({ seed: 42, nearDeposits: 0.2 });
-  buildAndWait(sim, 'warehouse');
-  const s = buildAndWait(sim, 'solar');
+  buildOnline(sim, 'warehouse');
+  const s = buildOnline(sim, 'solar');
 
   sim.clock.frac = 0.5;
   sim.step(1 / 20);
@@ -32,10 +32,10 @@ test('solar output tracks the sun across a sol', () => {
 
 test('batteries charge by day and discharge by night', () => {
   const sim = new Simulation({ seed: 42, nearDeposits: 0.2 });
-  buildAndWait(sim, 'warehouse');
-  buildAndWait(sim, 'solar');
-  buildAndWait(sim, 'battery');
-  buildAndWait(sim, 'extractor');
+  buildOnline(sim, 'warehouse');
+  buildOnline(sim, 'solar');
+  buildOnline(sim, 'battery');
+  buildOnline(sim, 'extractor');
 
   sim.storage.ice = 500; // keep the extractor genuinely loaded
 
@@ -63,9 +63,9 @@ test('batteries charge by day and discharge by night', () => {
 
 test('a rover charging at noon leaves surplus for the batteries', () => {
   const sim = new Simulation({ seed: 42, nearDeposits: 0.2 });
-  buildAndWait(sim, 'warehouse');
-  buildAndWait(sim, 'solar');
-  buildAndWait(sim, 'battery');
+  buildOnline(sim, 'warehouse');
+  buildOnline(sim, 'solar');
+  buildOnline(sim, 'battery');
 
   // Freeze the sky: clear any storm in progress and roll no new ones, so the
   // measurement below is about the grid, not the weather.
@@ -98,10 +98,10 @@ test('a rover charging at noon leaves surplus for the batteries', () => {
 
 test('switching a building off removes its load from the grid', () => {
   const sim = new Simulation({ seed: 42, nearDeposits: 0.2 });
-  buildAndWait(sim, 'warehouse');
-  buildAndWait(sim, 'solar');
-  buildAndWait(sim, 'battery');
-  const ext = buildAndWait(sim, 'extractor');
+  buildOnline(sim, 'warehouse');
+  buildOnline(sim, 'solar');
+  buildOnline(sim, 'battery');
+  const ext = buildOnline(sim, 'extractor');
   sim.storage.ice = 200;
   sim.clock.frac = 0.5;
   sim.step(1 / 20);
