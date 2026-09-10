@@ -116,6 +116,16 @@ function severityIcon(s: Severity): string {
   }
 }
 
+/**
+ * Compass bearing → "N", "NE", … The sim's bearing convention is atan2(x, z):
+ * 0 = north (+Z), turning east (+X) with positive angle.
+ */
+function compassPoint(bearingRad: number): string {
+  const pts = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+  const deg = ((bearingRad * 180) / Math.PI + 360) % 360;
+  return pts[Math.round(deg / 45) % 8];
+}
+
 export class HUD {
   private root: HTMLElement;
   /** This instance's own chrome root — lookups never leak into another HUD. */
@@ -166,6 +176,21 @@ export class HUD {
   private vitalsCollapsed = false;
   private inspectorCollapsed = false;
   private buildCollapsed = false;
+
+  /** Panel window manager state (drag / resize / geometry persistence). */
+  private dragState: {
+    id: string;
+    mode: 'move' | 'resize';
+    pointerId: number;
+    startX: number;
+    startY: number;
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  } | null = null;
+  private panelsHidden = false;
+  private lastTapOnHandle = { at: 0, id: '' };
 
   constructor(cb: HUDCallbacks) {
     this.cb = cb;
@@ -268,6 +293,9 @@ export class HUD {
         e.stopPropagation();
         this.setInspectorCollapsed(!this.inspectorCollapsed);
       });
+    // The rebuild wipes the panel's children — re-arm the window chrome.
+    insp.querySelector('.i-bar')?.classList.add('hud-drag');
+    this.ensureGrip(insp);
     this.applyInspectorCollapse();
   }
 
@@ -475,6 +503,248 @@ export class HUD {
     // Normalise the inspector to the bar + body structure every render path
     // below assumes.
     this.clearInspector();
+
+    // Panel window management: drag by the header, resize by the corner grip,
+    // geometry persisted — plus the one-tap "clear the screen" peek button.
+    this.enablePanelWindows();
+    this.buildPeekButton();
+  }
+
+  // ------------------------------------------- panel window management ----
+
+  private static readonly PANEL_MIN: Record<string, { w: number; h: number }> = {
+    vitals: { w: 190, h: 110 },
+    inspector: { w: 190, h: 120 },
+    log: { w: 180, h: 70 },
+  };
+
+  private ensureGrip(panel: HTMLElement): void {
+    if (panel.querySelector(':scope > .panel-grip')) return;
+    const grip = document.createElement('div');
+    grip.className = 'panel-grip';
+    grip.setAttribute('aria-hidden', 'true');
+    panel.appendChild(grip);
+  }
+
+  /**
+   * Mark the drag handles, add resize grips, restore stored geometry, and
+   * wire one delegated pointer pipeline for every panel window. Delegation
+   * matters: the inspector rebuilds its entire body on every selection, so a
+   * directly-bound handle would keep getting orphaned.
+   */
+  private enablePanelWindows(): void {
+    this.el('vitals').querySelector('.vitals-head')?.classList.add('hud-drag');
+    this.el('log').querySelector('.lg-title')?.classList.add('hud-drag');
+    for (const id of ['vitals', 'inspector', 'log']) this.ensureGrip(this.el(id));
+    this.applyStoredGeometry();
+
+    this.hudRoot.addEventListener('pointerdown', (e) => {
+      const t = e.target as HTMLElement | null;
+      if (!t || this.dragState) return;
+
+      // ---- resize grip -----------------------------------------------------
+      const grip = t.closest<HTMLElement>('.panel-grip');
+      if (grip) {
+        const panel = grip.parentElement as HTMLElement | null;
+        if (!panel?.id) return;
+        e.preventDefault();
+        e.stopPropagation();
+        this.beginPanelDrag(panel, 'resize', e);
+        return;
+      }
+
+      // ---- drag handle -----------------------------------------------------
+      const handle = t.closest<HTMLElement>('.hud-drag');
+      if (!handle) return;
+      // Interactive children keep their taps — a collapse button is not a drag.
+      if (t.closest('button, input, select, textarea, label, a')) return;
+      const panel = this.panelWindowOf(handle);
+      if (!panel) return;
+      e.preventDefault();
+      e.stopPropagation();
+      // A double-tap snaps the panel home; it must not also start a new drag.
+      if (this.doubleTapReset(panel)) return;
+      this.beginPanelDrag(panel, 'move', e);
+    });
+  }
+
+  private panelWindowOf(el: HTMLElement): HTMLElement | null {
+    let node: HTMLElement | null = el;
+    while (node && node !== this.hudRoot) {
+      if (node.id === 'vitals' || node.id === 'inspector' || node.id === 'log') return node;
+      node = node.parentElement;
+    }
+    return null;
+  }
+
+  private beginPanelDrag(panel: HTMLElement, mode: 'move' | 'resize', e: PointerEvent): void {
+    const rect = panel.getBoundingClientRect();
+    // Normalise the panel to explicit left/top/width/height so dragging works
+    // identically for right-anchored panels (the inspector).
+    panel.style.left = `${rect.left}px`;
+    panel.style.top = `${rect.top}px`;
+    panel.style.right = 'auto';
+    panel.style.bottom = 'auto';
+    panel.style.width = `${rect.width}px`;
+    panel.style.maxWidth = 'none';
+    panel.style.height = `${Math.min(rect.height, window.innerHeight)}px`;
+    panel.style.maxHeight = 'none';
+
+    this.dragState = {
+      id: panel.id,
+      mode,
+      pointerId: e.pointerId ?? 0,
+      startX: Number.isFinite(e.clientX) ? e.clientX : 0,
+      startY: Number.isFinite(e.clientY) ? e.clientY : 0,
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height,
+    };
+    panel.classList.add('panel-dragging');
+    try {
+      panel.setPointerCapture(e.pointerId);
+    } catch {
+      /* jsdom / odd environments: the window listeners below still track */
+    }
+
+    const onMove = (ev: Event): void => {
+      const p = ev as PointerEvent;
+      if (!this.dragState || (p.pointerId ?? 0) !== this.dragState.pointerId) return;
+      if (!Number.isFinite(p.clientX) || !Number.isFinite(p.clientY)) return;
+      const st = this.dragState;
+      const panelEl = this.el(st.id);
+      const dx = p.clientX - st.startX;
+      const dy = p.clientY - st.startY;
+      if (st.mode === 'move') {
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        const x = Math.max(-st.width + 48, Math.min(vw - 48, st.left + dx));
+        const y = Math.max(0, Math.min(vh - 34, st.top + dy));
+        panelEl.style.left = `${x}px`;
+        panelEl.style.top = `${y}px`;
+      } else {
+        const min = HUD.PANEL_MIN[st.id] ?? { w: 160, h: 80 };
+        const w = Math.max(min.w, Math.min(window.innerWidth, st.width + dx));
+        const h = Math.max(min.h, Math.min(window.innerHeight, st.height + dy));
+        panelEl.style.width = `${w}px`;
+        panelEl.style.height = `${h}px`;
+      }
+    };
+    const onUp = (ev: Event): void => {
+      const p = ev as PointerEvent;
+      if (!this.dragState || (p.pointerId ?? 0) !== this.dragState.pointerId) return;
+      const st = this.dragState;
+      this.dragState = null;
+      panel.classList.remove('panel-dragging');
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      const travel = Number.isFinite(p.clientX)
+        ? Math.hypot(p.clientX - st.startX, p.clientY - st.startY)
+        : 0;
+      if (st.mode === 'move' && travel < 6) {
+        // A press that never moved is a *tap* — it feeds the double-tap
+        // reset, and it must not be persisted as a new position.
+        this.lastTapOnHandle = { at: performance.now(), id: panel.id };
+        return;
+      }
+      this.storePanelGeometry(panel);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  }
+
+  /**
+   * A quick double-tap on the header snaps the panel back to its dock.
+   * Taps are recorded by the drag pipeline's pointer-up (presses that never
+   * moved), so an actual drag can never be mistaken for half of a double-tap.
+   */
+  private doubleTapReset(panel: HTMLElement): boolean {
+    const now = performance.now();
+    if (this.lastTapOnHandle.id === panel.id && now - this.lastTapOnHandle.at < 350) {
+      this.resetPanelGeometry(panel);
+      this.lastTapOnHandle = { at: 0, id: '' };
+      return true;
+    }
+    return false;
+  }
+
+  private storePanelGeometry(panel: HTMLElement): void {
+    const rect = panel.getBoundingClientRect();
+    this.storeSet(
+      `rf-panel-${panel.id}`,
+      JSON.stringify({
+        x: Math.round(rect.left),
+        y: Math.round(rect.top),
+        w: Math.round(rect.width),
+        h: Math.round(rect.height),
+      }),
+    );
+  }
+
+  resetPanelGeometry(panel: HTMLElement): void {
+    this.storeSet(`rf-panel-${panel.id}`, '');
+    panel.style.left = '';
+    panel.style.top = '';
+    panel.style.right = '';
+    panel.style.bottom = '';
+    panel.style.width = '';
+    panel.style.height = '';
+    panel.style.maxWidth = '';
+    panel.style.maxHeight = '';
+  }
+
+  private applyStoredGeometry(): void {
+    const vw = window.innerWidth || 1024;
+    const vh = window.innerHeight || 768;
+    for (const id of ['vitals', 'inspector', 'log']) {
+      const raw = this.storeGet(`rf-panel-${id}`);
+      if (!raw) continue;
+      try {
+        const g = JSON.parse(raw) as { x?: number; y?: number; w?: number; h?: number };
+        if (![g.x, g.y, g.w, g.h].every((n) => Number.isFinite(n))) continue;
+        const panel = this.el(id);
+        const w = Math.max(140, Math.min(vw, g.w!));
+        const h = Math.max(60, Math.min(vh, g.h!));
+        const x = Math.max(-w + 48, Math.min(vw - 48, g.x!));
+        const y = Math.max(0, Math.min(vh - 34, g.y!));
+        panel.style.left = `${x}px`;
+        panel.style.top = `${y}px`;
+        panel.style.right = 'auto';
+        panel.style.bottom = 'auto';
+        panel.style.width = `${w}px`;
+        panel.style.height = `${h}px`;
+        panel.style.maxWidth = 'none';
+        panel.style.maxHeight = 'none';
+      } catch {
+        /* malformed geometry — the CSS dock is the fallback */
+      }
+    }
+  }
+
+  /** The one-tap "get the HUD out of my way" button. */
+  private buildPeekButton(): void {
+    const b = document.createElement('button');
+    b.id = 'hud-peek';
+    b.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.setPanelsHidden(!this.panelsHidden);
+    });
+    this.hudRoot.appendChild(b);
+    this.setPanelsHidden(this.storeGet('rf-hud-hidden') === '1', false);
+  }
+
+  setPanelsHidden(on: boolean, persist = true): void {
+    this.panelsHidden = on;
+    this.hudRoot.classList.toggle('hud-hidden', on);
+    const b = this.hudRoot.querySelector<HTMLElement>('#hud-peek');
+    if (b) {
+      b.textContent = on ? '👁' : '🗂';
+      b.title = on ? 'Show HUD panels' : 'Hide HUD panels (clears the screen)';
+    }
+    if (persist) this.storeSet('rf-hud-hidden', on ? '1' : '0');
   }
 
   private buildResourceChips(): void {
@@ -861,15 +1131,25 @@ export class HUD {
     const wxStatus = this.el('wx-status');
     const fc = wx.forecast();
     const active = wx.current();
+    const threat = wx.threat();
     if (active) {
-      wxStatus.textContent = `${stormLabel(active.kind)} — passing in ${fmtDuration(
+      wxStatus.textContent = `${stormLabel(active.kind)} overhead — clearing in ${fmtDuration(
         wx.passesIn() / SOL_SECONDS,
       )}. Rovers are sheltering.`;
       wxStatus.className = 'wx-status bad';
     } else if (fc) {
-      wxStatus.textContent = `${fc.label} forecast — arriving in ~${fmtDuration(
+      // Storms travel: report where the system is and which way it blows in.
+      const where = threat
+        ? ` ${Math.round(threat.distKm)} km ${compassPoint(threat.bearingRad)}, tracking in —`
+        : '';
+      wxStatus.textContent = `${fc.label} forecast${where} here in ~${fmtDuration(
         fc.arrivesIn / SOL_SECONDS,
       )}. Charge batteries, shelter the crews.`;
+      wxStatus.className = 'wx-status warn';
+    } else if (threat) {
+      wxStatus.textContent = `${threat.label} on the map — ${Math.round(threat.distKm)} km ${compassPoint(
+        threat.bearingRad,
+      )}, arriving in ~${fmtDuration(threat.arrivesIn / SOL_SECONDS)}.`;
       wxStatus.className = 'wx-status warn';
     } else {
       wxStatus.textContent = `Clear skies · ${Math.round(wx.solarTransmission * 100)}% sunlight through the dust`;

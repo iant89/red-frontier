@@ -12,7 +12,11 @@ import { RESOURCES, ROVERS, BUILDINGS, ALL_FLUIDS } from '../sim/defs';
 import type { SunState } from '../sim/clock';
 import { sunDirection } from '../sim/clock';
 import type { Colonist } from '../sim/lifesupport';
-import { makeMarsFallbackMaterial, makeMarsTerrainMaterial } from './marsTerrain';
+import {
+  makeMarsFallbackMaterial,
+  makeMarsTerrainMaterial,
+  composeMacroAlbedo,
+} from './marsTerrain';
 import { WeatherFX } from './WeatherFX';
 
 export type OverlayMode = 'none' | 'power' | 'life' | 'weather';
@@ -243,6 +247,20 @@ export class GameRenderer {
         weather: sim.weather,
         rovers: sim.rovers,
         heightAt: (x, z) => this.world.heightAt(x, z),
+        // A devil's dust is the ground's own colour: blend the geological
+        // material weights into the palette the terrain is painted with.
+        tintAt: (x, z) => {
+          const s = this.world.sampleSurface(x, z);
+          let r = 0;
+          let g = 0;
+          let b = 0;
+          for (let k = 0; k < 6; k++) {
+            r += MAT_TINT[k].r * s.mat[k];
+            g += MAT_TINT[k].g * s.mat[k];
+            b += MAT_TINT[k].b * s.mat[k];
+          }
+          return { r, g, b };
+        },
       },
       this.camera,
       dt,
@@ -258,7 +276,9 @@ export class GameRenderer {
     const uv = geo.attributes.uv;
     const c = new THREE.Color();
     const tint = new THREE.Color();
-    const uvScale = 0.0072;
+    // Fine tiling for the bite maps only — the colour comes from a composed,
+    // world-spanning macro map (see loadMarsPbr), never from a repeating stamp.
+    const uvScale = 0.02;
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
       const z = pos.getZ(i);
@@ -296,6 +316,9 @@ export class GameRenderer {
     const finish = (): void => {
       if (--pending > 0) return;
       const anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+      // Compose the world-spanning macro albedo out of the source imagery —
+      // the landscape is generated from the map, not tiled with it.
+      const macro = composeMacroAlbedo(loaded.albedo!, this.world.seed);
       const mat = makeMarsTerrainMaterial(
         {
           albedo: loaded.albedo!,
@@ -306,6 +329,7 @@ export class GameRenderer {
           height: loaded.height!,
         },
         anisotropy,
+        { macro: macro ?? undefined, worldSize: this.world.half * 2 },
       );
       const old = this.terrain.material as THREE.Material;
       this.terrain.material = mat;

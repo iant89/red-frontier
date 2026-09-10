@@ -523,8 +523,24 @@ export class Game {
   }
 
   // ---------------------------------------------------------- gestures ----
+  /**
+   * True when HUD chrome is visually at this screen point. Belt and braces on
+   * top of the panels' `pointer-events`: a tap that lands on any UI surface —
+   * a speed button, a panel, a chip — must never leak through to the canvas
+   * and become a move order for the selected rover.
+   */
+  private uiCoversPoint(x: number, y: number): boolean {
+    try {
+      const el = document.elementFromPoint(x, y);
+      return !!el && el !== this.canvas;
+    } catch {
+      return false; // headless/odd environments: the CSS layer already guards
+    }
+  }
+
   private contextTap(x: number, y: number): void {
     if (!this.renderer || !this.sim) return;
+    if (this.uiCoversPoint(x, y)) return;
     if (this.pendingBuild) {
       this.setPendingBuild(null);
       return;
@@ -544,6 +560,7 @@ export class Game {
 
   private primaryTap(x: number, y: number): void {
     if (!this.renderer || !this.sim) return;
+    if (this.uiCoversPoint(x, y)) return;
     if (this.pendingBuild) {
       this.placeBuild(x, y);
       return;
@@ -926,7 +943,8 @@ export class Game {
 
   private updateGhost(): void {
     if (!this.renderer || !this.sim) return;
-    if (!this.pendingBuild || !this.mouse.in) {
+    // Over HUD chrome the blueprint ghost hides — the panel owns that pixel.
+    if (!this.pendingBuild || !this.mouse.in || this.uiCoversPoint(this.mouse.x, this.mouse.y)) {
       this.renderer.showGhost(null, 0, 0, false);
       return;
     }

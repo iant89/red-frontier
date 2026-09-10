@@ -203,6 +203,24 @@ export const STORM_UNLOCK_SOL = {
 export const STORM_WARN_LEAD_S = 60;
 
 /**
+ * Storms are *places*, not moods: each one is a circular weather system with a
+ * footprint (km) that travels across the planet, and the colony only feels the
+ * weather while that footprint is overhead. `cross` tunes how far the centre
+ * moves during the storm's life, as a fraction of its radius — the colony
+ * enters the leading edge as the winds arrive and sits under the system until
+ * the envelope decays, exactly like a front passing over on Earth.
+ */
+export const STORM_CELL_GEOM: Record<
+  'devil' | 'regional' | 'severe' | 'planetary',
+  { rMin: number; rMax: number; cross: number }
+> = {
+  devil: { rMin: 4, rMax: 9, cross: 0.55 },
+  regional: { rMin: 90, rMax: 210, cross: 0.6 },
+  severe: { rMin: 150, rMax: 300, cross: 0.6 },
+  planetary: { rMin: 850, rMax: 1400, cross: 0.45 },
+};
+
+/**
  * Structural damage per game second: `intensity^1.5 × exposure × this`.
  * Tuned so a regional storm bruises exposed arrays and a severe one can trip
  * them offline — while a planetary event threatens everything except the pod.
