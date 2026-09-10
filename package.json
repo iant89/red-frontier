@@ -19,6 +19,7 @@
     "test:all": "node scripts/run-tests.mjs --all",
     "test:list": "node scripts/run-tests.mjs --list",
     "test:check": "node scripts/run-tests.mjs --check",
+    "test:smoke": "node scripts/mobile-smoke.mjs",
     "setup:playwright": "node scripts/setup-playwright.mjs"
   },
   "devDependencies": {
