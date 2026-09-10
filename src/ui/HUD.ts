@@ -1515,8 +1515,14 @@ export class HUD {
     this.wireInspectorBar(insp);
   }
 
-  showRover(r: Rover, sim: Simulation): void {
+  /**
+   * Render a rover selection. HUD callers use the default selection semantics;
+   * the game loop passes `true` because it calls this method every tick and a
+   * collapsed panel must not be reopened by a routine value refresh.
+   */
+  showRover(r: Rover, sim: Simulation, preserveCollapse = false): void {
     const def = ROVERS[r.kind];
+    if (!preserveCollapse) this.setInspectorCollapsed(false);
     const mass = ALL_RESOURCES.reduce((s, k) => s + r.cargo[k], 0);
     const key = `rover:${r.id}`;
     const insp = this.el('inspector');
@@ -1667,8 +1673,10 @@ export class HUD {
     lv.className = `v ${r.lightsActive || r.phase === 'disabled' ? 'warn' : ''}`;
   }
 
-  showBuilding(b: Building, sim: Simulation): void {
+  /** Render a building selection; see showRover for the refresh distinction. */
+  showBuilding(b: Building, sim: Simulation, preserveCollapse = false): void {
     const def = BUILDINGS[b.kind];
+    if (!preserveCollapse) this.setInspectorCollapsed(false);
     const key = `bld:${b.id}`;
     const insp = this.el('inspector');
 
@@ -1869,8 +1877,10 @@ export class HUD {
     );
   }
 
-  showColonist(c: Colonist, sim: Simulation): void {
+  /** Render the colonist selection; see showRover for the refresh distinction. */
+  showColonist(c: Colonist, sim: Simulation, preserveCollapse = false): void {
     const key = `col:${c.id}`;
+    if (!preserveCollapse) this.setInspectorCollapsed(false);
     const insp = this.el('inspector');
     if (this.inspectorKey !== key) {
       this.inspectorKey = key;

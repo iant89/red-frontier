@@ -1040,14 +1040,14 @@ export class Game {
     if (this.selected) {
       if (this.selected.type === 'rover') {
         const r = this.sim.roverById(this.selected.id);
-        if (r) this.hud.showRover(r, this.sim);
+        if (r) this.hud.showRover(r, this.sim, true);
         else this.selected = null;
       } else if (this.selected.type === 'building') {
         const b = this.sim.buildingById(this.selected.id);
         if (b) this.hud.showBuilding(b, this.sim);
         else this.selected = null;
       } else {
-        this.hud.showColonist(this.sim.colonist, this.sim);
+        this.hud.showColonist(this.sim.colonist, this.sim, true);
       }
     }
     if (!this.selected) this.hud.clearInspector();

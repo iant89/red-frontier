@@ -31,6 +31,20 @@ test('the rover inspector patches values without rebuilding', () => {
   assert.equal(doc.querySelector('#i-bat'), node, 'the same node should be reused');
 });
 
+test('selecting an already-rendered rover reopens a collapsed inspector', () => {
+  const rover = sim.rovers[0];
+  hud.showRover(rover, sim);
+  hud.setInspectorCollapsed(true);
+  assert.ok(doc.getElementById('inspector')!.classList.contains('collapsed'));
+
+  // This is also what a selection refresh looks like to the HUD. It must not
+  // leave the body hidden merely because the title/key did not change.
+  hud.showRover(rover, sim);
+  const inspector = doc.getElementById('inspector')!;
+  assert.ok(!inspector.classList.contains('collapsed'));
+  assert.match(inspector.querySelector('.i-body')!.textContent!, /Battery/);
+});
+
 test('the building inspector renders a placed site', () => {
   hud.showBuilding(solar, sim);
   assert.match(doc.getElementById('inspector')!.textContent!, /Solar Array/);
