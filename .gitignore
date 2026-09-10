@@ -11,3 +11,6 @@ node_modules/.test-dist/
 
 # local scratch probes (not part of the project)
 .probe/
+
+# playwright NSS stubs built by scripts/setup-playwright.mjs (local toolchain)
+.playwright-libs/

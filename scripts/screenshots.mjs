@@ -6,6 +6,10 @@
  *   npm i --no-save playwright && npx playwright install chromium
  *   node scripts/screenshots.mjs
  *
+ * On machines without system NSS (this sandbox, minimal containers), run
+ * `node scripts/setup-playwright.mjs` first and launch via the sparticuz
+ * Chromium + stub recipe it prints, instead of `npx playwright install`.
+ *
  * The .github/workflows/screenshots.yml workflow does all of this on a
  * runner and commits the PNGs back to the branch.
  */
