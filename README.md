@@ -197,9 +197,10 @@ src/
     World.ts        seeded terrain + deposits
     Simulation.ts   entities, tick order, construction, persistence
   render/           three.js renderer (terrain, entities, day/night, overlays)
+    particles/      true particle system (wind, storm grit, dust devils, rover trails)
   ui/               DOM HUD (vitals, alerts, inspectors, build palette)
   lib/              deterministic RNG + simplex noise
-tests/              26 headless suites (sim/*, hud/*) + the linked full test
+tests/              29 headless suites (sim/*, hud/*, render/*) + the linked full test
 scripts/            esbuild test runner: filters, --affected, --watch
 ```
 
@@ -227,7 +228,7 @@ scripts/            esbuild test runner: filters, --affected, --watch
 
 ### Testing
 
-The tests are split into **26 small suites** that each pin one corner of the
+The tests are split into **29 small suites** that each pin one corner of the
 game, plus one **full test** that links them all. A suite is a plain module that
 registers cases with `test()` and finishes with `await finish()`; `scripts/run-tests.mjs`
 bundles and runs any subset of them in its own process.
