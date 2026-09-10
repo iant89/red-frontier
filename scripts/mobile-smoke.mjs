@@ -8,7 +8,10 @@
  *   - tap to arm a blueprint, long-press to cancel it (contextTap branch)
  *   - tap-to-select a rover (3D picking through the real renderer)
  *   - tap-vs-drag disambiguation (a tap never rotates the camera)
- *   - long-press on terrain issues a move order to the selected rover
+ *   - folding the inspector by tap, then long-press on bare-canvas terrain
+ *     issues a move order to the selected rover (the click-through guard
+ *     ignores gestures landing on UI, so the press point is verified with
+ *     elementFromPoint first — as a real finger would require)
  *   - pinch spread zooms the camera, two-finger drag pans it
  *   - no uncaught page errors along the way
  *
@@ -523,23 +526,55 @@ try {
   if (selectedId === null) {
     fail('long-press orders the selected rover to move', 'precondition: tap-to-select failed');
   } else {
-    const px = cx;
-    const py = cy + 120;
-    const expected = await raycastSynced(page, px, py);
-    if (!expected) {
-      fail('long-press orders the selected rover to move', 'terrain raycast missed');
+    // Selecting the rover opened its floating panel over mid-screen, and the
+    // click-through guard rightly ignores canvas gestures that land on UI — a
+    // real player must fold the panel (or press elsewhere) to order onto
+    // covered ground. Do the same: collapse the inspector, then press a point
+    // verified to be bare canvas. elementFromPoint is the guard's own oracle,
+    // so the synthetic dispatch can't drift from real hit-testing again.
+    await touchTap(page, await centerOf(page, '#i-collapse'));
+    await sleep(200);
+    check(
+      'inspector collapses by tap',
+      (await page.locator('#inspector.collapsed').count()) === 1,
+      'expected #inspector.collapsed',
+    );
+    const candidates = [
+      [cx, cy + 120],
+      [cx - 120, cy + 120],
+      [cx + 120, cy + 120],
+      [cx, cy - 140],
+      [cx - 120, cy - 60],
+      [cx + 120, cy - 60],
+    ];
+    let press = null;
+    for (const [sx, sy] of candidates) {
+      const bare = await rf(
+        page,
+        ({ x, y }) => document.elementFromPoint(x, y) === document.getElementById('game-canvas'),
+        { x: sx, y: sy },
+      );
+      if (!bare) continue;
+      const pt = await raycastSynced(page, sx, sy);
+      if (pt) {
+        press = { sx, sy, x: pt.x, z: pt.z };
+        break;
+      }
+    }
+    if (!press) {
+      fail('long-press orders the selected rover to move', 'no bare-canvas terrain point found');
     } else {
-      await longPressCanvas(page, px, py);
+      await longPressCanvas(page, press.sx, press.sy);
       await sleep(150);
       const cmd = await rf(page, (id) => window.__rf.game.sim.roverById(id)?.command ?? null, selectedId);
       const moved =
         cmd?.type === 'moveTo' &&
-        Math.abs(cmd.x - expected.x) < 1e-6 &&
-        Math.abs(cmd.z - expected.z) < 1e-6;
+        Math.abs(cmd.x - press.x) < 1e-6 &&
+        Math.abs(cmd.z - press.z) < 1e-6;
       check(
         'long-press orders the selected rover to move',
         moved,
-        `cmd=${JSON.stringify(cmd)} want=(${expected.x},${expected.z})`,
+        `cmd=${JSON.stringify(cmd)} want=(${press.x},${press.z}) at screen (${Math.round(press.sx)},${Math.round(press.sy)})`,
       );
     }
   }
