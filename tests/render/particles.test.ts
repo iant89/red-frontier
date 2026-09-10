@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { mulberry32 } from '../../src/lib/rng';
-import { ParticlePool } from '../../src/render/particles/ParticlePool';
+import { ParticlePool, PKind } from '../../src/render/particles/ParticlePool';
 import {
   WindEmitter,
   StormEmitter,
@@ -142,6 +142,43 @@ test('particles settle on their ground plane instead of sinking', () => {
   assert.equal(a.pos[1], 0, 'clamped to the ground');
 });
 
+test('wrapAmbient corrals wind-blown motes but never devil or trail dust', () => {
+  const pool = new ParticlePool(8, mulberry32(7));
+  const base = { y: 5, z: 0, vx: 0, vy: 0, vz: 0, life: 10, size0: 1, size1: 1, r: 1, g: 1, b: 1, alpha: 1 };
+  // A storm mote blown 200 units past the box edge…
+  pool.spawn({ ...base, x: 200 });
+  // …while a devil swirl and a wheel puff sit just as far out.
+  pool.spawn({ ...base, x: 200, kind: PKind.Devil });
+  pool.spawn({ ...base, x: 200, kind: PKind.Trail });
+  pool.wrapAmbient(0, 0, 75);
+  const a = renderArrays(pool);
+  const n = pool.writeRender(a.pos, a.col, a.size, a.alpha);
+  assert.equal(n, 3);
+  const xs = [a.pos[0], a.pos[3], a.pos[6]].sort((p, q) => p - q);
+  // 200 wraps into [-75, 75]: 200 + 75 = 275 → 275 mod 150 = 125 → -75 + 125.
+  assert.equal(xs[0], 50, `ambient mote wrapped into the box, got ${xs[0]}`);
+  assert.equal(xs[1], 200, 'devil dust stays with its vortex');
+  assert.equal(xs[2], 200, 'trail dust stays where the wheels threw it');
+});
+
+test('a centripetal anchor bends tangential throw into an orbit', () => {
+  const drive = (pullK: number): number => {
+    const pool = new ParticlePool(4, mulberry32(8));
+    pool.spawn({
+      x: 5, y: 0, z: 0, vx: 0, vy: 0, vz: 9, life: 3,
+      size0: 1, size1: 1, r: 1, g: 1, b: 1, alpha: 1, pullX: 0, pullZ: 0, pullK,
+    });
+    for (let i = 0; i < 75; i++) pool.update(0.02, 0.02 * (i + 1));
+    const a = renderArrays(pool);
+    pool.writeRender(a.pos, a.col, a.size, a.alpha);
+    return Math.hypot(a.pos[0], a.pos[2]);
+  };
+  const orbit = drive(4);
+  const escape = drive(0);
+  assert.ok(orbit < 7, `anchored throw stays near the funnel, got r=${orbit.toFixed(2)}`);
+  assert.ok(escape > 12, `unanchored throw flies straight off, got r=${escape.toFixed(2)}`);
+});
+
 test('a seeded pool is bit-deterministic', () => {
   const drive = (seed: number): Float32Array => {
     const pool = new ParticlePool(256, mulberry32(seed));
@@ -195,6 +232,8 @@ test('storm grit scales with intensity and vanishes in calm', () => {
   const half = storm.rateFor(makeCtx({ storm: 'regional', stormIntensity: 0.5, dust: 0.6 }));
   const full = storm.rateFor(makeCtx({ storm: 'severe', stormIntensity: 1, dust: 0.85 }));
   assert.ok(half > 0 && full > half, `grit grows with the storm (${half} → ${full})`);
+  const devilSky = storm.rateFor(makeCtx({ storm: 'devil', stormIntensity: 1, dust: 0.85 }));
+  assert.ok(devilSky < half, `a dust devil is haze, not a wall (${devilSky} < ${half})`);
 
   const pool = new ParticlePool(2000, mulberry32(13));
   runEmitter((c, p) => storm.update(c, p), makeCtx({ stormIntensity: 0 }), pool, 2);
@@ -211,6 +250,22 @@ test('a dust devil spins a rising column', () => {
   const v = { x: 0, y: 0, z: 0 };
   pool.meanVelocity(v);
   assert.ok(v.y > 2, `the column rises, mean vy=${v.y.toFixed(2)}`);
+});
+
+test('the devil funnel holds together instead of blowing apart', () => {
+  const pool = new ParticlePool(2000, mulberry32(16));
+  const devil = new DustDevil({ x: 0, z: 0, groundY: 0 }, mulberry32(16));
+  const ctx = makeCtx({ windX: 2, windZ: 1, windSpeed: 6, storm: 'devil', stormIntensity: 0.6 });
+  runEmitter((c, p) => devil.update(c, p), ctx, pool, 3);
+  const a = renderArrays(pool);
+  const n = pool.writeRender(a.pos, a.col, a.size, a.alpha);
+  assert.ok(n > 50, `a visible funnel, got ${n}`);
+  let sum = 0;
+  for (let i = 0; i < n; i++) {
+    sum += Math.hypot(a.pos[i * 3] - devil.x, a.pos[i * 3 + 2] - devil.z);
+  }
+  const mean = sum / n;
+  assert.ok(mean < 18, `the funnel hugs its devil, mean radius=${mean.toFixed(2)}`);
 });
 
 test('the devil manager only wants devils during devil storms', () => {
@@ -369,6 +424,24 @@ test('pause freezes the system exactly', () => {
   for (let i = 0; i < 20; i++) fx.sync(input, cam, 0);
   assert.equal(fx.alive, alive, 'no aging, no emission while paused');
   assert.equal(fx.rendered, rendered);
+});
+
+test('emission centres on the viewed ground, not the camera', () => {
+  const { fx, cam } = makeFx(25);
+  // The default orbit pose: perched out at radius, looking back at the pad.
+  cam.position.set(120, 110, 150);
+  cam.lookAt(0, 0, 0);
+  const input = makeInput(calmWeather());
+  runFx(fx, cam, input, 0.5);
+  const f = fx.focus;
+  assert.ok(
+    Math.hypot(f.x, f.z) < 30,
+    `focus sits near the pad, got (${f.x.toFixed(1)}, ${f.z.toFixed(1)})`,
+  );
+  assert.ok(
+    Math.hypot(f.x - 120, f.z - 150) > 100,
+    'focus is far from the ground below the camera',
+  );
 });
 
 group('GPU adapter');

@@ -17,6 +17,15 @@
 /** Random source: `Math.random` in play, a seeded PRNG in tests. */
 export type Rand = () => number;
 
+/**
+ * What a particle belongs to. Ambient wind/storm motes are wrapped into the
+ * camera-following box every frame (they would otherwise blow hundreds of
+ * units downwind and evacuate the viewed area); devil and trail particles
+ * stay where the vortex / wheels put them.
+ */
+export const PKind = { Ambient: 0, Devil: 1, Trail: 2 } as const;
+export type ParticleKind = (typeof PKind)[keyof typeof PKind];
+
 export interface SpawnOptions {
   x: number;
   y: number;
@@ -46,6 +55,17 @@ export interface SpawnOptions {
   turbulence?: number;
   /** Floor the particle rests on (it lands, it doesn't fall through). */
   groundY?: number;
+  /** What the particle belongs to (default `Ambient` — camera-box wrapped). */
+  kind?: ParticleKind;
+  /**
+   * Centripetal anchor: each second the particle accelerates toward
+   * (`pullX`, `pullZ`) by `pullK` × its distance from the anchor (a spring,
+   * 1/s²). Zero (default) disables it. This is what bends the dust devil's
+   * tangential throw into an orbit instead of a straight-line escape.
+   */
+  pullX?: number;
+  pullZ?: number;
+  pullK?: number;
 }
 
 const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v);
@@ -81,6 +101,10 @@ export class ParticlePool {
   private readonly turb: Float32Array;
   private readonly seed: Float32Array;
   private readonly groundY: Float32Array;
+  private readonly kind: Uint8Array;
+  private readonly pullX: Float32Array;
+  private readonly pullZ: Float32Array;
+  private readonly pullK: Float32Array;
 
   private cursor = 0;
   private count = 0;
@@ -111,6 +135,10 @@ export class ParticlePool {
     this.seed = new Float32Array(n);
     this.groundY = new Float32Array(n);
     this.groundY.fill(-Infinity);
+    this.kind = new Uint8Array(n);
+    this.pullX = new Float32Array(n);
+    this.pullZ = new Float32Array(n);
+    this.pullK = new Float32Array(n);
   }
 
   /** Live particle count. */
@@ -146,6 +174,10 @@ export class ParticlePool {
     this.turb[i] = Math.max(0, o.turbulence ?? 0);
     this.seed[i] = this.rand();
     this.groundY[i] = o.groundY ?? -Infinity;
+    this.kind[i] = o.kind ?? PKind.Ambient;
+    this.pullX[i] = o.pullX ?? 0;
+    this.pullZ[i] = o.pullZ ?? 0;
+    this.pullK[i] = Math.max(0, o.pullK ?? 0);
   }
 
   /**
@@ -178,6 +210,12 @@ export class ParticlePool {
       }
       vy -= this.grav[i] * dt;
 
+      const pk = this.pullK[i];
+      if (pk > 0) {
+        vx += (this.pullX[i] - this.px[i]) * pk * dt;
+        vz += (this.pullZ[i] - this.pz[i]) * pk * dt;
+      }
+
       const tb = this.turb[i];
       if (tb > 0) {
         const s = this.seed[i];
@@ -207,6 +245,26 @@ export class ParticlePool {
       this.vx[i] = vx;
       this.vy[i] = vy;
       this.vz[i] = vz;
+    }
+  }
+
+  /**
+   * Toroidally wrap every live *ambient* particle into the square box around
+   * (`cx`, `cz`) with the given half-extent. Storm grit at 50+ m/s would
+   * otherwise travel hundreds of units downwind in one life and leave the
+   * viewed area empty; wrapping keeps the box uniformly populated while the
+   * fade envelope hides births and deaths. Devil and trail particles are
+   * anchored to the vortex / wheels and are never wrapped.
+   */
+  wrapAmbient(cx: number, cz: number, half: number): void {
+    const size = Math.max(1, half * 2);
+    const n = this.capacity;
+    for (let i = 0; i < n; i++) {
+      if (this.life[i] <= 0 || this.kind[i] !== PKind.Ambient) continue;
+      const dx = this.px[i] - cx + half;
+      const dz = this.pz[i] - cz + half;
+      this.px[i] = cx - half + ((((dx % size) + size) % size));
+      this.pz[i] = cz - half + ((((dz % size) + size) % size));
     }
   }
 

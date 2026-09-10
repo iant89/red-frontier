@@ -10,6 +10,7 @@
  */
 
 import type { ParticlePool, Rand } from './ParticlePool';
+import { PKind } from './ParticlePool';
 import type { StormKind } from '../../sim/weather';
 
 /** Everything an emitter needs to know about this frame's world. */
@@ -18,7 +19,10 @@ export interface FxContext {
   time: number;
   /** Sim seconds advanced this frame. */
   dt: number;
-  /** Camera ground position — emission boxes follow it. */
+  /**
+   * Emission centre — the ground under the middle of the view, which the
+   * controller derives from the camera. Boxes and devil spawns follow it.
+   */
   camX: number;
   camZ: number;
   /** Wind drift vector in world units/second (sim speed × compass bearing). */
@@ -52,8 +56,10 @@ function dustTint(
 }
 
 const WIND_TINT = { r: 0.78, g: 0.61, b: 0.43 };
-const STORM_TINT = { r: 0.72, g: 0.5, b: 0.33 };
-const DEVIL_TINT = { r: 0.79, g: 0.56, b: 0.36 };
+// Storm grit reads brighter than the ground — sunlit airborne dust plus
+// backscatter — so the wall separates from the terrain even from high orbit.
+const STORM_TINT = { r: 0.85, g: 0.61, b: 0.4 };
+const DEVIL_TINT = { r: 0.88, g: 0.64, b: 0.43 };
 const TRAIL_TINT = { r: 0.76, g: 0.55, b: 0.38 };
 
 // ------------------------------------------------------------- wind ----
@@ -103,7 +109,7 @@ export class WindEmitter {
       size0: 0.5 + R() * 0.7,
       size1: 1.2 + R() * 0.9,
       ...tint,
-      alpha: 0.05 + ctx.dust * 0.15,
+      alpha: 0.06 + ctx.dust * 0.2,
       fadeIn: 0.2,
       fadeOut: 0.45,
       gravity: 0.12,
@@ -127,7 +133,10 @@ export class StormEmitter {
   rateFor(ctx: FxContext): number {
     const k = ctx.stormIntensity;
     if (k <= 0.03) return 0;
-    return Math.min(560, k * 520 + ctx.dust * 40);
+    // Devils are local vortices under relatively clear skies (visibility
+    // stays high) — they kick up a light haze, not a regional grit wall.
+    const kindScale = ctx.storm === 'devil' ? 0.25 : ctx.storm === 'regional' ? 0.7 : 1;
+    return Math.min(560, (k * 520 + ctx.dust * 40) * kindScale);
   }
 
   update(ctx: FxContext, pool: ParticlePool): void {
@@ -148,9 +157,9 @@ export class StormEmitter {
     const x = ctx.camX + (R() - 0.5) * W;
     const z = ctx.camZ + (R() - 0.5) * D;
     const g = ctx.heightAt(x, z);
-    const streak = R() < 0.33;
+    const streak = R() < 0.4;
     const tint = dustTint(R, STORM_TINT, 0.08);
-    const boost = 1.15 + k * 1.1;
+    const boost = 1.0 + k * 0.8;
     // Slow vertical heaving sells the gust fronts rolling through.
     const heave = Math.sin(ctx.time * 2.4 + x * 0.05 + z * 0.03) * 2.6 * k;
     pool.spawn({
@@ -161,10 +170,10 @@ export class StormEmitter {
       vy: heave * 0.4 + (R() - 0.5) * 1.6,
       vz: ctx.windZ * boost + (R() - 0.5) * (3 + 5 * k),
       life: 2 + R() * 2,
-      size0: 1.1 + R() * 0.9,
-      size1: 2.2 + R() * 1.4,
+      size0: 2.0 + R() * 1.6,
+      size1: 4.0 + R() * 2.5,
       ...tint,
-      alpha: 0.1 + 0.3 * k,
+      alpha: 0.15 + 0.4 * k,
       fadeIn: 0.12,
       fadeOut: 0.4,
       gravity: 0.25,
@@ -231,7 +240,7 @@ export class DustDevil {
     this.strength += (this.target - this.strength) * Math.min(1, ctx.dt * 0.9);
     if (this.strength < 0.02) return;
 
-    this.colAcc += 140 * this.strength * ctx.dt;
+    this.colAcc += 220 * this.strength * ctx.dt;
     while (this.colAcc >= 1) {
       this.colAcc -= 1;
       this.emitColumn(ctx, pool);
@@ -249,7 +258,7 @@ export class DustDevil {
   private emitColumn(ctx: FxContext, pool: ParticlePool): void {
     const R = ctx.rand;
     // Bias spawns low: the funnel is densest where it touches the ground.
-    const h01 = Math.pow(R(), 0.7);
+    const h01 = Math.pow(R(), 1.5);
     const h = h01 * this.height;
     // The funnel widens with altitude.
     const r = this.baseR * (0.35 + 1.5 * h01) * (0.75 + R() * 0.5);
@@ -257,26 +266,32 @@ export class DustDevil {
     const ca = Math.cos(a);
     const sa = Math.sin(a);
     const tint = dustTint(R, DEVIL_TINT, 0.07);
-    // Tangential rim speed, a slight inward pull, and a strong updraft that
-    // weakens with height.
-    const rim = this.spin * r * 0.55 * this.dir;
+    // Tangential rim speed plus a centripetal anchor on the funnel: without
+    // the anchor the throw would fly off on straight tangents and the column
+    // would dissolve into haze. Rim speed grows with radius while the spring
+    // is uniform, so the funnel naturally flares with height.
+    const rim = this.spin * r * 0.3 * this.dir;
     pool.spawn({
       x: this.x + ca * r,
       y: this.groundY + 0.3 + h,
       z: this.z + sa * r,
-      vx: -sa * rim - ca * 1.2,
+      vx: -sa * rim,
       vy: 5 + 3.5 * (1 - h01) + R() * 1.5,
-      vz: ca * rim - sa * 1.2,
-      life: 0.7 + R() * 0.7,
-      size0: 1.0 + R() * 0.8,
-      size1: 2.0 + R() * 1.0,
+      vz: ca * rim,
+      life: 0.9 + R() * 0.7,
+      size0: 1.8 + R() * 1.4,
+      size1: 3.5 + R() * 2.0,
       ...tint,
-      alpha: 0.34 * this.strength,
+      alpha: 0.6 * this.strength,
       fadeIn: 0.15,
       fadeOut: 0.5,
       gravity: 0,
       drag: 0.4,
       turbulence: 1.4,
+      kind: PKind.Devil,
+      pullX: this.x,
+      pullZ: this.z,
+      pullK: 5,
     });
   }
 
@@ -294,16 +309,17 @@ export class DustDevil {
       vy: 0.8 + R() * 1.2,
       vz: Math.sin(a) * speed + ctx.windZ * 0.2,
       life: 0.5 + R() * 0.4,
-      size0: 0.9 + R() * 0.7,
-      size1: 2.2 + R() * 1.0,
+      size0: 1.1 + R() * 0.9,
+      size1: 2.8 + R() * 1.2,
       ...tint,
-      alpha: 0.22 * this.strength,
+      alpha: 0.3 * this.strength,
       fadeIn: 0.1,
       fadeOut: 0.6,
       gravity: 1.2,
       drag: 1.6,
       turbulence: 1.8,
       groundY: this.groundY + 0.1,
+      kind: PKind.Devil,
     });
   }
 }
@@ -340,7 +356,7 @@ export class DevilManager {
   private spawnNear(ctx: FxContext): DustDevil {
     const R = ctx.rand;
     const bearing = R() * Math.PI * 2;
-    const dist = 45 + R() * 55;
+    const dist = 30 + R() * 40;
     const x = ctx.camX + Math.cos(bearing) * dist;
     const z = ctx.camZ + Math.sin(bearing) * dist;
     return new DustDevil({ x, z, groundY: ctx.heightAt(x, z) }, R);
@@ -373,7 +389,7 @@ export class RoverTrailEmitter {
   /** Particles/second for a rover moving at `speed` (0 below a crawl). */
   rateFor(speed: number): number {
     if (speed < 0.4) return 0;
-    return Math.min(60, 5 + speed * 3.4);
+    return Math.min(72, 6 + speed * 4);
   }
 
   update(ctx: FxContext, pool: ParticlePool, rovers: TrailRover[]): void {
@@ -414,7 +430,7 @@ export class RoverTrailEmitter {
     const bz = r.z - fz * 1.9 + lz * s * 1.15;
     const g = ctx.heightAt(bx, bz);
     const tint = dustTint(R, TRAIL_TINT, 0.08);
-    const size = 0.7 + r.speed * 0.07;
+    const size = 0.9 + r.speed * 0.09;
     pool.spawn({
       x: bx,
       y: g + 0.45,
@@ -422,17 +438,18 @@ export class RoverTrailEmitter {
       vx: -fx * r.speed * 0.1 + ctx.windX * 0.12 + (R() - 0.5) * 1.1,
       vy: (0.9 + r.speed * 0.14) * (0.7 + R() * 0.6),
       vz: -fz * r.speed * 0.1 + ctx.windZ * 0.12 + (R() - 0.5) * 1.1,
-      life: 1.1 + R() * 0.9,
+      life: 1.4 + R() * 1.0,
       size0: size,
-      size1: size * 2.7,
+      size1: size * 3.0,
       ...tint,
-      alpha: Math.min(0.36, 0.1 + r.speed * 0.024),
+      alpha: Math.min(0.5, 0.14 + r.speed * 0.03),
       fadeIn: 0.12,
       fadeOut: 0.55,
       gravity: 0.9,
       drag: 1.1,
       turbulence: 1.6,
       groundY: g + 0.12,
+      kind: PKind.Trail,
     });
   }
 }

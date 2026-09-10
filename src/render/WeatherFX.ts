@@ -57,6 +57,22 @@ export interface WeatherFxOptions {
   rand?: Rand;
 }
 
+const _dir = new THREE.Vector3();
+
+/**
+ * Ground point under the middle of the view — where the player is looking.
+ * Emission boxes and devil spawns centre here, not under the camera itself:
+ * at the default zoom the camera sits ~120 units from its target, so
+ * camera-centred dust would fall outside the viewed area entirely.
+ */
+function viewFocus(cam: THREE.PerspectiveCamera): { x: number; z: number } {
+  cam.getWorldDirection(_dir);
+  // Looking at the horizon (or up): fall back to the ground below the camera.
+  if (_dir.y > -0.05) return { x: cam.position.x, z: cam.position.z };
+  const t = Math.min(900, (cam.position.y - 2) / -_dir.y);
+  return { x: cam.position.x + _dir.x * t, z: cam.position.z + _dir.z * t };
+}
+
 export class WeatherFX {
   private readonly pool: ParticlePool;
   private readonly points: ParticlePoints;
@@ -90,6 +106,14 @@ export class WeatherFX {
     return this.devils.activeCount;
   }
 
+  private focusX = 0;
+  private focusZ = 0;
+
+  /** Emission centre used by the last sync (ground under the view centre). */
+  get focus(): { x: number; z: number } {
+    return { x: this.focusX, z: this.focusZ };
+  }
+
   /** Call on resize (drawing-buffer height × camera FOV). */
   setViewport(viewportHeightPx: number, fovDeg: number): void {
     this.points.setPerspective(viewportHeightPx, fovDeg);
@@ -104,11 +128,14 @@ export class WeatherFX {
     // The sim's compass convention is atan2(x, z) — the drift vector is
     // (sin, cos) of the bearing, same mapping the old field used.
     const drift = w.windSpeed * 0.45;
+    const focus = viewFocus(camera);
+    this.focusX = focus.x;
+    this.focusZ = focus.z;
     const ctx: FxContext = {
       time: input.time,
       dt: dtc,
-      camX: camera.position.x,
-      camZ: camera.position.z,
+      camX: focus.x,
+      camZ: focus.z,
       windX: Math.sin(w.windDirRad) * drift,
       windZ: Math.cos(w.windDirRad) * drift,
       windSpeed: w.windSpeed,
@@ -146,6 +173,9 @@ export class WeatherFX {
     this.trails.update(ctx, this.pool, movers);
 
     this.pool.update(dtc, input.time);
+    // Keep the camera box populated: without this, storm grit travelling
+    // 100+ units downwind in one life would evacuate the viewed area.
+    this.pool.wrapAmbient(focus.x, focus.z, 75);
     this.points.sync(this.pool);
   }
 
