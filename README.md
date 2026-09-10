@@ -76,6 +76,7 @@ Watch the *empty in…* estimates on the left panel; they are the real clock.
 | Focus selection | `F` | Focus button |
 | Blueprints 1–9 | `1`…`9` | — |
 | Save | `Ctrl/Cmd+S` | auto every 45 s |
+| Developer panel | `` ` `` (backquote) | 🛠 topbar button |
 
 Select a rover, then tap a deposit to mine it, the ground to move, or a
 battered/buried structure to clean or repair it. **Shift+order** stacks tasks
@@ -106,6 +107,32 @@ a finite oxygen reserve, so the sim refuses walks it knows they cannot survive
 
 When the forecast turns ugly: charge the batteries, shelter the crews, clean
 the arrays — and remember the RTG does not care what the sky is doing.
+
+### Developer mode
+
+Press `` ` `` (backquote) or the 🛠 topbar button to open the **Developer
+mode** panel. Everything it does is a live edit to the running colony — and,
+by contract, **none of it is written into the save file**: the mode lives
+outside the sim, and its building upgrade levels are runtime-only overlays
+that reload never sees (the panel carries an `UNSAVED` badge to say so).
+
+- **Environment** — jump to any sol and time of day (the slider scrubs the
+  sun live), conjure or dismiss any class of dust storm (including the
+  planet-encircling ones), set airborne dust directly, and switch the storm
+  scheduler off to fly the sky by hand.
+- **Spawn** — fabricate rovers, buildings and resource deposits at the camera
+  target, or arm *place…* and click terrain (Shift+click to keep placing,
+  Esc to cancel — the same grammar as the build palette). Fabrications are
+  honest sim objects: buildings pass the real siting checks and come online
+  instantly, rovers arrive fully charged, and everything made this way
+  *does* persist like something you earned.
+- **Selection** — with a rover, structure, or your colonist selected the
+  panel edits the thing directly: battery charge (plus a *keep full while
+  dev mode is on* pin that also revives stranded rovers), ore type and load,
+  drivetrain condition, structure health, damage state, cleanliness, power
+  switch, one-click construction for unfinished sites, suit oxygen — and the
+  developer **upgrade** buttons, which walk a structure through Mk 1–5 at
+  +35 % output per mark.
 
 ## What is simulated
 
@@ -196,11 +223,12 @@ src/
     weather.ts      wind, dust, storm scheduler + envelopes
     World.ts        seeded terrain + deposits
     Simulation.ts   entities, tick order, construction, persistence
+  dev/              developer mode: runtime edit state (DevMode) + the panel (DevPanel)
   render/           three.js renderer (terrain, entities, day/night, overlays)
     particles/      true particle system (wind, storm grit, dust devils, rover trails)
   ui/               DOM HUD (vitals, alerts, inspectors, build palette)
   lib/              deterministic RNG + simplex noise
-tests/              29 headless suites (sim/*, hud/*, render/*) + the linked full test
+tests/              31 headless suites (sim/*, hud/*, render/*) + the linked full test
 scripts/            esbuild test runner: filters, --affected, --watch
 ```
 
@@ -225,6 +253,11 @@ scripts/            esbuild test runner: filters, --affected, --watch
   rather than silently corrupting a colony. v3 saves (Prototype 3) migrate to
   the v4 schema on load: rovers gain a task queue, drivetrain condition and
   automation rules, and buildings gain an assembly slot.
+- **Developer mode is a runtime overlay, never sim state.** The keep-full
+  battery pins and the upgrade marks ride in `DevMode` / as a runtime-only
+  field that `snapshot()` deliberately skips, so nothing the panel does can
+  leak into (or contaminate) a save — verified by a sim suite and by poking
+  the stored save JSON end-to-end.
 
 ### Testing
 

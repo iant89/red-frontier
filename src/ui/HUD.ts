@@ -28,6 +28,7 @@ import {
   SUIT_O2_CAPACITY,
   SOL_SECONDS,
   BUILDING_MAX_HEALTH,
+  devLevelMul,
 } from '../sim/config';
 import type { PowerTier } from '../sim/config';
 import type { Alert, AlertBus, Severity } from '../sim/alerts';
@@ -42,6 +43,8 @@ export interface HUDCallbacks {
   onOverlay: (mode: OverlayMode) => void;
   /** Save the colony and return to the main menu. */
   onMenu?: () => void;
+  /** Toggle the developer-mode panel. */
+  onDev?: () => void;
 }
 
 const fmtKg = (n: number) =>
@@ -303,6 +306,7 @@ export class HUD {
         </div>
         <div class="resources" id="resources"></div>
         <button class="btn idle-btn" id="idle-btn" title="Select the next idle rover (.)">😴 <span class="btn-t">Idle</span> <span class="idle-n" id="idle-n">0</span></button>
+        <button class="btn" id="dev-btn" title="Developer mode — world editor (~ backtick)">🛠</button>
         <button class="btn" id="history-btn" title="Alert history (H)">📜</button>
         <button class="btn" id="menu-btn" title="Save and return to the main menu">☰</button>
         <div class="toolbar" id="speeds"></div>
@@ -422,6 +426,10 @@ export class HUD {
     this.el('idle-btn').addEventListener('pointerdown', (e) => {
       e.stopPropagation();
       this.cb.onAction('cycle-idle');
+    });
+    this.el('dev-btn').addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.cb.onDev?.();
     });
     this.el('history-btn').addEventListener('pointerdown', (e) => {
       e.stopPropagation();
@@ -1458,6 +1466,11 @@ export class HUD {
         }</span></div>`,
       );
     } else {
+      if (b.level > 1) {
+        rows.push(
+          `<div class="stat"><span class="k">Developer upgrade</span><span class="v warn">Mk ${b.level} · ×${devLevelMul(b.level).toFixed(2)} output (unsaved)</span></div>`,
+        );
+      }
       if (def.powerProduceKw > 0) {
         const clean = def.generation === 'solar' ? b.cleanliness : 1;
         rows.push(
@@ -1666,6 +1679,11 @@ export class HUD {
    */
   hideStartOverlay(): void {
     this.el('start-overlay').style.display = 'none';
+  }
+
+  /** Reflect the developer-mode master switch on the topbar wrench. */
+  setDevActive(on: boolean): void {
+    this.el('dev-btn').classList.toggle('active', on);
   }
 }
 

@@ -198,6 +198,27 @@ export class World {
     return 'regolith';
   }
 
+  /**
+   * Developer mode: drop a fresh resource deposit into the world at runtime.
+   * An ordinary deposit afterwards — the renderer picks it up on the next
+   * sync and rovers can mine it like any generated seam.
+   */
+  addDeposit(resource: ResourceId, x: number, z: number, amountKg: number, radius?: number): Deposit {
+    const table = DEPOSIT_TABLE[resource];
+    const d: Deposit = {
+      id: this.nextId++,
+      resource,
+      x,
+      z,
+      amount: amountKg,
+      maxAmount: amountKg,
+      radius: radius ?? table.radius,
+      reservedBy: null,
+    };
+    this.deposits.push(d);
+    return d;
+  }
+
   /** nearest resource label helper for UI */
   resourceLabel(r: ResourceId): string {
     return RESOURCES[r].label;

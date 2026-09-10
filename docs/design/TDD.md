@@ -157,6 +157,15 @@ Browser matrix: Chromium/Safari/Firefox; desktop + iOS/iPadOS + Android; WebGPU 
 Dev overlay (disabled in release): tick time, render time, entity count, active chunks, worker queue size, memory, utility-network status, weather values, selected entity components, deterministic state hash.
 Cheat commands (explicit, excluded from save-compat tests): spawn resource, damage building, trigger storm, teleport rover, reveal chunk, advance sol, set research, refill storage, force brownout, export state.
 
+**Implemented: the Developer mode panel** (`src/dev/`, toggled with backquote or the 🛠 topbar button in play). Design rules it shipped with:
+
+- *Runtime-only overlay.* `DevMode` holds all modifier state (enabled flag, keep-battery-full pin set, armed click-to-place spec) *outside* the sim and applies it per frame via `applyTo(sim)` after the sim step. Building upgrade marks live on a `level` field that `snapshot()` deliberately never writes and `restore()` defaults back to 1 — so nothing the panel does can reach the save file (explicitly tested, including a live read of the stored localStorage blob).
+- *Fabrication goes through the real sim.* The sim exposes explicit `devSpawnRover/devSpawnBuilding/devSpawnDeposit/devCompleteBuilding/devSetTime` entry points (never implicit mutation). Building spawns are validated by the ordinary `canPlace` siting rules — deposits, clearance, slope — and rejected taps are refused with the same reason strings the build palette shows. Fabrications become first-class sim objects (they charge, work, break, and *are* saved once created); only the dev modifiers are not.
+- *No sim-side clock forks.* Editing the calendar re-anchors the authoritative sol clock (`simTime = (sol + frac − START_SOL_FRAC) · SOL_SECONDS`) rather than nudging display state, and history sampling is rebased so the jump records one marker instead of a wall of regressed points.
+- *Input discipline.* Hotkeys are swallowed while any form control has focus (the panel's own number boxes included), and the click-to-place arm grammar is the build palette's: Shift clicks keep placing, Esc disarms first.
+
+Still open per the spec above: tick/frame perf counters, worker queue inspection, deterministic state hash, teleport/reveal commands.
+
 ## 23. Browser Deployment
 
 Static web app, hashed assets. Service Worker caching → offline after first load. IndexedDB saves. WebGPU detection at startup → WebGL2 fallback → compatibility screen if neither. Save on visibility changes/before suspension. Optional future Java backend for account/cloud saves, telemetry, content manifests, multiplayer authority (browser remains capable of full single-player sim).

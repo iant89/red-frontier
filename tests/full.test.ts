@@ -31,6 +31,7 @@ import './sim/garage.test';
 import './sim/lights.test';
 import './sim/determinism.test';
 import './sim/persistence.test';
+import './sim/devtools.test';
 import './render/particles.test';
 import './hud/chrome.test';
 import './hud/weather.test';
@@ -42,7 +43,8 @@ import './hud/alerts.test';
 import './hud/mobile.test';
 import './hud/dossier.test';
 import './hud/markers.test';
+import './hud/devpanel.test';
 
 // Each suite prints one line as it runs; `report` prints the total, every
 // failure, and exits non-zero if anything broke.
-report(29);
+report(31);

@@ -263,6 +263,22 @@ export const COLONIST_SPEED = 5.5;
 /** Construction output a suited human contributes (rover baseline = 1.0). */
 export const COLONIST_BUILD_POWER = 0.5;
 
+// ------------------------------------------------------- developer mode ----
+
+/**
+ * Developer-mode building upgrades (runtime only — never written to the save
+ * file). Each level above 1 multiplies a structure's output along every axis
+ * the sim consults its definition for: generation, grid storage, silo and
+ * tank capacity, process conversion rates, and garage work rates.
+ */
+export const DEV_UPGRADE_STEP = 0.35;
+export const DEV_MAX_BUILDING_LEVEL = 5;
+
+/** Output multiplier a building at `level` works at (1 at base level). */
+export function devLevelMul(level: number): number {
+  return 1 + DEV_UPGRADE_STEP * (Math.max(1, level) - 1);
+}
+
 // ---------------------------------------------------------- persistence ----
 
 export const AUTOSAVE_INTERVAL_S = 45;

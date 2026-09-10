@@ -64,6 +64,9 @@ import {
   ROUTE_RESUME_ROOM_KG,
   LIGHTS_AUTO_IRRADIANCE,
   LIGHTS_AUTO_VISIBILITY,
+  START_SOL_FRAC,
+  DEV_MAX_BUILDING_LEVEL,
+  devLevelMul,
 } from './config';
 import type { PowerTier } from './config';
 import type {
@@ -264,6 +267,14 @@ export interface Building {
   // ---- Prototype 4: rover garage ------------------------------------------
   /** What the assembly line is building right now, if anything. */
   assembly: { kind: RoverKind; progress: number } | null;
+  // ---- Developer mode (runtime only) ---------------------------------------
+  /**
+   * Developer-mode upgrade level. 1 is the honest baseline; higher levels
+   * scale output and capacity through {@link devLevelMul}. Deliberately
+   * excluded from snapshot()/restore() — a dev-mode boost never touches the
+   * save file, and a loaded colony comes back at level 1.
+   */
+  level: number;
 }
 
 export type { Colonist } from './lifesupport';
@@ -494,10 +505,11 @@ export class Simulation {
     for (const b of this.buildings) {
       if (!this.runnable(b)) continue;
       const def = BUILDINGS[b.kind];
-      cap += def.storagePerResourceKg;
+      const mul = devLevelMul(b.level);
+      cap += def.storagePerResourceKg * mul;
       if (def.fluidCapacity) {
         for (const f of ALL_FLUIDS) {
-          fluid[f] += def.fluidCapacity[f] ?? 0;
+          fluid[f] += (def.fluidCapacity[f] ?? 0) * mul;
         }
       }
     }
@@ -552,7 +564,9 @@ export class Simulation {
   batteryCapacity(): number {
     let cap = POD_BATTERY_KWH;
     for (const b of this.buildings) {
-      if (this.runnable(b) && b.enabled) cap += BUILDINGS[b.kind].batteryKWh;
+      if (this.runnable(b) && b.enabled) {
+        cap += BUILDINGS[b.kind].batteryKWh * devLevelMul(b.level);
+      }
     }
     return cap;
   }
@@ -703,7 +717,9 @@ export class Simulation {
   private chargeRateKwAt(x: number, z: number): number {
     for (const b of this.buildings) {
       if (b.kind !== 'garage' || !this.runnable(b) || !b.enabled) continue;
-      if (Math.hypot(b.x - x, b.z - z) < BUILDINGS.garage.radius + 5) return GARAGE_CHARGE_RATE_KW;
+      if (Math.hypot(b.x - x, b.z - z) < BUILDINGS.garage.radius + 5) {
+        return GARAGE_CHARGE_RATE_KW * devLevelMul(b.level);
+      }
     }
     return ROVER_CHARGE_RATE_KW;
   }
@@ -1239,10 +1255,137 @@ export class Simulation {
       cleanliness: 1,
       damaged: false,
       assembly: null,
+      level: 1,
     };
     this.buildings.push(b);
     this.event('info', `${def.label} sited — assigning a builder.`);
     return b;
+  }
+
+  // ------------------------------------------------------- developer mode ----
+  /**
+   * Runtime-only backdoors for the developer panel. They mutate ordinary
+   * entity state — a fabricated rover is a real rover from then on — but add
+   * nothing to the save file: upgrade levels are never snapshotted, and the
+   * panel's own switches live outside the sim entirely.
+   */
+
+  /** Fab a rover of `kind` out of thin air at world position. */
+  devSpawnRover(kind: RoverKind, x: number, z: number): Rover {
+    const r = this.spawnRoverAt(kind, x, z, Math.atan2(SPAWN_X - x, SPAWN_Z - z));
+    this.event('ok', `${r.label} #${r.id} rolled out of nowhere — charged and ready (developer).`);
+    return r;
+  }
+
+  /**
+   * Fab a building instantly: placed for free, fully assembled and online.
+   * Siting is still honest — the terrain and clearance checks apply, so a
+   * bad spot returns null with the reason in the log.
+   */
+  devSpawnBuilding(kind: BuildingKind, x: number, z: number): Building | null {
+    const err = this.canPlace(kind, x, z);
+    if (err) {
+      this.event('warn', err);
+      return null;
+    }
+    const def = BUILDINGS[kind];
+    const b: Building = {
+      id: this.allocId(),
+      kind,
+      x,
+      z,
+      rot: 0,
+      state: 'building',
+      remainingCost: emptyAmounts(),
+      needsMaterials: false,
+      progress: 1,
+      buildTime: def.buildTime,
+      workerId: null,
+      enabled: true,
+      powerSat: 1,
+      throughput: 0,
+      genKw: 0,
+      loadKw: 0,
+      idleReason: '',
+      health: BUILDING_MAX_HEALTH,
+      cleanliness: 1,
+      damaged: false,
+      assembly: null,
+      level: 1,
+    };
+    this.buildings.push(b);
+    // completeBuilding flips it online, recomputes capacities and logs the
+    // "+storage / +kW" extras exactly like an ordinary finish.
+    this.completeBuilding(b);
+    return b;
+  }
+
+  /** Survey a fresh resource deposit in at world position. */
+  devSpawnDeposit(resource: ResourceId, x: number, z: number, amountKg: number): Deposit {
+    const d = this.world.addDeposit(resource, x, z, Math.max(10, amountKg));
+    this.event(
+      'ok',
+      `${RESOURCES[resource].label} deposit surveyed in — ${Math.round(d.amount)} kg (developer).`,
+    );
+    return d;
+  }
+
+  /**
+   * Complete a construction site instantly, for free. Any rover walking a
+   * construct task to it is released exactly like a demolition release.
+   */
+  devCompleteBuilding(id: number): boolean {
+    const b = this.buildingById(id);
+    if (!b || b.state === 'online') return false;
+    b.remainingCost = emptyAmounts();
+    b.needsMaterials = false;
+    this.alerts.clear(`mats-${b.id}`, this.simTime, this.clock.format());
+    for (const r of this.rovers) {
+      if (r.command.type === 'construct' && r.command.buildingId === b.id) {
+        this.finishTask(r);
+      }
+    }
+    b.workerId = null;
+    b.progress = 1;
+    this.completeBuilding(b);
+    return true;
+  }
+
+  /**
+   * Set a building's developer upgrade level (1..DEV_MAX, clamped). Returns
+   * the level it landed on. Never persisted — see the field's comment.
+   */
+  devSetBuildingLevel(id: number, level: number): number {
+    const b = this.buildingById(id);
+    if (!b) return 1;
+    const next = clamp(Math.round(level), 1, DEV_MAX_BUILDING_LEVEL);
+    if (next !== b.level) {
+      b.level = next;
+      this.recomputeCapacities();
+    }
+    return b.level;
+  }
+
+  /**
+   * Jump the mission calendar: set the sol and the time-of-day fraction
+   * (0 = midnight, 0.25 = sunrise, 0.5 = noon). simTime is re-synced so the
+   * weather scheduler and history windows stay coherent after the jump.
+   */
+  devSetTime(sol: number, frac: number): void {
+    const target = Math.max(0, Math.floor(sol));
+    const f = clamp(frac, 0, 0.9999);
+    this.clock.restore({ sol: target, frac: f });
+    this.simTime = Math.max(0, (target + f - START_SOL_FRAC) * SOL_SECONDS);
+    this.weather.time = this.simTime;
+    // History windows are wall-clock comparisons — let them re-anchor at the
+    // new time rather than starving until simTime catches back up.
+    this.lastHistoryAt = -Infinity;
+    this.lastFlows = {
+      water: { produced: 0, consumed: 0 },
+      oxygen: { produced: 0, consumed: 0 },
+      food: { produced: 0, consumed: 0 },
+    };
+    this.flowWindow = [];
   }
 
   // -------------------------------------------------------- main loop ----
@@ -1447,9 +1590,9 @@ export class Simulation {
        * point of it.
        */
       const out =
-        def.generation === 'solar'
+        (def.generation === 'solar'
           ? def.powerProduceKw * sun.irradiance * this.dustTransmission * b.cleanliness
-          : def.powerProduceKw;
+          : def.powerProduceKw) * devLevelMul(b.level);
       b.genKw = out;
       genKw += out;
     }
@@ -1548,7 +1691,8 @@ export class Simulation {
     for (const b of this.buildings) {
       if (b.kind !== 'garage' || !this.runnable(b) || !b.enabled) continue;
       const reach = BUILDINGS.garage.radius + 5;
-      const service = GARAGE_SERVICE_RATE * SIM_TICK * (0.3 + 0.7 * b.powerSat);
+      const service =
+        GARAGE_SERVICE_RATE * devLevelMul(b.level) * SIM_TICK * (0.3 + 0.7 * b.powerSat);
       for (const r of this.rovers) {
         if (r.phase === 'disabled' || r.condition >= 100) continue;
         if (Math.hypot(b.x - r.x, b.z - r.z) <= reach) {
@@ -1581,13 +1725,16 @@ export class Simulation {
     if (!def.process) return def.powerDrawKw > 0 ? 1 : 0;
     const hours = SIM_TICK * HOURS_PER_SEC;
     const p = def.process;
+    // An upgraded line moves mul× the mass per hour, so its *want* is gated
+    // against the multiplied rates too — the gate and the flow must agree.
+    const mul = devLevelMul(b.level);
     let factor = 1;
 
     if (p.solidIn) {
       for (const res of ALL_RESOURCES) {
         const rate = p.solidIn[res];
         if (!rate) continue;
-        const need = rate * hours;
+        const need = rate * mul * hours;
         factor = Math.min(factor, need > 0 ? this.storage[res] / need : 1);
       }
     }
@@ -1595,7 +1742,7 @@ export class Simulation {
       for (const f of ALL_FLUIDS) {
         const rate = p.fluidIn[f];
         if (!rate) continue;
-        const need = rate * hours;
+        const need = rate * mul * hours;
         factor = Math.min(factor, need > 0 ? this.pools.amounts[f] / need : 1);
       }
     }
@@ -1603,7 +1750,7 @@ export class Simulation {
       for (const f of ALL_FLUIDS) {
         const rate = p.fluidOut[f];
         if (!rate) continue;
-        const make = rate * hours;
+        const make = rate * mul * hours;
         factor = Math.min(factor, make > 0 ? fluidHeadroom(this.pools, f) / make : 1);
       }
     }
@@ -1655,11 +1802,14 @@ export class Simulation {
     const perSol = 1 / (hours <= 0 ? 1 : hours) / (SIM_TICK * SOLS_PER_SEC ? 1 : 1);
     void perSol;
 
+    // A developer-mode upgraded line converts more mass for the same power.
+    const mul = devLevelMul(b.level);
+
     if (p.solidIn) {
       for (const res of ALL_RESOURCES) {
         const r = p.solidIn[res];
         if (!r) continue;
-        const take = r * rate * hours;
+        const take = r * mul * rate * hours;
         this.storage[res] = Math.max(0, this.storage[res] - take);
       }
     }
@@ -1667,7 +1817,7 @@ export class Simulation {
       for (const f of ALL_FLUIDS) {
         const r = p.fluidIn[f];
         if (!r) continue;
-        const got = takeFluid(this.pools, f, r * rate * hours);
+        const got = takeFluid(this.pools, f, r * mul * rate * hours);
         this.flows[f].consumed += got;
       }
     }
@@ -1675,7 +1825,7 @@ export class Simulation {
       for (const f of ALL_FLUIDS) {
         const r = p.fluidOut[f];
         if (!r) continue;
-        const made = addFluid(this.pools, f, r * rate * hours);
+        const made = addFluid(this.pools, f, r * mul * rate * hours);
         this.flows[f].produced += made;
       }
     }
@@ -3513,6 +3663,9 @@ export class Simulation {
         b.assembly && ROVERS[b.assembly.kind as RoverKind]
           ? { kind: b.assembly.kind, progress: b.assembly.progress ?? 0 }
           : null,
+      // Developer-mode upgrades are runtime-only by design: a loaded colony
+      // always comes back at base level, whatever the live game had.
+      level: 1,
     }));
 
     /**

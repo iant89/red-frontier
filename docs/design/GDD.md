@@ -157,6 +157,7 @@ Storm prep: charge batteries, shelter rovers, clean arrays, secure externals, fi
 - Simulation LOD: nearby full sim, distant simplified, far industrial systems statistical.
 - Target scale: Early 20–100 entities; Medium 100–1,000; Large 1,000–5,000; Late 5,000+.
 - Persistence: auto+manual slots, IndexedDB, optional cloud, import/export saves, save sim state not renderer state.
+- Developer mode (TDD §22): an in-game tooling panel for weather/time control, setting selected-object properties, and spawning/upgrading — as hard contract, the mode's edits are runtime-only and **never written to the save file**; nothing the panel does outlives a reload. (Objects it fabricates, however, join the world for real and do save.)
 - Multiplayer out of scope initially; later server-authoritative.
 
 ## 16 — Development Roadmap & MVP
