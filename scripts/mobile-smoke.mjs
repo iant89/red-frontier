@@ -358,9 +358,17 @@ try {
   check('vitals toggle expands and re-collapses by tap', expanded && recollapsed);
 
   // ---------------------------------- palette arm + long-press to cancel ----
-  await touchTap(page, await centerOf(page, '.build-btn'));
-  await sleep(200);
-  const armed = await rf(page, () => document.querySelectorAll('.build-btn.active').length);
+  // The arm tap races the 450ms hold-to-peek dossier: on a slow runner the
+  // release can land late, the dossier opens, and the tap disarms itself.
+  // Retry until armed — checking first, since tapping while armed would
+  // toggle the blueprint back off.
+  const armedCount = () =>
+    rf(page, () => document.querySelectorAll('.build-btn.active').length);
+  for (let i = 0; i < 3 && (await armedCount()) !== 1; i++) {
+    await touchTap(page, await centerOf(page, '.build-btn'));
+    await sleep(250);
+  }
+  const armed = await armedCount();
   check('tapping a blueprint arms it', armed === 1, `active=${armed}`);
   const canvasBox = await page.locator('#game-canvas').boundingBox();
   const cx = canvasBox.x + canvasBox.width / 2;
