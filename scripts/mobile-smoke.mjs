@@ -164,12 +164,32 @@ async function gesture(page, steps) {
   }, steps);
 }
 
-/** Quick tap: down, 60ms, up — inside Game's 500ms tap window. */
+/**
+ * A tap: down and up dispatched synchronously in one task, so dur is ~0ms
+ * no matter how long software-rendered frames block the event loop. (A
+ * timer-spaced tap can stretch past Game's 500ms tap window under jank and
+ * silently stop being a tap — exactly the CI flake this once was.)
+ */
 const tapCanvas = (page, x, y) =>
-  gesture(page, [
-    [0, 'pointerdown', 1, x, y],
-    [60, 'pointerup', 1, x, y],
-  ]);
+  page.evaluate(
+    ({ x, y }) => {
+      const c = document.getElementById('game-canvas');
+      const ev = (type) =>
+        new PointerEvent(type, {
+          pointerId: 1,
+          pointerType: 'touch',
+          clientX: x,
+          clientY: y,
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          isPrimary: true,
+        });
+      c.dispatchEvent(ev('pointerdown'));
+      c.dispatchEvent(ev('pointerup'));
+    },
+    { x, y },
+  );
 
 /** A press held past Game's 480ms long-press timer, then released. */
 const longPressCanvas = (page, x, y, holdMs = 650) =>
@@ -442,11 +462,29 @@ try {
   } else {
     const frames = await rf(page, () => window.__rf.game.renderer.renderer.info.render.frame);
     console.log(`info - frames rendered: ${frames}`);
-    const before = await rigState(page);
-    await convergeScene();
-    await tapCanvas(page, target.x, target.y);
-    await sleep(300);
+    // Converge, probe the pick directly (so a miss says whether the tap
+    // point itself is bad), then tap and record the camera around it.
+    const tapRoverAt = async (x, y) => {
+      await convergeScene();
+      const probe = await rf(
+        page,
+        ({ x, y }) => {
+          const pk = window.__rf.game.renderer.pickTargetAt(x, y);
+          return pk ? `${pk.type}#${pk.id}` : 'null';
+        },
+        { x, y },
+      );
+      console.log(`info - pick at tap point (${Math.round(x)},${Math.round(y)}): ${probe}`);
+      const before = await rigState(page);
+      await tapCanvas(page, x, y);
+      await sleep(300);
+      const after = await rigState(page);
+      return { before, after };
+    };
+    const r1 = await tapRoverAt(target.x, target.y);
     let sel = await readSelection();
+    let after = r1.after;
+    const before = r1.before;
     // One retry on the twin: in some landing layouts a building or deposit
     // photobombs rover 0's exact screen centre and eats the tap.
     if ((sel.kind !== 'Rover' || sel.id === null) && roster.length > 1) {
@@ -454,15 +492,13 @@ try {
       await sleep(400);
       const t2 = await projectRover(1);
       if (!t2.behind && t2.x > 0 && t2.x < VIEW.width && t2.y > 0 && t2.y < VIEW.height) {
-        await convergeScene();
-        await tapCanvas(page, t2.x, t2.y);
-        await sleep(300);
+        const r2 = await tapRoverAt(t2.x, t2.y);
+        after = r2.after;
         sel = await readSelection();
       }
     }
     selectedId = sel.id;
     check('tap selects the rover', sel.kind === 'Rover' && selectedId !== null, `kind=${sel.kind} title=${sel.title} id=${sel.idText}`);
-    const after = await rigState(page);
     check(
       'a tap never rotates the camera',
       Math.abs(after.theta - before.theta) < 1e-9 && Math.abs(after.phi - before.phi) < 1e-9,
