@@ -16,7 +16,7 @@
 import { World } from './World';
 import { evaluateSite, maintenanceNeed } from './rules';
 import type { Deposit } from './World';
-import { clamp } from '../lib/rng';
+import { clamp, mulberry32 } from '../lib/rng';
 import {
   SIM_TICK,
   SPAWN_X,
@@ -68,6 +68,11 @@ import {
   START_SOL_FRAC,
   DEV_MAX_BUILDING_LEVEL,
   devLevelMul,
+  POI_DISCOVER_M,
+  DROP_FIRST_SOL_MIN,
+  DROP_FIRST_SOL_MAX,
+  DROP_GAP_SOL_MIN,
+  DROP_GAP_SOL_MAX,
 } from './config';
 import type { PowerTier } from './config';
 import type {
@@ -97,6 +102,17 @@ import {
   richnessMulFor,
 } from './difficulty';
 import type { DifficultyId, WorldOptions } from './difficulty';
+import {
+  burialRate,
+  isPickedClean,
+  makeSupplyDrop,
+  POI_KINDS,
+  rollDropRing,
+  salvageRateKgS,
+  salvageTotalKg,
+  takeSalvage,
+} from './pois';
+import type { Poi, PoiKind } from './pois';
 import { SolClock } from './clock';
 import type { SunState } from './clock';
 import { Weather, stormLabel } from './weather';
@@ -132,6 +148,7 @@ export type RoverTask =
   | { type: 'clean'; buildingId: number }
   | { type: 'repair'; buildingId: number }
   | { type: 'recover'; roverId: number; give?: number; given?: number }
+  | { type: 'salvage'; poiId: number }
   | { type: 'unload' }
   | { type: 'wait'; seconds: number };
 
@@ -228,6 +245,8 @@ export type RoverGoal =
   | 'charge'
   | 'toService'
   | 'service'
+  | 'toSalvage'
+  | 'salvage'
   | 'toRecover'
   | 'recover';
 
@@ -347,6 +366,10 @@ export function roverStatusText(r: Rover): string {
       return 'Responding to stranded rover';
     case 'recover':
       return 'Jump-starting a stranded rover';
+    case 'toSalvage':
+      return 'Heading to the site';
+    case 'salvage':
+      return 'Salvaging';
     default:
       return r.phase;
   }
@@ -408,6 +431,21 @@ export class Simulation {
   weather = new Weather(0);
   private stormAnnounced = false;
 
+  /**
+   * Exploration state (GDD §06/§10). The sites themselves live on `World` —
+   * they are places, and the renderer and HUD read them through the world view.
+   * What lives here is the *schedule*: which sol Earth's next cargo mission
+   * lands on. That is authoritative state, so it is saved.
+   */
+  nextDropSol = 0;
+  /**
+   * Its own RNG stream, like the weather's: drop timing must not perturb the
+   * streams that drive anything else, or a colony's skies would change because
+   * a cargo mission was added to the design. Seeded in the constructor (a field
+   * initializer would run before `seed` is set) and re-seeded on restore.
+   */
+  private dropRng: () => number = mulberry32(1);
+
   constructor(params: {
     seed: number;
     nearDeposits?: number;
@@ -440,6 +478,7 @@ export class Simulation {
     );
     this.spawnStart();
     this.recomputeCapacities();
+    this.resetExploration();
     const supplies = diff.suppliesMul * suppliesMulFor(this.worldOptions.supplies);
     this.pools.amounts = {
       water: POD_STARTING_FLUIDS.water * supplies,
@@ -1564,6 +1603,9 @@ export class Simulation {
     // 2. weather (TDD §4's tick order puts it right after the clock)
     this.tickWeather();
 
+    // 2b. the world past the base: what the fleet has found, and what Earth sent
+    this.tickExploration();
+
     // 3 & 4. power network, then production scaled by what it delivered.
     this.tickPower();
     this.tickGarages();
@@ -1668,6 +1710,198 @@ export class Simulation {
   }
 
   /** Storm damage has tripped a building offline until it is repaired. */
+  // -------------------------------------------------------- exploration ----
+
+  /**
+   * Roll a fresh drop schedule and point it at the launch window. Called once at
+   * mission start and again on restore, where the save supplies the sol the next
+   * mission was already booked for.
+   */
+  private resetExploration(nextDropSol?: number): void {
+    this.dropRng = mulberry32(this.seed ^ 0x2f6e2b1);
+    this.nextDropSol =
+      nextDropSol && nextDropSol > 0
+        ? nextDropSol
+        : DROP_FIRST_SOL_MIN + this.dropRng() * (DROP_FIRST_SOL_MAX - DROP_FIRST_SOL_MIN);
+  }
+
+  /** Every site on the planet — found or not. */
+  get pois(): Poi[] {
+    return this.world.pois;
+  }
+
+  poiById(id: number): Poi | undefined {
+    return this.world.pois.find((p) => p.id === id);
+  }
+
+  /**
+   * The world past the base (GDD §06, §10). Runs straight after the weather,
+   * because the only thing that decides how fast a landed container disappears
+   * is the sky.
+   */
+  private tickExploration(): void {
+    this.tickDiscovery();
+    this.tickSupplyDrops();
+  }
+
+  /**
+   * GDD §06: "the map begins mostly unknown." A site joins the map when a rover
+   * or the colonist gets within {@link POI_DISCOVER_M} of it — and says so out
+   * loud, because a find the player never hears about is a find that never
+   * happened. Discovery is permanent: finding something does not un-find it when
+   * the rover drives away.
+   */
+  private tickDiscovery(): void {
+    for (const p of this.world.pois) {
+      if (p.discovered) continue;
+      const near = (x: number, z: number) => Math.hypot(x - p.x, z - p.z) <= POI_DISCOVER_M;
+      const seen =
+        this.rovers.some((r) => r.phase !== 'disabled' && near(r.x, r.z)) ||
+        near(this.colonist.x, this.colonist.z);
+      if (!seen) continue;
+      p.discovered = true;
+      const info = POI_KINDS[p.kind];
+      const kg = salvageTotalKg(p);
+      this.alerts.raise(
+        `poi-found-${p.id}`,
+        'opportunity',
+        `${info.icon} ${info.label} found`,
+        kg > 1 ? `${info.blurb} About ${Math.round(kg)} kg of salvage.` : info.blurb,
+        this.simTime,
+        this.clock.format(),
+      );
+    }
+  }
+
+  /**
+   * Earth cargo missions (GDD §10): they arrive at uncertain locations, are
+   * marked by a transponder, and the dust takes them if nobody comes.
+   *
+   * Three things happen here, in this order: book the next mission, land it when
+   * its sol arrives, and run down the burial clock on whatever is on the ground.
+   * The clock runs at `burialRate(stormIntensity)` times normal inside a storm,
+   * which is the entire design of the feature — the drop is not lost because
+   * time passed, it is lost because the sky came in and the player had to choose
+   * between it and the arrays.
+   */
+  private tickSupplyDrops(): void {
+    const solNow = this.clock.sol + this.clock.frac;
+    if (solNow >= this.nextDropSol) this.landSupplyDrop();
+
+    const dtSols = SIM_TICK * SOLS_PER_SEC;
+    const rate = burialRate(this.weather.stormIntensity);
+    for (const p of this.world.pois) {
+      if (p.kind !== 'supplyDrop') continue;
+
+      /**
+       * A drop is finished either way — buried by the dust or stripped by a
+       * rover — and either way its deadline alert has to go. Clearing only on
+       * burial would leave a recovered container on the alert board forever,
+       * counting down a sol it no longer has.
+       */
+      if (p.buried || isPickedClean(p)) {
+        this.alerts.clear(`drop-live-${p.id}`, this.simTime, this.clock.format());
+        continue;
+      }
+
+      p.solsToBury -= dtSols * rate;
+      if (p.solsToBury > 0) {
+        // One standing alert per live drop, with the clock in it, so the HUD
+        // reads as a deadline rather than a rumour. `raise` only logs on the
+        // transition, so re-asserting it every tick is not log spam.
+        const sols = p.solsToBury;
+        this.alerts.raise(
+          `drop-live-${p.id}`,
+          sols < 1 ? 'crit' : 'opportunity',
+          `📦 Supply drop — ${p.manifest}`,
+          `${Math.round(salvageTotalKg(p))} kg at ${Math.round(p.x)}, ${Math.round(p.z)}. ` +
+            `Buried in ${sols.toFixed(1)} sols${rate > 1 ? ' — the storm is filling it in fast' : ''}.`,
+          this.simTime,
+          this.clock.format(),
+          p.id,
+        );
+        continue;
+      }
+
+      p.solsToBury = 0;
+      p.buried = true;
+      this.alerts.clear(`drop-live-${p.id}`, this.simTime, this.clock.format());
+      this.event(
+        'warn',
+        `The dust took the ${p.manifest.toLowerCase()} drop — ${Math.round(salvageTotalKg(p))} kg left under the regolith.`,
+      );
+    }
+  }
+
+  /**
+   * Put one container on the ground. The site is chosen inside a ring — far
+   * enough out that recovery is an expedition, close enough in that it is not a
+   * fool's errand on a flat battery (GDD §10's "uncertain locations").
+   */
+  private landSupplyDrop(): void {
+    const ring = rollDropRing(this.dropRng, this.world.half);
+    let x = 0;
+    let z = 0;
+    let placed = false;
+    for (let t = 0; t < 48 && !placed; t++) {
+      const ang = this.dropRng() * Math.PI * 2;
+      const d = ring.min + this.dropRng() * (ring.max - ring.min);
+      x = Math.cos(ang) * d;
+      z = Math.sin(ang) * d;
+      placed = this.world.canDrive(x, z);
+    }
+    this.nextDropSol =
+      this.clock.sol + this.clock.frac + DROP_GAP_SOL_MIN +
+      this.dropRng() * (DROP_GAP_SOL_MAX - DROP_GAP_SOL_MIN);
+    if (!placed) {
+      this.event('info', 'Earth reports a cargo mission aborted before landing.');
+      return;
+    }
+    const id = this.world.nextPoiSlot;
+    const drop = makeSupplyDrop(id, x, z, this.dropRng);
+    this.world.addPoi(drop);
+    this.event(
+      'opportunity',
+      `Transponder contact: a ${drop.manifest.toLowerCase()} container landed at ${Math.round(x)}, ${Math.round(z)} — ` +
+        `${Math.round(salvageTotalKg(drop))} kg, and the dust is already working on it.`,
+    );
+  }
+
+  /**
+   * Send a rover to cut a site apart and haul it home (GDD §05's SALVAGE task).
+   *
+   * Refusals are the same shape as every other order's: a log line saying why,
+   * and nothing queued. The interesting one is the undiscovered site — the sim
+   * knows about it, the player is not supposed to yet, so it cannot be ordered.
+   */
+  issueSalvage(roverId: number, poiId: number, queued = false): boolean {
+    const r = this.roverById(roverId);
+    const p = this.poiById(poiId);
+    if (!r || r.phase === 'disabled') return false;
+    if (!p) {
+      this.event('warn', 'There is nothing at those coordinates.');
+      return false;
+    }
+    if (!p.discovered) {
+      this.event('info', 'Nothing has been surveyed there yet.');
+      return false;
+    }
+    if (p.buried) {
+      this.event('warn', `${POI_KINDS[p.kind].label} is buried — the dust got there first.`);
+      return false;
+    }
+    if (p.kind === 'settlementSite') {
+      this.event('info', 'A settlement site has nothing to salvage — it is a place to build.');
+      return false;
+    }
+    if (isPickedClean(p)) {
+      this.event('info', `${POI_KINDS[p.kind].label} has already been picked clean.`);
+      return false;
+    }
+    this.giveTask(r, { type: 'salvage', poiId }, queued);
+    return true;
+  }
+
   private tripDamaged(b: Building): void {
     b.damaged = true;
     const def = BUILDINGS[b.kind];
@@ -2494,6 +2728,17 @@ export class Simulation {
         this.doRecover(r, cmd);
         break;
       }
+      case 'salvage': {
+        const p = this.poiById(cmd.poiId);
+        if (!p || p.buried || isPickedClean(p)) {
+          // Gone, buried, or already stripped: report and move on to the queue.
+          if (cargoMass(r) > 0.01) this.beginUnload(r);
+          else this.finishTask(r);
+          break;
+        }
+        this.doSalvage(r, p);
+        break;
+      }
       case 'unload': {
         this.doUnload(r);
         break;
@@ -2690,6 +2935,10 @@ export class Simulation {
         r.goal = 'service';
         r.phase = 'working';
         break;
+      case 'toSalvage':
+        r.goal = 'salvage';
+        r.phase = 'working';
+        break;
       case 'toDepot':
         this.tryUnload(r);
         break;
@@ -2840,6 +3089,18 @@ export class Simulation {
         this.event('ok', `${r.label}'s haul route complete — the seam is worked out.`);
       }
     }
+    if (cmd.type === 'salvage') {
+      const p = this.poiById(cmd.poiId);
+      // A site too big for one hold keeps the rover running — out, back, out
+      // again — until it is stripped, exactly like a player-ordered mining run
+      // that has not finished its seam.
+      if (p && !p.buried && !isPickedClean(p)) {
+        r.goal = 'idle';
+        r.phase = 'idle';
+        r.statusText = roverStatusText(r);
+        return;
+      }
+    }
     // Automatic runs are single-trip: dropping the load returns the rover to
     // the pool so the scheduler can re-decide what the colony needs *now*.
     this.finishTask(r);
@@ -2898,6 +3159,82 @@ export class Simulation {
           : `${r.label} cleaned the ${def.label} array — output restored.`,
       );
       this.finishTask(r);
+    }
+  }
+
+  /**
+   * The SALVAGE task (GDD §05, §06, §10): drive out to a site, cut it apart, and
+   * fill the hold. Bulk salvage rides home through the ordinary haul-and-unload
+   * chain, so a wreck 400 m out is a logistics problem rather than a special
+   * case — and a site too big for one hold keeps the rover running, exactly like
+   * a seam that a plain mining order has not finished.
+   *
+   * Surviving cells do not ride home in the hold; they go into the grid store
+   * once the bulk cargo is stripped. Drops contain no fluids: exposed water and
+   * food would freeze, and the current logistics model cannot recover fluids in
+   * the field.
+   */
+  private doSalvage(r: Rover, p: Poi): void {
+    const def = ROVERS[r.kind];
+    const hours = SIM_TICK * HOURS_PER_SEC;
+    const reach = 8;
+    const dist = Math.hypot(p.x - r.x, p.z - r.z);
+    if (dist > reach) {
+      r.gid = p.id;
+      if (r.goal !== 'toSalvage' || r.phase !== 'moving') this.setTravel(r, p.x, p.z, 'toSalvage');
+      return;
+    }
+    r.gid = p.id;
+    r.goal = 'salvage';
+    r.phase = 'working';
+    r.statusText = p.kind === 'supplyDrop' ? 'Recovering cargo' : 'Salvaging';
+
+    const room = def.capacityKg - cargoMass(r);
+    if (room <= 0.01) {
+      this.beginUnload(r);
+      return;
+    }
+    const rate = salvageRateKgS(p.kind) * this.weather.workMultiplier() * this.roverWorkMul(r);
+    const { takenKg, perResource } = takeSalvage(p, room, rate, SIM_TICK);
+    for (const res of ALL_RESOURCES) {
+      const kg = perResource[res];
+      if (kg && kg > 0) r.cargo[res] += kg;
+    }
+    r.battery = Math.max(0, r.battery - def.workPowerKw * hours);
+    r.condition = Math.max(0, r.condition - ROVER_WEAR_WORK_S * SIM_TICK);
+    if (r.battery <= 0) this.disable(r);
+
+    if (!isPickedClean(p)) {
+      r.statusText = `Salvaging (${Math.round(salvageTotalKg(p))} kg left)`;
+      return;
+    }
+    this.recoverSiteCells(p);
+    const label = POI_KINDS[p.kind].label;
+    this.event(
+      'ok',
+      p.kind === 'supplyDrop'
+        ? `${r.label} recovered the ${p.manifest.toLowerCase()} drop — ${Math.round(takenKg)} kg aboard, and the site is empty.`
+        : `${r.label} stripped the ${label} — ${Math.round(takenKg)} kg aboard. Nothing left out here.`,
+    );
+    this.finishTask(r);
+  }
+
+  /** Hand surviving cells to the grid store once the bulk cargo is stripped. */
+  private recoverSiteCells(p: Poi): void {
+    if (p.energyKWh <= 0.5) return;
+    const cap = this.batteryCapacity();
+    const took = Math.max(0, Math.min(p.energyKWh, cap - this.storedKWh));
+    const lost = p.energyKWh - took;
+    this.storedKWh += took;
+    p.energyKWh = 0;
+    if (took > 0.5) {
+      this.event('ok', `Recovered from the site: ${Math.round(took)} kWh of cells.`);
+    }
+    if (lost > 0.5) {
+      this.event(
+        'warn',
+        `${Math.round(lost)} kWh of the site's cells would not fit — the batteries were already full.`,
+      );
     }
   }
 
@@ -3626,6 +3963,25 @@ export class Simulation {
         // Scheduler claims are authoritative: they steer the next dispatch.
         reservedBy: d.reservedBy ?? null,
       })),
+      /**
+       * Sites and landed drops. The world could regenerate the *scattered* ones
+       * from the seed, but a colony's found sites, stripped wrecks and the
+       * container sitting under 1.4 sols of dust are player-mutated state, and
+       * TDD §15 says player-mutated chunk state is what gets persisted.
+       */
+      pois: this.world.pois.map((p) => ({
+        id: p.id,
+        kind: p.kind,
+        x: p.x,
+        z: p.z,
+        salvage: { ...p.salvage },
+        energyKWh: p.energyKWh,
+        discovered: p.discovered,
+        solsToBury: p.solsToBury,
+        buried: p.buried,
+        manifest: p.manifest,
+      })),
+      exploration: { nextDropSol: this.nextDropSol },
       rovers: this.rovers.map((r) => ({
         id: r.id,
         kind: r.kind,
@@ -3676,6 +4032,7 @@ export class Simulation {
     if (data.version === 3) data = migrateV3Save(data);
     if (data.version === 4) data = migrateV4Save(data);
     if (data.version === 5) data = migrateV5Save(data);
+    if (data.version === 6) data = migrateV6Save(data);
     if (data.version !== SAVE_VERSION) {
       throw new Error(`unsupported save version ${data.version}`);
     }
@@ -3718,6 +4075,29 @@ export class Simulation {
       radius: d.radius,
       reservedBy: Number.isFinite(d.reservedBy) ? d.reservedBy : null,
     }));
+    // Sites and drops come back as written, so a stripped wreck stays stripped
+    // and a container with 1.4 sols of dust left still has 1.4 sols left. A save
+    // with none (v6 and older, or a world where nothing was ever found) keeps
+    // the scatter the seed generated.
+    if (Array.isArray(data.pois)) {
+      this.world.setPois(
+        (data.pois as any[])
+          .filter((p) => p && Number.isFinite(p.id) && POI_KINDS[p.kind as PoiKind])
+          .map((p) => ({
+            id: p.id,
+            kind: p.kind as PoiKind,
+            x: Number(p.x) || 0,
+            z: Number(p.z) || 0,
+            salvage: { ...(p.salvage ?? {}) },
+            energyKWh: Math.max(0, Number(p.energyKWh) || 0),
+            discovered: !!p.discovered,
+            solsToBury: Math.max(0, Number(p.solsToBury) || 0),
+            buried: !!p.buried,
+            manifest: typeof p.manifest === 'string' ? p.manifest : '',
+          })),
+      );
+    }
+    this.resetExploration(Number(data.exploration?.nextDropSol));
 
     this.rovers = (data.rovers ?? []).map((r: any) => {
       const command = coerceTask(r.command) ?? { type: 'idle' as const };
@@ -3873,6 +4253,8 @@ function coerceTask(t: any): RoverTask | null {
             ...(Number.isFinite(t.give) ? { give: t.give, given: t.given ?? 0 } : {}),
           }
         : null;
+    case 'salvage':
+      return Number.isFinite(t.poiId) ? { type: 'salvage', poiId: t.poiId } : null;
     case 'unload':
       return { type: 'unload' };
     case 'wait':
@@ -3916,14 +4298,29 @@ function migrateV3Save(data: any): any {
  * so they land on the classic defaults: Pioneer, medium claim, random site.
  */
 function migrateV5Save(data: any): any {
-  return {
+  return migrateV6Save({
     ...data,
-    version: SAVE_VERSION,
+    version: 6,
     difficulty: 'pioneer',
     worldHalf: 640,
     region: null,
     worldOptions: { ...DEFAULT_WORLD_OPTIONS },
-  };
+  });
+}
+
+/**
+ * v6 → v7. Colonies gained an explorable planet: scattered points of interest
+ * (GDD §06) and Earth cargo missions on a schedule (GDD §10).
+ *
+ * Neither has a v6 equivalent, so an older save simply has not found anything
+ * yet: the sites are regenerated from the seed on restore (`World` scatters them
+ * in its constructor and `restore` only replaces the list when the save carries
+ * one), and the drop schedule is re-rolled from the launch window. A colony
+ * saved before the feature existed therefore behaves exactly as it did, plus a
+ * planet with somewhere to go.
+ */
+function migrateV6Save(data: any): any {
+  return { ...data, version: SAVE_VERSION };
 }
 
 export { colonistStatusText };

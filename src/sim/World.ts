@@ -3,9 +3,17 @@ import type { ScatterRock, SurfaceSample, LandingSite } from './terrain';
 import { NavGrid } from './navgrid';
 import type { NavPoint } from './navgrid';
 import { mulberry32 } from '../lib/rng';
-import { WORLD_HALF, SPAWN_RADIUS } from './config';
+import {
+  WORLD_HALF,
+  SPAWN_RADIUS,
+  POI_COUNT,
+  POI_MIN_DIST_FROM_SPAWN,
+  POI_MIN_SEPARATION,
+} from './config';
 import type { ResourceId } from './defs';
 import { ALL_RESOURCES, RESOURCES, DEPOSIT_TABLE } from './defs';
+import type { Poi, PoiKind } from './pois';
+import { makePoi, pickPoiKind } from './pois';
 
 export type { ScatterRock, SurfaceSample, LandingSite } from './terrain';
 
@@ -51,8 +59,21 @@ export class World {
   private terrain: MartianTerrain;
   private nav: NavGrid;
   deposits: Deposit[] = [];
+  /**
+   * Points of interest (GDD §06), and — once the mission is running — the Earth
+   * cargo containers the simulation drops onto them (GDD §10). One list because
+   * they are one thing to the renderer, the HUD and the salvage task: a place
+   * on the map with something at it.
+   *
+   * Scatter runs on its own RNG stream rather than `depositRng`, so adding the
+   * feature did not move a single existing seam: a seed's deposits are what they
+   * were before this landed.
+   */
+  pois: Poi[] = [];
   private depositRng: () => number;
+  private poiRng: () => number;
   private nextId = 1;
+  private nextPoiId = 1;
 
   constructor(params: WorldGenParams) {
     this.seed = params.seed >>> 0;
@@ -64,7 +85,9 @@ export class World {
     });
     this.nav = new NavGrid((x, z) => this.terrain.heightAt(x, z), this.half);
     this.depositRng = mulberry32(this.seed ^ 0x9e3779b9);
+    this.poiRng = mulberry32(this.seed ^ 0x51ab3c7d);
     this.generateDeposits(params);
+    this.generatePois();
   }
 
   /** Authoritative ground height at world (x, z). Continuous. */
@@ -185,6 +208,65 @@ export class World {
         radius: table.radius * (0.8 + rng() * 0.4),
       });
     }
+  }
+
+  /**
+   * Scatter the planet's points of interest (GDD §06).
+   *
+   * Two placement rules do the design work. Nothing lands inside
+   * {@link POI_MIN_DIST_FROM_SPAWN} — the neighbourhood around the landing site
+   * is already known, so a "find" is always a journey — and sites keep
+   * {@link POI_MIN_SEPARATION} from each other, so arriving somewhere never
+   * means arriving at three things at once.
+   *
+   * Everything is driven by `poiRng` on its own stream: the same seed scatters
+   * the same planet, and the deposits are untouched by this method existing.
+   */
+  private generatePois(): void {
+    const areaScale = Math.min(4, Math.max(0.6, (this.half / WORLD_HALF) ** 2));
+    const total = Math.round(POI_COUNT * areaScale);
+    const rng = this.poiRng;
+    const inner = Math.min(POI_MIN_DIST_FROM_SPAWN, this.half * 0.45);
+
+    for (let i = 0; i < total; i++) {
+      const kind: PoiKind = pickPoiKind(rng);
+      let x = 0;
+      let z = 0;
+      let placed = false;
+      for (let t = 0; t < 40 && !placed; t++) {
+        const ang = rng() * Math.PI * 2;
+        const d = inner + rng() * Math.max(40, this.half - 24 - inner);
+        x = Math.cos(ang) * d;
+        z = Math.sin(ang) * d;
+        if (!this.canDrive(x, z)) continue;
+        if (this.pois.some((p) => Math.hypot(p.x - x, p.z - z) < POI_MIN_SEPARATION)) continue;
+        placed = true;
+      }
+      if (!placed) continue;
+      this.pois.push(makePoi(this.nextPoiId++, kind, x, z, rng));
+    }
+  }
+
+  /**
+   * Add a site the world did not generate — in practice the supply drops the
+   * simulation schedules (GDD §10), which arrive during the mission rather than
+   * existing at launch. The caller owns the payload; the world owns the id.
+   */
+  addPoi(poi: Omit<Poi, 'id'>): Poi {
+    const p: Poi = { ...poi, id: this.nextPoiId++ };
+    this.pois.push(p);
+    return p;
+  }
+
+  /** Adopt sites from a save, ids and all, and keep the allocator ahead of them. */
+  setPois(pois: Poi[]): void {
+    this.pois = pois.map((p) => ({ ...p }));
+    this.nextPoiId = this.pois.reduce((m, p) => Math.max(m, p.id + 1), 1);
+  }
+
+  /** The next id `addPoi` will hand out — the mirror needs it to stay in step. */
+  get nextPoiSlot(): number {
+    return this.nextPoiId;
   }
 
   private pickWeighted(weight: Record<ResourceId, number>): ResourceId {

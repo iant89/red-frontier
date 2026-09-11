@@ -42,7 +42,15 @@ import type { DifficultyId, WorldOptions } from '../difficulty';
  */
 export type WorldView = Pick<
   World,
-  'seed' | 'half' | 'region' | 'deposits' | 'heightAt' | 'sampleSurface' | 'rocks' | 'landingSite'
+  | 'seed'
+  | 'half'
+  | 'region'
+  | 'deposits'
+  | 'pois'
+  | 'heightAt'
+  | 'sampleSurface'
+  | 'rocks'
+  | 'landingSite'
 >;
 
 /** The alert board, read-only. Raising and clearing alerts is sim-internal. */
@@ -139,6 +147,7 @@ export type SimQuery = Pick<
   Simulation,
   | 'roverById'
   | 'buildingById'
+  | 'poiById'
   | 'idleRovers'
   | 'needsMaintenance'
   | 'canPlace'

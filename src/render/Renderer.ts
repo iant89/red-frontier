@@ -6,6 +6,8 @@ import type { Building as SBuilding, Rover as SRover } from '../sim/Simulation';
 // draw state, and that is all. No sim mutator is even nameable from here.
 import type { SimView, WorldView } from '../sim/host';
 import type { RoverKind, BuildingKind, ResourceId } from '../sim/defs';
+import { isPickedClean, POI_KINDS } from '../sim/pois';
+import type { Poi } from '../sim/pois';
 import { RESOURCES, ROVERS, BUILDINGS, ALL_FLUIDS } from '../sim/defs';
 import type { SunState } from '../sim/clock';
 import { sunDirection } from '../sim/clock';
@@ -33,11 +35,26 @@ const SUN_HIGH = new THREE.Color(0xfff0d0);
 
 export interface PickTarget {
   object: THREE.Object3D;
-  type: 'rover' | 'building' | 'deposit' | 'colonist';
+  type: 'rover' | 'building' | 'deposit' | 'colonist' | 'poi';
   id: number;
 }
 
 const TERRAIN_SEGS = 280;
+
+/**
+ * Site colours (GDD §06/§10). Deliberately off the rust palette the terrain is
+ * built from, and distinct from the resource colours a deposit uses, so a find
+ * reads as *something was here* rather than as another seam.
+ */
+const POI_COLORS: Record<Poi['kind'], number> = {
+  supplyDrop: 0xffb347,
+  wreckRover: 0x8d8f97,
+  abandonedMission: 0xc9a06a,
+  meteorite: 0x6b5a52,
+  iceCave: 0x79c8e8,
+  scienceCache: 0x9fd6c2,
+  settlementSite: 0x7bd17b,
+};
 
 /** Albedo tints matching the 2×3 atlas tiles, used as vertex colour. */
 const MAT_TINT = [
@@ -59,6 +76,7 @@ export class GameRenderer {
   private roverRoot = new THREE.Group();
   private buildingRoot = new THREE.Group();
   private depositRoot = new THREE.Group();
+  private poiRoot = new THREE.Group();
 
   private roverMeshes = new Map<number, THREE.Group>();
   private colonistMesh: THREE.Group | null = null;
@@ -74,6 +92,8 @@ export class GameRenderer {
     { group: THREE.Group; body: THREE.Object3D; pad: THREE.Mesh; construction: THREE.Object3D; damageRing: THREE.Mesh }
   >();
   private depositMeshes = new Map<number, THREE.Group>();
+  /** Points of interest and landed drops (GDD §06/§10), keyed by site id. */
+  private poiMeshes = new Map<number, THREE.Group>();
 
   selectionRing: THREE.Mesh;
   ghostGroup: THREE.Group;
@@ -118,6 +138,7 @@ export class GameRenderer {
     this.scene.add(this.roverRoot);
     this.scene.add(this.buildingRoot);
     this.scene.add(this.depositRoot);
+    this.scene.add(this.poiRoot);
     this.scene.add(this.overlayRoot);
 
     this.selectionRing = this.makeRing(0xffffff, 1.4, 0.35);
@@ -427,6 +448,7 @@ export class GameRenderer {
     this.syncRovers(sim.rovers);
     this.syncBuildings(sim.buildings);
     this.syncDeposits(sim.world.deposits);
+    this.syncPois(sim.world.pois);
     this.syncColonist(sim.colonist);
     this.syncOverlay(sim);
   }
@@ -825,6 +847,92 @@ export class GameRenderer {
         this.depositMeshes.delete(id);
       }
     }
+  }
+
+  /**
+   * Points of interest (GDD §06) and landed supply drops (§10).
+   *
+   * Only what the colony knows about is drawn: an undiscovered site is not on the
+   * map, so it is not on the screen either — and not pickable, which is what
+   * stops a player clicking something they have no business knowing exists. A
+   * stripped site keeps a low marker (you were here; there is nothing left) and a
+   * buried container keeps a dim one, because losing a drop should leave
+   * something on the landscape to look at.
+   */
+  private syncPois(pois: Poi[]): void {
+    const seen = new Set<number>();
+    for (const p of pois) {
+      if (!p.discovered) continue;
+      seen.add(p.id);
+      let g = this.poiMeshes.get(p.id);
+      if (!g) {
+        g = this.makePoiMesh(p);
+        this.poiRoot.add(g);
+        this.poiMeshes.set(p.id, g);
+      }
+      g.position.set(p.x, this.world.heightAt(p.x, p.z), p.z);
+      const spent = isPickedClean(p) || p.buried;
+      g.scale.setScalar(spent ? 0.55 : 1);
+      // The beacon is the one part that animates: a live drop pulses, a spent
+      // site goes dark. Kept cheap — this runs every frame for a handful of nodes.
+      const beacon = g.userData.beacon as THREE.Mesh | undefined;
+      if (beacon) {
+        const mat = beacon.material as THREE.MeshStandardMaterial;
+        const t = this.clockT;
+        const pulse = p.kind === 'supplyDrop' && !spent ? 0.55 + 0.45 * Math.sin(t * 3.1) : 0.16;
+        mat.emissiveIntensity = spent ? 0.05 : pulse;
+      }
+      const label = POI_KINDS[p.kind];
+      g.userData.label = p.buried
+        ? `${label.label} — buried`
+        : spent
+          ? `${label.label} — picked clean`
+          : label.label;
+    }
+    for (const [id, g] of this.poiMeshes) {
+      if (!seen.has(id)) {
+        this.poiRoot.remove(g);
+        this.poiMeshes.delete(id);
+      }
+    }
+  }
+
+  private makePoiMesh(p: Poi): THREE.Group {
+    const g = new THREE.Group();
+    const color = POI_COLORS[p.kind];
+    // The find itself: a low, readable silhouette in the site's colour.
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(5.4, 2.6, 4.2),
+      new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0.25 }),
+    );
+    body.position.y = 1.3;
+    body.castShadow = true;
+    body.receiveShadow = true;
+    g.add(body);
+    // A transponder mast, so a site is findable at strategic zoom against a
+    // landscape that is otherwise one continuous rust colour.
+    const mast = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.18, 0.22, 7, 6),
+      new THREE.MeshStandardMaterial({ color: 0x9a9a9a, roughness: 0.6, metalness: 0.6 }),
+    );
+    mast.position.y = 4.4;
+    g.add(mast);
+    const beacon = new THREE.Mesh(
+      new THREE.SphereGeometry(0.85, 10, 8),
+      new THREE.MeshStandardMaterial({
+        color,
+        emissive: color,
+        emissiveIntensity: 0.6,
+        roughness: 0.4,
+      }),
+    );
+    beacon.position.y = 8.1;
+    g.add(beacon);
+    g.userData.beacon = beacon;
+    g.userData.pickable = true;
+    g.userData.pickType = 'poi';
+    g.userData.pickId = p.id;
+    return g;
   }
 
   private makeDepositMesh(d: Deposit): THREE.Group {
@@ -1355,6 +1463,7 @@ export class GameRenderer {
     for (const [, g] of this.roverMeshes) out.push(g);
     for (const [, rec] of this.buildingMeshes) out.push(rec.group);
     for (const [, g] of this.depositMeshes) out.push(g);
+    for (const [, g] of this.poiMeshes) out.push(g);
     return out;
   }
 

@@ -49,6 +49,7 @@ export type SimCommand =
   | { type: 'rover/clean'; roverId: number; buildingId: number; queue: boolean }
   | { type: 'rover/repair'; roverId: number; buildingId: number; queue: boolean }
   | { type: 'rover/recover'; roverId: number; strandedId: number; queue: boolean }
+  | { type: 'rover/salvage'; roverId: number; poiId: number; queue: boolean }
   | { type: 'rover/stop'; roverId: number }
   | { type: 'rover/repeatRoute'; roverId: number; on: boolean }
   | { type: 'rover/rule'; roverId: number; rule: RoverRule; on: boolean }
@@ -95,6 +96,7 @@ export const COMMAND_TYPES: readonly SimCommandType[] = [
   'rover/clean',
   'rover/repair',
   'rover/recover',
+  'rover/salvage',
   'rover/stop',
   'rover/repeatRoute',
   'rover/rule',
@@ -203,6 +205,7 @@ export const COMMAND_SHAPES: Record<SimCommandType, CommandShape> = {
   'rover/clean': { roverId: 'id', buildingId: 'id', queue: 'bool' },
   'rover/repair': { roverId: 'id', buildingId: 'id', queue: 'bool' },
   'rover/recover': { roverId: 'id', strandedId: 'id', queue: 'bool' },
+  'rover/salvage': { roverId: 'id', poiId: 'id', queue: 'bool' },
   'rover/stop': { roverId: 'id' },
   'rover/repeatRoute': { roverId: 'id', on: 'bool' },
   'rover/rule': { roverId: 'id', rule: 'rule', on: 'bool' },
