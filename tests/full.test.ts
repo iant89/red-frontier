@@ -32,6 +32,7 @@ import './sim/lights.test';
 import './sim/determinism.test';
 import './sim/persistence.test';
 import './sim/devtools.test';
+import './sim/host.test';
 import './render/particles.test';
 import './ui/build-status.test';
 import './hud/chrome.test';

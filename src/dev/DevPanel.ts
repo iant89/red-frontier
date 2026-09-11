@@ -12,7 +12,8 @@
  * by sim design; fabricated entities are ordinary world objects afterwards.
  */
 
-import type { Simulation, Rover, Building, Colonist } from '../sim/Simulation';
+import type { Rover, Building, Colonist } from '../sim/Simulation';
+import type { SimView } from '../sim/host';
 import type { BuildingKind, ResourceId, RoverKind } from '../sim/defs';
 import {
   BUILDING_ORDER,
@@ -31,7 +32,8 @@ export type DevSelection =
   | null;
 
 export interface DevPanelCallbacks {
-  getSim(): Simulation | null;
+  /** The colony, as the host's read model — the panel draws it and edits it by command. */
+  getSim(): SimView | null;
   getSelection(): DevSelection;
   /** Adopt a selection (spawn panels select what they fabricate). */
   select(sel: DevSelection): void;
@@ -234,7 +236,7 @@ export class DevPanel {
       if (!sim) return;
       const sol = Math.max(1, Math.round(Number(this.numValue('dv-sol', 1)) || 1));
       const frac = this.todFrac();
-      this.dev.setTime(sim, sol, frac);
+      this.dev.setTime(sol, frac);
       this.setStatus(`Calendar jumped to Sol ${sol} · ${fracToClock(frac)}`);
     });
     this.root.querySelectorAll('[data-tod]').forEach((btn) => {
@@ -243,7 +245,7 @@ export class DevPanel {
         if (!sim) return;
         const frac = Number((btn as HTMLElement).dataset.tod);
         this.setTodSlider(frac);
-        this.dev.setTime(sim, sim.clock.sol + 1, frac);
+        this.dev.setTime(sim.clock.sol + 1, frac);
         this.setStatus(`Time set to ${fracToClock(frac)}`);
       });
     });
@@ -252,7 +254,7 @@ export class DevPanel {
       const sim = this.cb.getSim();
       if (!sim) return;
       (this.el('dv-todv') as HTMLElement).textContent = fracToClock(this.todFrac());
-      this.dev.setTime(sim, sim.clock.sol + 1, this.todFrac());
+      this.dev.setTime(sim.clock.sol + 1, this.todFrac());
     });
     const dust = this.el('dv-dust') as HTMLInputElement;
     dust.addEventListener('input', () => {
@@ -260,28 +262,28 @@ export class DevPanel {
       if (!sim) return;
       const v = Number(dust.value) / 100;
       (this.el('dv-dustv') as HTMLElement).textContent = `${dust.value}%`;
-      this.dev.setDust(sim, v);
+      this.dev.setDust(v);
     });
     this.root.querySelectorAll('[data-storm]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const sim = this.cb.getSim();
         if (!sim) return;
         const kind = (btn as HTMLElement).dataset.storm as StormKindReal;
-        this.dev.forceStorm(sim, kind);
+        this.dev.forceStorm(kind);
         this.setStatus(`Storm conjured — ${kind}`);
       });
     });
     this.el('dv-wx-clear').addEventListener('click', () => {
       const sim = this.cb.getSim();
       if (!sim) return;
-      this.dev.clearStorms(sim);
+      this.dev.clearStorms();
       this.setStatus('Skies cleared');
     });
     this.el('dv-storms-on').addEventListener('change', () => {
       const sim = this.cb.getSim();
       if (!sim) return;
       const on = (this.el('dv-storms-on') as HTMLInputElement).checked;
-      this.dev.setStormScheduler(sim, on);
+      this.dev.setStormScheduler(on);
       this.setStatus(on ? 'Storm scheduler resumed' : 'Storm scheduler suspended');
     });
 
@@ -291,7 +293,7 @@ export class DevPanel {
       if (!sim) return;
       const kind = this.selValue('dv-spawn-rover') as RoverKind;
       const pt = this.cb.getSpawnPoint();
-      const id = this.dev.spawnRover(sim, kind, pt.x, pt.z);
+      const id = this.dev.spawnRover(kind, pt.x, pt.z);
       this.cb.select({ type: 'rover', id });
       this.setStatus(`${ROVERS[kind].label} #${id} fabricated`);
     });
@@ -315,7 +317,7 @@ export class DevPanel {
       const res = this.selValue('dv-spawn-dep') as ResourceId;
       const kg = Math.max(10, this.numValue('dv-dep-kg', 2500));
       const pt = this.cb.getSpawnPoint();
-      this.dev.spawnDeposit(sim, res, pt.x, pt.z, kg);
+      this.dev.spawnDeposit(res, pt.x, pt.z, kg);
       this.setStatus(`${RESOURCES[res].label} deposit surveyed in — ${Math.round(kg)} kg`);
     });
     this.el('dv-arm-deposit').addEventListener('click', () => {
@@ -336,7 +338,7 @@ export class DevPanel {
   private spawnBuildingNow(kind: BuildingKind, pt: { x: number; z: number }): void {
     const sim = this.cb.getSim();
     if (!sim) return;
-    const id = this.dev.spawnBuilding(sim, kind, pt.x, pt.z);
+    const id = this.dev.spawnBuilding(kind, pt.x, pt.z);
     if (id === null) {
       this.setStatus(`Cannot fabricate a ${BUILDINGS[kind].label} there — see the colony log`);
       return;
@@ -411,7 +413,7 @@ export class DevPanel {
     this.patchSelection(sim, sel);
   }
 
-  private rebuildSelection(sim: Simulation, sel: DevSelection): void {
+  private rebuildSelection(sim: SimView, sel: DevSelection): void {
     const body = this.el('dv-sel-body');
     const title = this.el('dv-sel-title');
     // New nodes mean the id cache for selection controls is stale.
@@ -491,7 +493,7 @@ export class DevPanel {
     bat.addEventListener('input', () => {
       const sim = this.cb.getSim();
       if (!sim) return;
-      this.dev.setBatteryFrac(sim, id, Number(bat.value) / 100);
+      this.dev.setBatteryFrac(id, Number(bat.value) / 100);
       // Dragging the battery by hand means the pin should follow suit visually.
       const keep = q<HTMLInputElement>('dvs-keep');
       keep.checked = this.dev.isKeepBatteryFull(id);
@@ -501,14 +503,14 @@ export class DevPanel {
     keep.addEventListener('change', () => {
       const sim = this.cb.getSim();
       if (!sim) return;
-      this.dev.setKeepBatteryFull(sim, id, keep.checked);
+      this.dev.setKeepBatteryFull(id, keep.checked);
       this.setStatus(keep.checked ? 'Battery pinned at 100%' : 'Battery pin released');
     });
     const cond = q<HTMLInputElement>('dvs-cond');
     cond.addEventListener('input', () => {
       const sim = this.cb.getSim();
       if (!sim) return;
-      this.dev.setCondition(sim, id, Number(cond.value));
+      this.dev.setCondition(id, Number(cond.value));
     });
     q<HTMLButtonElement>('dvs-cargo-set').addEventListener('click', () => {
       const sim = this.cb.getSim();
@@ -593,7 +595,7 @@ export class DevPanel {
     body.querySelector('#dvs-complete')?.addEventListener('click', () => {
       const sim = this.cb.getSim();
       if (!sim) return;
-      this.dev.completeBuilding(sim, id);
+      this.dev.completeBuilding(id);
       this.setStatus('Structure completed instantly');
       this.selKey = ''; // the panel swaps the button out on rebuild
     });
@@ -601,26 +603,27 @@ export class DevPanel {
     hp.addEventListener('input', () => {
       const sim = this.cb.getSim();
       if (!sim) return;
-      this.dev.setHealth(sim, id, Number(hp.value));
+      this.dev.setHealth(id, Number(hp.value));
     });
     const dmg = q<HTMLInputElement>('dvs-damaged');
     dmg.addEventListener('change', () => {
       const sim = this.cb.getSim();
       if (!sim) return;
-      this.dev.setDamaged(sim, id, dmg.checked);
+      this.dev.setDamaged(id, dmg.checked);
     });
     const en = q<HTMLInputElement>('dvs-enabled');
     en.addEventListener('change', () => {
       const sim = this.cb.getSim();
       if (!sim) return;
-      sim.setBuildingEnabled(id, en.checked);
+      // Not a dev backdoor — the power switch is the player's own toggle, so it
+      // goes through the same command the HUD's button sends.
+      this.dev.setBuildingEnabled(id, en.checked);
     });
     body.querySelector('#dvs-clean')?.addEventListener('input', () => {
       const sim = this.cb.getSim();
       if (!sim) return;
       this.dev.setCleanliness(
-        sim,
-        id,
+                id,
         Number((body.querySelector('#dvs-clean') as HTMLInputElement).value) / 100,
       );
     });
@@ -628,14 +631,14 @@ export class DevPanel {
       const sim = this.cb.getSim();
       const b = sim?.buildingById(id);
       if (!sim || !b) return;
-      const landed = this.dev.setUpgradeLevel(sim, id, b.level + 1);
+      const landed = this.dev.setUpgradeLevel(id, b.level + 1);
       this.setStatus(`Upgraded to Mk ${landed}`);
     });
     q<HTMLButtonElement>('dvs-mk-down').addEventListener('click', () => {
       const sim = this.cb.getSim();
       const b = sim?.buildingById(id);
       if (!sim || !b) return;
-      const landed = this.dev.setUpgradeLevel(sim, id, b.level - 1);
+      const landed = this.dev.setUpgradeLevel(id, b.level - 1);
       this.setStatus(`Set to Mk ${landed}`);
     });
   }
@@ -699,12 +702,12 @@ export class DevPanel {
     chp.addEventListener('input', () => {
       const sim = this.cb.getSim();
       if (!sim) return;
-      this.dev.setColonistHealth(sim, Number(chp.value));
+      this.dev.setColonistHealth(Number(chp.value));
     });
     q<HTMLButtonElement>('dvs-suit').addEventListener('click', () => {
       const sim = this.cb.getSim();
       if (!sim) return;
-      this.dev.refillSuit(sim);
+      this.dev.refillSuit();
       this.setStatus('Suit oxygen refilled');
     });
   }
@@ -718,7 +721,7 @@ export class DevPanel {
     if (suit) suit.textContent = c.inside ? 'docked (refilling)' : `${c.suitO2.toFixed(2)} kg`;
   }
 
-  private patchSelection(sim: Simulation, sel: DevSelection): void {
+  private patchSelection(sim: SimView, sel: DevSelection): void {
     if (!sel) return;
     if (sel.type === 'rover') {
       const r = sim.roverById(sel.id);

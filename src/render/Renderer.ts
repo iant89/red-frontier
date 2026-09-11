@@ -1,12 +1,10 @@
 import * as THREE from 'three';
-import type { World } from '../sim/World';
 import { WORLD_HALF, SPAWN_X, SPAWN_Z, SPAWN_RADIUS } from '../sim/config';
 import type { Deposit } from '../sim/World';
-import type {
-  Building as SBuilding,
-  Rover as SRover,
-  Simulation,
-} from '../sim/Simulation';
+import type { Building as SBuilding, Rover as SRover } from '../sim/Simulation';
+// The renderer's entire window onto the colony is the host's read model: it can
+// draw state, and that is all. No sim mutator is even nameable from here.
+import type { SimView, WorldView } from '../sim/host';
 import type { RoverKind, BuildingKind, ResourceId } from '../sim/defs';
 import { RESOURCES, ROVERS, BUILDINGS, ALL_FLUIDS } from '../sim/defs';
 import type { SunState } from '../sim/clock';
@@ -55,7 +53,7 @@ export class GameRenderer {
   scene = new THREE.Scene();
   camera: THREE.PerspectiveCamera;
   renderer: THREE.WebGLRenderer;
-  private world: World;
+  private world: WorldView;
 
   terrain: THREE.Mesh;
   private roverRoot = new THREE.Group();
@@ -94,7 +92,7 @@ export class GameRenderer {
   private raycaster = new THREE.Raycaster();
   private ndc = new THREE.Vector2();
 
-  constructor(canvas: HTMLCanvasElement, world: World) {
+  constructor(canvas: HTMLCanvasElement, world: WorldView) {
     this.world = world;
     this.renderer = new THREE.WebGLRenderer({
       canvas,
@@ -238,7 +236,7 @@ export class GameRenderer {
    * grit, dust devils and rover wheel trails. FX runs on sim time — frozen
    * while paused, because weather is sim state, not a screen effect.
    */
-  private syncWeatherFx(sim: Simulation): void {
+  private syncWeatherFx(sim: SimView): void {
     const dt = Math.min(0.5, Math.max(0, sim.simTime - this.lastSimT));
     this.lastSimT = sim.simTime;
     this.weatherFx.sync(
@@ -416,7 +414,7 @@ export class GameRenderer {
   }
 
   // ---------------- entity syncing ----------------
-  sync(sim: Simulation): void {
+  sync(sim: SimView): void {
     this.clockT = sim.simTime;
     // Panels face the sun's azimuth and tilt with its elevation.
     const el = Math.max(0, sim.sun.elevationRad);
@@ -511,7 +509,7 @@ export class GameRenderer {
    * selected network. Cheap, readable, and colour-independent (TDD §11 asks
    * for colour-independent icons, so each mark carries a distinct shape too).
    */
-  private syncOverlay(sim: Simulation): void {
+  private syncOverlay(sim: SimView): void {
     if (this.overlayMode === 'none') return;
     const seen = new Set<number>();
     for (const b of sim.buildings) {
