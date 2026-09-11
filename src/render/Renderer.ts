@@ -14,6 +14,7 @@ import {
   makeMarsFallbackMaterial,
   makeMarsTerrainMaterial,
   composeMacroAlbedo,
+  splitMarsPbrAtlas,
 } from './marsTerrain';
 import { WeatherFX } from './WeatherFX';
 
@@ -308,37 +309,66 @@ export class GameRenderer {
   private loadMarsPbr(): void {
     const base = `${import.meta.env.BASE_URL}textures/pbr`;
     const loader = new THREE.TextureLoader();
-    const names = ['albedo', 'normal', 'roughness', 'metallic', 'ao', 'height'] as const;
-    const loaded: Partial<Record<(typeof names)[number], THREE.Texture>> = {};
-    let pending = names.length;
-    const finish = (): void => {
-      if (--pending > 0) return;
-      const anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
-      // Compose the world-spanning macro albedo out of the source imagery —
-      // the landscape is generated from the map, not tiled with it.
-      const macro = composeMacroAlbedo(loaded.albedo!, this.world.seed);
-      const mat = makeMarsTerrainMaterial(
-        {
-          albedo: loaded.albedo!,
-          normal: loaded.normal!,
-          roughness: loaded.roughness!,
-          metallic: loaded.metallic!,
-          ao: loaded.ao!,
-          height: loaded.height!,
-        },
-        anisotropy,
-        { macro: macro ?? undefined, worldSize: this.world.half * 2 },
-      );
+    const anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+    let applied = false;
+
+    const apply = (
+      maps: Parameters<typeof makeMarsTerrainMaterial>[0],
+      macro: THREE.Texture | null,
+    ): void => {
+      if (applied) return;
+      applied = true;
+      const mat = makeMarsTerrainMaterial(maps, anisotropy, {
+        macro: macro ?? undefined,
+        worldSize: this.world.half * 2,
+      });
       const old = this.terrain.material as THREE.Material;
       this.terrain.material = mat;
       old.dispose();
     };
-    for (const name of names) {
-      loader.load(`${base}/${name}.jpg`, (tex) => {
-        loaded[name] = tex;
-        finish();
-      });
-    }
+
+    // The art source is a single 2×2 sheet: albedo / height on the top row,
+    // normal / roughness on the bottom row. Keep the six-file loader below as
+    // a compatibility fallback for older installs and missing assets.
+    loader.load(
+      `${base}/mars-terrain-atlas.jpg`,
+      (atlas) => {
+        const maps = splitMarsPbrAtlas(atlas, anisotropy);
+        // Cropping the albedo first keeps the macro composer from seeing the
+        // normal/height quadrants as colour data.
+        const macro = composeMacroAlbedo(maps.albedo, this.world.seed);
+        apply(maps, macro);
+      },
+      undefined,
+      () => {
+        const names = ['albedo', 'normal', 'roughness', 'metallic', 'ao', 'height'] as const;
+        const loaded: Partial<Record<(typeof names)[number], THREE.Texture>> = {};
+        let pending = names.length;
+        const finish = (): void => {
+          if (--pending > 0) return;
+          // Compose the world-spanning macro albedo only for the legacy
+          // individual-map path; an atlas needs its quadrant UVs preserved.
+          const macro = composeMacroAlbedo(loaded.albedo!, this.world.seed);
+          apply(
+            {
+              albedo: loaded.albedo!,
+              normal: loaded.normal!,
+              roughness: loaded.roughness!,
+              metallic: loaded.metallic!,
+              ao: loaded.ao!,
+              height: loaded.height!,
+            },
+            macro,
+          );
+        };
+        for (const name of names) {
+          loader.load(`${base}/${name}.jpg`, (tex) => {
+            loaded[name] = tex;
+            finish();
+          });
+        }
+      },
+    );
   }
 
   private buildRocks(): void {

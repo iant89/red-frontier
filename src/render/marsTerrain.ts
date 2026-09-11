@@ -7,6 +7,8 @@ export interface MarsPbrMaps {
   metallic: THREE.Texture;
   ao: THREE.Texture;
   height: THREE.Texture;
+  /** True when the maps are quadrants of one 2×2 atlas texture. */
+  atlas?: boolean;
 }
 
 export interface MarsTerrainOptions {
@@ -21,16 +23,70 @@ export interface MarsTerrainOptions {
   worldSize?: number;
 }
 
-function prep(tex: THREE.Texture, color: boolean, anisotropy: number): THREE.Texture {
+function prep(tex: THREE.Texture, color: boolean, anisotropy: number, atlas = false): THREE.Texture {
   tex.colorSpace = color ? THREE.SRGBColorSpace : THREE.NoColorSpace;
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
+  tex.wrapS = atlas ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
+  tex.wrapT = atlas ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
   tex.minFilter = THREE.LinearMipmapLinearFilter;
   tex.magFilter = THREE.LinearFilter;
   tex.anisotropy = anisotropy;
   tex.generateMipmaps = true;
   tex.needsUpdate = true;
   return tex;
+}
+
+function neutralMap(value: number): THREE.DataTexture {
+  const tex = new THREE.DataTexture(new Uint8Array([value, value, value, 255]), 1, 1, THREE.RGBAFormat);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/**
+ * Split the 2×2 terrain material sheet used by the terrain art pipeline.
+ * Quadrants are: albedo, height, normal, roughness (left-to-right, top-to-
+ * bottom). Browser builds crop the quadrants into repeatable CanvasTextures;
+ * the headless fallback keeps atlas UVs for callers that only need metadata.
+ */
+export function splitMarsPbrAtlas(atlas: THREE.Texture, anisotropy = 8): MarsPbrMaps {
+  const image = atlas.image as { width?: number; height?: number } | undefined;
+  const canCrop =
+    typeof document !== 'undefined' &&
+    !!image?.width &&
+    !!image?.height &&
+    image.width >= 2 &&
+    image.height >= 2;
+
+  const quadrant = (x: number, y: number, color: boolean): THREE.Texture => {
+    if (canCrop) {
+      const width = Math.floor(image!.width! / 2);
+      const height = Math.floor(image!.height! / 2);
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        // Texture UV y=1 is the top row, while canvas y=0 is the top row.
+        ctx.drawImage(image as CanvasImageSource, x * width, (1 - y) * height, width, height, 0, 0, width, height);
+        return prep(new THREE.CanvasTexture(canvas), color, anisotropy);
+      }
+    }
+    const tex = atlas.clone();
+    tex.repeat.set(0.5, 0.5);
+    tex.offset.set(x * 0.5, y * 0.5);
+    return prep(tex, color, anisotropy, true);
+  };
+  return {
+    albedo: quadrant(0, 1, true),
+    height: quadrant(1, 1, false),
+    normal: quadrant(0, 0, false),
+    roughness: quadrant(1, 0, false),
+    // The sheet does not contain metalness or AO. Mars ground is non-metallic;
+    // a neutral AO map preserves the material's lighting without inventing
+    // another copy of the atlas.
+    metallic: prep(neutralMap(0), false, anisotropy),
+    ao: prep(neutralMap(255), false, anisotropy),
+    atlas: !canCrop,
+  };
 }
 
 /**
@@ -46,12 +102,13 @@ export function makeMarsTerrainMaterial(
   anisotropy = 8,
   opts: MarsTerrainOptions = {},
 ): THREE.MeshStandardMaterial {
-  prep(maps.albedo, true, anisotropy);
-  prep(maps.normal, false, anisotropy);
-  prep(maps.roughness, false, anisotropy);
-  prep(maps.metallic, false, anisotropy);
-  prep(maps.ao, false, anisotropy);
-  prep(maps.height, false, anisotropy);
+  const atlas = maps.atlas === true;
+  prep(maps.albedo, true, anisotropy, atlas);
+  prep(maps.normal, false, anisotropy, atlas);
+  prep(maps.roughness, false, anisotropy, atlas);
+  prep(maps.metallic, false, anisotropy, atlas);
+  prep(maps.ao, false, anisotropy, atlas);
+  prep(maps.height, false, anisotropy, atlas);
 
   const macro = opts.macro ?? null;
   if (macro) {
