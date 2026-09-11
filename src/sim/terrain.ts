@@ -72,6 +72,17 @@ interface Crater {
   reach: number;
 }
 
+/** A broad, low-gradient landform. Hills are separate from craters so the
+ * playable map has real rolling relief instead of only impact holes. */
+interface Hill {
+  x: number;
+  z: number;
+  radius: number;
+  height: number;
+  stretch: number;
+  rotation: number;
+}
+
 const PAD_INNER = SPAWN_RADIUS;
 const PAD_OUTER = SPAWN_RADIUS + 48;
 
@@ -86,6 +97,7 @@ export class MartianTerrain {
   readonly seed: number;
   readonly site: LandingSite;
   readonly craters: Crater[] = [];
+  readonly hills: Hill[] = [];
   readonly rocks: ScatterRock[] = [];
   readonly worldHalf: number;
 
@@ -183,10 +195,63 @@ export class MartianTerrain {
   }
 
   private generate(): void {
+    this.placeHills();
     this.placeCraters();
     this.captureCraterDatums();
     this.padDatum = this.macroElevation(0, 0);
     this.scatterRocks();
+  }
+
+  /**
+   * Lay down a handful of broad, seeded landforms. The MOLA approximation is
+   * intentionally gentle at this scale: it often reads as regional tilt, not
+   * as a hill. These landforms supply the missing visual relief while keeping
+   * their gradients below the rover/building limits.
+   *
+   * A separate random stream keeps adding hills from changing crater layouts,
+   * deposits, or save compatibility for an existing seed. The pad is still
+   * flattened by the pad blend in sample(), so a hill may safely roll past it.
+   */
+  private placeHills(): void {
+    const hillRng = mulberry32(this.seed ^ 0x48_49_4c_53);
+    const rand = (a: number, b: number): number => a + hillRng() * (b - a);
+    const count = 5 + Math.floor(hillRng() * 3);
+
+    for (let i = 0; i < count; i++) {
+      const angle = rand(0, Math.PI * 2);
+      const distance = rand(150, this.worldHalf * 0.78);
+      const radius = rand(180, 300);
+      const positive = i === 0 || hillRng() > 0.34;
+      this.hills.push({
+        x: Math.cos(angle) * distance,
+        z: Math.sin(angle) * distance,
+        radius,
+        // Positive mounds dominate, with a few shallow swales to keep the
+        // horizon from becoming a row of identical bumps.
+        height: (positive ? 1 : -1) * rand(11, 21),
+        stretch: rand(0.78, 1.45),
+        rotation: rand(0, Math.PI),
+      });
+    }
+  }
+
+  /** Height contributed by the broad hill / swale layer. */
+  private hillElevation(x: number, z: number): number {
+    let h = 0;
+    for (const hill of this.hills) {
+      const dx = x - hill.x;
+      const dz = z - hill.z;
+      const c = Math.cos(hill.rotation);
+      const s = Math.sin(hill.rotation);
+      const along = dx * c + dz * s;
+      const across = (-dx * s + dz * c) / hill.stretch;
+      const q = Math.hypot(along, across) / hill.radius;
+      if (q > 2.2) continue;
+      // Gaussian shoulders make the landform merge into the surrounding
+      // areoid without the sharp edge a clipped cone would introduce.
+      h += hill.height * Math.exp(-1.55 * q * q);
+    }
+    return h;
   }
 
   private rand(a = 0, b = 1): number {
@@ -226,7 +291,7 @@ export class MartianTerrain {
     const regional = (hKm - this.site.elevKm) * 1000;
     const roll =
       this.noise.fbm(x * 0.004 + 3.1, z * 0.004 - 1.7, 3, 2.0, 0.5) * 1.6 * (0.4 + this.site.rockiness);
-    return regional + roll + this.mesoElevation(x, z);
+    return regional + this.hillElevation(x, z) + roll + this.mesoElevation(x, z);
   }
 
   private regionalSteep(): number {
