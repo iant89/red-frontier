@@ -8,6 +8,7 @@
  */
 
 import { clamp, lerp, smoothstep, mulberry32 } from '../lib/rng';
+import { marsMolaElevationKm } from './marsDem';
 
 const D2R = Math.PI / 180;
 /** Mars mean radius (km). */
@@ -177,7 +178,10 @@ export function marsElevationKm(lat: number, lon: number): number {
 
   h += trench(lat, lon, -13.5, 270, 330, 2.2, -5.5);
 
-  return h;
+  // Keep the compact analytic model for continuity and use the reduced MOLA
+  // raster as a real global topographic prior. The raster is coarse enough to
+  // steer regional tilt only; local playable relief is generated in terrain.ts.
+  return lerp(h, marsMolaElevationKm(lat, lon), 0.32);
 }
 
 function biomeStats(biome: MarsBiome): {

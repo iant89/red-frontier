@@ -2,13 +2,13 @@
  * Playable terrain is a 1280 m window of real Mars.
  *
  * A seed picks a landable site on the globe (Amazonis, Arabia, Gale, …).
- * The *landscaping* is the MOLA-like areoid itself: the window samples the
- * real elevation model over a several-kilometre stretch and folds it down
- * into playable scale, so hills, swales and the regional tilt sit where the
- * planet's actual topography puts them — the landing site's own gradient,
- * curvature and neighbours decide the shape of the ground. On top of that
- * sits HiRISE-scale local geology: round craters of mixed age, a little
- * grit, rocks on rims — not a single noise field, and not star-shaped ejecta.
+ * The *landscaping* starts from a compact MOLA-derived global relief prior:
+ * the landing site's regional tilt and neighbouring topography steer a
+ * several-kilometre window into playable scale. A seeded landform layer adds
+ * broad, driveable hills where the coarse global DEM cannot resolve local
+ * relief. On top of that sits HiRISE-scale local geology: round craters of
+ * mixed age, a little grit, rocks on rims — not a single noise field, and not
+ * star-shaped ejecta.
  */
 
 import { Noise2D } from '../lib/noise';
