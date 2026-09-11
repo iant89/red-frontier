@@ -2,13 +2,17 @@
  * Application shell: owns the frame loop, input, and the wiring between the
  * simulation, the renderer and the HUD.
  *
- * The dependency arrows all point one way. The sim knows nothing about this
- * file; the renderer and HUD only read the sim. Everything the player does
- * arrives here as a gesture and leaves as a *command* on the simulation.
+ * The dependency arrows all point one way. The simulation knows nothing about
+ * this file, and this file knows nothing about the simulation: it holds a
+ * {@link SimHost}, reads it through a {@link SimView}, and changes it only by
+ * sending a {@link SimCommand}. Everything the player does arrives here as a
+ * gesture and leaves as a message. Which host is on the other end — this thread
+ * or a worker — is not this file's business (TDD §16).
  */
 
-import { Simulation } from '../sim/Simulation';
 import type { Rover } from '../sim/Simulation';
+import type { SimCommand, SimHost, SimView } from '../sim/host';
+import { createHost, planHost, restoreHost } from '../sim/host';
 import { GameRenderer } from '../render/Renderer';
 import type { OverlayMode } from '../render/Renderer';
 import { CameraRig } from './CameraRig';
@@ -52,7 +56,12 @@ type Selection =
   | null;
 
 export class Game {
-  sim: Simulation | null = null;
+  /**
+   * The colony's host — the only handle this class keeps to the simulation.
+   * Everything below reaches the world through it: reads via `view`, writes via
+   * `order()`, time via `step()`.
+   */
+  host: SimHost | null = null;
   renderer: GameRenderer | null = null;
   rig: CameraRig | null = null;
   hud: HUD;
@@ -81,6 +90,15 @@ export class Game {
 
   private canvas: HTMLCanvasElement;
 
+  /**
+   * The colony as the outside world may see it: a read model, never a live sim.
+   * `scripts/mobile-smoke.mjs` reads world state back through this, which is why
+   * it stays a getter on the Game rather than a field that could go stale.
+   */
+  get sim(): SimView | null {
+    return this.host?.view ?? null;
+  }
+
   constructor() {
     this.canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
     this.hud = new HUD({
@@ -96,7 +114,7 @@ export class Game {
     });
     this.dev = new DevMode((sev, text) => this.hud.addLog(sev, text));
     this.devPanel = new DevPanel(this.dev, {
-      getSim: () => this.sim,
+      getSim: () => this.host?.view ?? null,
       getSelection: () => this.selected,
       select: (sel) => {
         this.selected = sel;
@@ -197,7 +215,16 @@ export class Game {
       loader.setActiveStep(1);
       loader.setProgress(0.2, 'Seeding Martian geology…');
       await nextFrame();
-      const sim = new Simulation({
+      // The world comes up behind a host rather than in a constructor call here,
+      // and the host is chosen by a factory rather than by this file: seeding,
+      // mirroring the terrain and (when asked for) standing up a worker are one
+      // await, so the frame loop, the renderer and the panels never learn which
+      // side of a thread boundary the colony is on (TDD §16).
+      const plan = planHost(location.search);
+      if (plan.transport === 'worker')
+        loader.setProgress(0.3, 'Spinning up the simulation thread…');
+      await nextFrame();
+      const host = await createHost({
         seed,
         difficulty: config.difficulty,
         worldHalf: size.worldHalf,
@@ -210,12 +237,12 @@ export class Game {
       loader.setActiveStep(2);
       loader.setProgress(0.68, 'Building terrain mesh…');
       await nextFrame();
-      this.launch(sim);
+      this.launch(host);
       loader.setActiveStep(3);
       loader.setProgress(0.87, 'Deploying rovers…');
       await nextFrame();
 
-      this.renderer?.sync(sim);
+      this.renderer?.sync(host.view);
       this.renderer?.render();
       this.saveId = this.store.create(
         {
@@ -225,14 +252,14 @@ export class Game {
           region: config.region,
           seedText: config.seedText,
         },
-        sim.snapshot(),
+        await host.requestSnapshot(),
         1,
       );
       loader.markAllDone();
       loader.setProgress(1, 'Touchdown confirmed.');
       await delay(340);
 
-      const site = sim.world.landingSite();
+      const site = host.view.world.landingSite();
       this.hud.addLog(
         'ok',
         `Descent stage down at ${site.name} — ${size.label} claim, ${config.seedText} seed. Two rovers deployed.`,
@@ -272,26 +299,29 @@ export class Game {
       loader.setProgress(0.07, `Reading \u201c${meta.name}\u201d…`);
       await nextFrame();
       await delay(140);
-      const data = record.data as { seed?: number };
-      const sim = new Simulation({ seed: data?.seed ?? 1 });
       loader.setActiveStep(1);
       loader.setProgress(0.32, 'Restoring terrain and deposits…');
       await nextFrame();
-      sim.restore(record.data);
+      // The host boots the world and restores it in one move, so a corrupt or
+      // future-versioned save fails before a renderer or a camera has anything
+      // pointed at it. With a worker host that restore happens off-thread, and
+      // the terrain the renderer is about to build is derived locally from the
+      // seed the save names — which is why the restore path needs no second call.
+      const host = await restoreHost(record.data as object);
       loader.setActiveStep(2);
       loader.setProgress(0.68, 'Rebuilding terrain mesh…');
       await nextFrame();
-      this.launch(sim);
+      this.launch(host);
       this.saveId = meta.id;
       loader.setActiveStep(3);
-      loader.setProgress(0.9, `Resuming Sol ${sim.clock.sol + 1}…`);
+      loader.setProgress(0.9, `Resuming Sol ${host.view.clock.sol + 1}…`);
       await nextFrame();
-      this.renderer?.sync(sim);
+      this.renderer?.sync(host.view);
       this.renderer?.render();
       loader.markAllDone();
       loader.setProgress(1, 'Welcome back, Commander.');
       await delay(320);
-      this.hud.addLog('ok', `Save restored — ${sim.clock.format()}.`);
+      this.hud.addLog('ok', `Save restored — ${host.view.clock.format()}.`);
     } catch (err) {
       console.error(err);
       loader.setProgress(1, `Could not restore that save (${(err as Error).message}).`);
@@ -302,8 +332,11 @@ export class Game {
     }
   }
 
-  private launch(sim: Simulation): void {
-    this.sim = sim;
+  private launch(host: SimHost): void {
+    // Unwiring the developer mode first matters now that its edits are commands:
+    // a battery pin left attached would re-apply itself to the new colony.
+    this.dev.detach();
+    this.host = host;
     this.selected = null;
     this.pendingBuild = null;
     this.endShown = false;
@@ -314,11 +347,14 @@ export class Game {
     this.hud.setDevActive(false);
     this.hud.setBuild(null);
     this.lastAuto = performance.now();
-    this.renderer = new GameRenderer(this.canvas, sim.world);
+    this.renderer = new GameRenderer(this.canvas, host.view.world);
     this.renderer.setOverlay(this.hud.overlay as OverlayMode);
-    this.rig = new CameraRig(this.renderer.camera, sim.world.half);
+    this.rig = new CameraRig(this.renderer.camera, host.view.world.half);
     this.resize();
-    this.hud.updateVitals(sim);
+    // The mode's per-step overlay installs on the host it edits, which is why
+    // the frame loop no longer mentions developer mode at all.
+    this.dev.attach(host);
+    this.hud.updateVitals(host.view);
     this.syncUI(true);
     this.started = true;
   }
@@ -548,9 +584,15 @@ export class Game {
     const pt = this.renderer.raycastTerrain(x, y);
     if (!pt) return;
     if (this.selected?.type === 'rover') {
-      this.sim.issueMove(this.selected.id, pt.x, pt.z, this.shiftHeld);
+      this.order({
+        type: 'rover/move',
+        roverId: this.selected.id,
+        x: pt.x,
+        z: pt.z,
+        queue: this.shiftHeld,
+      });
     } else if (this.selected?.type === 'colonist') {
-      this.sim.orderColonist({ type: 'moveTo', x: pt.x, z: pt.z });
+      this.order({ type: 'colonist/order', order: { type: 'moveTo', x: pt.x, z: pt.z } });
     } else if (this.selected?.type === 'building') {
       // Right-clicking empty ground with a structure selected clears it.
       this.selected = null;
@@ -580,7 +622,12 @@ export class Game {
           this.selected?.type === 'rover' ? this.sim.roverById(this.selected.id) : undefined;
         const target = this.sim.roverById(pick.id);
         if (rv && target && target.id !== rv.id && target.phase === 'disabled') {
-          this.sim.issueRecover(rv.id, target.id, this.shiftHeld);
+          this.order({
+            type: 'rover/recover',
+            roverId: rv.id,
+            strandedId: target.id,
+            queue: this.shiftHeld,
+          });
         } else if (this.selected?.type === 'rover' && this.selected.id === pick.id) {
           // Tapping the selected rover again deselects it.
           this.selected = null;
@@ -594,8 +641,11 @@ export class Game {
           this.selected?.type === 'rover' ? this.sim.roverById(this.selected.id) : undefined;
         const job = this.sim.needsMaintenance(pick.id);
         if (rv && job) {
-          if (job === 'repair') this.sim.issueRepair(rv.id, pick.id, this.shiftHeld);
-          else this.sim.issueClean(rv.id, pick.id, this.shiftHeld);
+          this.order(
+            job === 'repair'
+              ? { type: 'rover/repair', roverId: rv.id, buildingId: pick.id, queue: this.shiftHeld }
+              : { type: 'rover/clean', roverId: rv.id, buildingId: pick.id, queue: this.shiftHeld },
+          );
         } else if (this.selected?.type === 'building' && this.selected.id === pick.id) {
           // Tapping the selected structure again deselects it.
           this.selected = null;
@@ -610,7 +660,12 @@ export class Game {
         }
       } else if (pick.type === 'deposit') {
         if (this.selected?.type === 'rover') {
-          this.sim.issueMine(this.selected.id, pick.id, this.shiftHeld);
+          this.order({
+            type: 'rover/mine',
+            roverId: this.selected.id,
+            depositId: pick.id,
+            queue: this.shiftHeld,
+          });
         } else {
           const d = this.sim.world.deposits.find((dp) => dp.id === pick.id);
           this.hud.addLog(
@@ -627,13 +682,28 @@ export class Game {
     const pt = this.renderer.raycastTerrain(x, y);
     if (!pt) return;
     if (this.selected?.type === 'rover') {
-      this.sim.issueMove(this.selected.id, pt.x, pt.z, this.shiftHeld);
+      this.order({
+        type: 'rover/move',
+        roverId: this.selected.id,
+        x: pt.x,
+        z: pt.z,
+        queue: this.shiftHeld,
+      });
     } else if (this.selected) {
       // Tapping empty ground with a structure or the colonist selected
       // clears the selection (a rover instead takes it as a move order).
       this.selected = null;
       this.syncUI(true);
     }
+  }
+
+  /**
+   * The one way this class writes to the colony: an intent, handed to the host.
+   * Reads stay on `this.sim` (the view), which is why the gesture handlers below
+   * look unchanged — only the writes had to be told where they end up.
+   */
+  private order(command: SimCommand): void {
+    this.host?.send(command);
   }
 
   private setPendingBuild(kind: BuildingKind | null): void {
@@ -644,12 +714,17 @@ export class Game {
   }
 
   private placeBuild(x: number, y: number): void {
-    if (!this.renderer || !this.sim || !this.pendingBuild) return;
+    const host = this.host;
+    if (!this.renderer || !host || !this.pendingBuild) return;
     const pt = this.renderer.raycastTerrain(x, y);
     if (!pt) return;
-    const b = this.sim.placeBuilding(this.pendingBuild, pt.x, pt.z);
-    if (b) {
-      this.selected = { type: 'building', id: b.id };
+    const kind = this.pendingBuild;
+    // Placing is the one gesture whose result the UI needs immediately: the new
+    // structure must be selected, and only the sim knows the id it allocated.
+    // `request` is the ack path the protocol reserves for exactly that.
+    const ack = host.request({ type: 'building/place', kind, x: pt.x, z: pt.z });
+    if (ack.ok && ack.entityId !== undefined) {
+      this.selected = { type: 'building', id: ack.entityId };
       // Shift-place keeps the blueprint armed for laying out solar farms.
       if (!this.shiftHeld) this.setPendingBuild(null);
     }
@@ -718,11 +793,11 @@ export class Game {
     const spec = this.dev.armedSpawn;
     if (!spec || !this.sim) return;
     if (spec.type === 'rover') {
-      const id = this.dev.spawnRover(this.sim, spec.kind as RoverKind, x, z);
+      const id = this.dev.spawnRover(spec.kind as RoverKind, x, z);
       this.selected = { type: 'rover', id };
       this.devPanel.setStatus(`${ROVERS[spec.kind as RoverKind].label} #${id} fabricated`);
     } else if (spec.type === 'building') {
-      const id = this.dev.spawnBuilding(this.sim, spec.kind as BuildingKind, x, z);
+      const id = this.dev.spawnBuilding(spec.kind as BuildingKind, x, z);
       if (id !== null) {
         this.selected = { type: 'building', id };
         this.devPanel.setStatus(`${BUILDINGS[spec.kind as BuildingKind].label} #${id} fabricated online`);
@@ -730,7 +805,7 @@ export class Game {
         this.devPanel.setStatus('Cannot fabricate there — see the colony log for why');
       }
     } else {
-      this.dev.spawnDeposit(this.sim, spec.kind as ResourceId, x, z, spec.amountKg ?? 2500);
+      this.dev.spawnDeposit(spec.kind as ResourceId, x, z, spec.amountKg ?? 2500);
       this.devPanel.setStatus(
         `${spec.kind} deposit surveyed in — ${Math.round(spec.amountKg ?? 2500)} kg`,
       );
@@ -763,15 +838,21 @@ export class Game {
         this.selected = null;
         break;
       case 'stop':
-        if (this.selected.type === 'rover') this.sim.stopRover(this.selected.id);
+        if (this.selected.type === 'rover')
+          this.order({ type: 'rover/stop', roverId: this.selected.id });
         break;
       case 'unload':
         if (this.selected.type === 'rover')
-          this.sim.issueUnload(this.selected.id, this.shiftHeld);
+          this.order({ type: 'rover/unload', roverId: this.selected.id, queue: this.shiftHeld });
         break;
       case 'wait':
         if (this.selected.type === 'rover')
-          this.sim.issueWait(this.selected.id, Number(arg) || 60, true);
+          this.order({
+            type: 'rover/wait',
+            roverId: this.selected.id,
+            seconds: Number(arg) || 60,
+            queue: true,
+          });
         break;
       case 'recenter':
         this.centerOnSelected();
@@ -779,7 +860,11 @@ export class Game {
       case 'repeathaul':
         if (this.selected.type === 'rover') {
           const rv = this.sim.roverById(this.selected.id);
-          this.sim.setRepeatRoute(this.selected.id, !(rv?.command.type === 'mine' && rv.command.repeat));
+          this.order({
+            type: 'rover/repeatRoute',
+            roverId: this.selected.id,
+            on: !(rv?.command.type === 'mine' && rv.command.repeat),
+          });
         }
         break;
       case 'rule-haul':
@@ -795,42 +880,42 @@ export class Game {
                 : a === 'rule-storm'
                   ? 'stormShelter'
                   : 'autoRescue';
-          this.sim.setRoverRule(this.selected.id, rule, arg === 1);
+          this.order({ type: 'rover/rule', roverId: this.selected.id, rule, on: arg === 1 });
         }
         break;
       case 'rule-charge':
         if (this.selected.type === 'rover' && typeof arg === 'number') {
-          this.sim.setChargeFloor(this.selected.id, arg);
+          this.order({ type: 'rover/chargeFloor', roverId: this.selected.id, pct: arg });
         }
         break;
       case 'rule-lights':
         if (this.selected.type === 'rover') {
-          this.sim.setRoverLights(this.selected.id, arg === 1);
+          this.order({ type: 'rover/lights', roverId: this.selected.id, on: arg === 1 });
         }
         break;
       case 'toggle':
         if (this.selected.type === 'building') {
           const b = this.sim.buildingById(this.selected.id);
-          if (b) this.sim.setBuildingEnabled(b.id, !b.enabled);
+          if (b) this.order({ type: 'building/toggle', buildingId: b.id, enabled: !b.enabled });
         }
         break;
       case 'demolish':
         if (this.selected.type === 'building') {
-          this.sim.demolish(this.selected.id);
+          this.order({ type: 'building/demolish', buildingId: this.selected.id });
           this.selected = null;
         }
         break;
       case 'shelter':
-        this.sim.orderColonist({ type: 'shelter' });
+        this.order({ type: 'colonist/order', order: { type: 'shelter' } });
         break;
       case 'service':
         if (this.selected.type === 'building') {
-          this.sim.dispatchMaintenance(this.selected.id);
+          this.order({ type: 'building/maintain', buildingId: this.selected.id });
         }
         break;
       case 'assemble':
         if (this.selected.type === 'building' && typeof arg === 'string') {
-          this.sim.assembleRover(this.selected.id, arg as RoverKind);
+          this.order({ type: 'building/assemble', buildingId: this.selected.id, kind: arg as RoverKind });
         }
         break;
     }
@@ -840,8 +925,8 @@ export class Game {
   /** Jump to the next rover with nothing to do (`.` hotkey + HUD button). */
   private idleCycleIdx = 0;
   private cycleIdle(): void {
-    if (!this.sim) return;
-    const idle = this.sim.idleRovers();
+    const idle = this.sim?.idleRovers();
+    if (!idle) return;
     if (idle.length === 0) {
       this.hud.flashSave('No idle rovers');
       return;
@@ -864,15 +949,33 @@ export class Game {
   }
 
   private save(quiet = false): void {
-    if (!this.sim || !this.saveId) return;
-    try {
-      this.store.update(this.saveId, this.sim.snapshot(), this.sim.clock.sol + 1);
-      if (!quiet) this.hud.flashSave(`Saved · ${this.sim.clock.format()}`);
-    } catch (e) {
-      // Quota is the realistic failure here; say so rather than failing silently.
-      this.hud.flashSave('Save failed — browser storage full?');
-      console.error(e);
-    }
+    const host = this.host;
+    const id = this.saveId;
+    if (!host || !id) return;
+    // Everything about the payload — reading the world, serialising it, and the
+    // sol it is stamped with — is taken *before* the handoff, so an autosave can
+    // never interleave two colonies if the mission ends mid-write.
+    const sol = host.view.clock.sol + 1;
+    const stamp = host.view.clock.format();
+    // TDD §20 budgets a save at 1–2 s of user-visible time; asking the host for
+    // the snapshot instead of building it here is how that stays off the frame
+    // loop once the sim runs on its own thread.
+    void host.requestSnapshot().then(
+      (snapshot) => {
+        try {
+          this.store.update(id, snapshot, sol);
+          if (!quiet) this.hud.flashSave(`Saved · ${stamp}`);
+        } catch (e) {
+          // Quota is the realistic failure here; say so rather than failing silently.
+          this.hud.flashSave('Save failed — browser storage full?');
+          console.error(e);
+        }
+      },
+      (e) => {
+        this.hud.flashSave('Save failed — the colony could not be read');
+        console.error(e);
+      },
+    );
   }
 
   /** Persist the colony and hand control back to the main menu. */
@@ -880,6 +983,10 @@ export class Game {
     if (!this.started) return;
     this.save(true);
     this.hud.flashSave('Saved — returning to menu…');
+    // Stop the world before the page goes: a host with a timer inside it must
+    // not be left ticking through the reload the menu needs.
+    this.dev.detach();
+    this.host?.dispose();
     // A clean boot is the only honest teardown for a WebGL colony: the menu
     // (and its splash) rebuilds in under a second.
     window.setTimeout(() => window.location.reload(), 700);
@@ -898,7 +1005,9 @@ export class Game {
 
   private loop(nowMs: number): void {
     requestAnimationFrame((t) => this.loop(t));
-    if (!this.started || !this.renderer || !this.sim || !this.rig) return;
+    const host = this.host;
+    if (!this.started || !this.renderer || !host || !this.rig) return;
+    const view = host.view;
     const t = nowMs / 1000;
     let dt = t - this.lastT;
     this.lastT = t;
@@ -906,17 +1015,24 @@ export class Game {
     if (dt < 0) dt = 0;
 
     const speed = SPEEDS[this.hud.speedIdx];
-    if (speed > 0 && !this.sim.gameOver) this.sim.step(dt * speed);
+    // The host owns the tick now. Stepping is the one call in this loop that a
+    // worker host answers differently — and "differently" is all: an in-process
+    // host runs the fixed substeps, a worker's own timer does, and this frame
+    // simply reads whatever the newest view holds.
+    //
+    // A paused world still hands the frame over at zero, because the host also
+    // runs its runtime overlays there: a developer-mode battery pin has to keep
+    // its grip while the player inspects a frozen colony.
+    host.step(speed > 0 && !view.gameOver ? dt * speed : 0);
 
-    // Developer-mode modifiers ride on top of the sim, never inside it —
-    // which is why they're saved nowhere.
-    this.dev.applyTo(this.sim);
-
-    for (const ev of this.sim.drainEvents()) {
+    // Developer-mode modifiers ride on top of the sim, never inside it — which
+    // is why they're saved nowhere. They are a host overlay now, so the pin
+    // keeps its grip without this loop knowing developer mode exists.
+    for (const ev of host.drainEvents()) {
       this.hud.addLog(ev.severity, ev.text, ev.stamp);
     }
 
-    this.renderer.sync(this.sim);
+    this.renderer.sync(view);
     this.rig.update();
 
     if (nowMs - this.lastAuto > AUTOSAVE_INTERVAL_S * 1000) {
@@ -927,16 +1043,17 @@ export class Game {
     this.updateGhost();
     this.updateSelectionVisual();
     const renderer = this.renderer;
-    this.hud.updateMarkers(this.sim, (x, z) => renderer.project(x, z));
+    this.hud.updateMarkers(view, (x, z) => renderer.project(x, z));
     this.syncUI(false);
     this.renderer.render();
 
-    if (this.sim.gameOver && !this.endShown) {
+    const over = view.gameOver;
+    if (over && !this.endShown) {
       this.endShown = true;
       this.save(true);
       this.hud.showEnd(
         'MISSION LOST',
-        `${this.sim.gameOver.reason} Sol ${this.sim.gameOver.sol}. Mars does not negotiate.`,
+        `${over.reason} Sol ${over.sol}. Mars does not negotiate.`,
       );
     }
   }

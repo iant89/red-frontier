@@ -14,6 +14,7 @@
  */
 
 import { World } from './World';
+import { evaluateSite, maintenanceNeed } from './rules';
 import type { Deposit } from './World';
 import { clamp } from '../lib/rng';
 import {
@@ -99,7 +100,7 @@ import type { DifficultyId, WorldOptions } from './difficulty';
 import { SolClock } from './clock';
 import type { SunState } from './clock';
 import { Weather, stormLabel } from './weather';
-import type { StormKind } from './weather';
+import type { StormKind, StormKindReal } from './weather';
 import { resolvePower, idlePower, type PowerDemand, type PowerResult } from './power';
 import {
   makePools,
@@ -498,7 +499,18 @@ export class Simulation {
 
   // ------------------------------------------------- derived capacities ----
 
-  /** Recompute bulk + fluid capacity from whatever is online. */
+    /**
+   * The id the next created entity will carry. Public and read-only because the
+   * *client* needs it: an id-allocating command sent to a worker must be
+   * answered before the round trip finishes, and the only honest way to do that
+   * is to know the number the sim is going to hand out. `tests/sim/worker.test.ts`
+   * pins that the reservation is right, and that a wrong one is harmless.
+   */
+  get nextEntityId(): number {
+    return this.nextId;
+  }
+
+/** Recompute bulk + fluid capacity from whatever is online. */
   recomputeCapacities(): void {
     let cap = BASE_STORAGE_PER_RESOURCE;
     const fluid = { ...POD_FLUID_CAPACITY };
@@ -1164,11 +1176,7 @@ export class Simulation {
    * truth the HUD and the tap-to-order gesture both read.
    */
   needsMaintenance(buildingId: number): 'repair' | 'clean' | null {
-    const b = this.buildingById(buildingId);
-    if (!b || b.state !== 'online') return null;
-    if (b.health < BUILDING_MAX_HEALTH - 0.5) return 'repair';
-    if (BUILDINGS[b.kind].generation === 'solar' && b.cleanliness < 0.995) return 'clean';
-    return null;
+    return maintenanceNeed(this.buildingById(buildingId));
   }
 
   orderColonist(order: ColonistOrder): void {
@@ -1204,26 +1212,17 @@ export class Simulation {
   }
 
   // -------------------------------------------------------- placement ----
+  /**
+   * The siting rule lives in `rules.ts` so the mirrored view can run the *same*
+   * function against the same seed. This is the authoritative call: it sees the
+   * live world, and `building/place` re-checks it before anything is sited.
+   */
   canPlace(kind: BuildingKind, x: number, z: number): string | null {
-    if (!this.world.inBounds(x, z)) return 'Outside the playable region.';
-    const def = BUILDINGS[kind];
-    if (!this.world.canDrive(x, z)) return 'No safe approach — drop-off or unreachable.';
-    const slope = this.world.slopeAt(x, z);
-    const maxSlope = def.pressurized ? 0.15 : 0.24;
-    if (slope > maxSlope || !this.world.canBuild(x, z)) return 'Terrain too steep here.';
-    if (Math.hypot(SPAWN_X - x, SPAWN_Z - z) < def.radius + POD_RADIUS + 1.5)
-      return 'Too close to the landing pod.';
-    for (const b of this.buildings) {
-      const d = Math.hypot(b.x - x, b.z - z);
-      if (d < def.radius + BUILDINGS[b.kind].radius + 1.5)
-        return 'Too close to an existing structure.';
-    }
-    for (const dep of this.world.deposits) {
-      if (dep.amount <= 0) continue;
-      if (Math.hypot(dep.x - x, dep.z - z) < dep.radius + def.radius + 2)
-        return 'Cannot build on a resource deposit.';
-    }
-    return null;
+    return evaluateSite(kind, x, z, {
+      ground: this.world,
+      buildings: this.buildings,
+      deposits: this.world.deposits,
+    });
   }
 
   placeBuilding(kind: BuildingKind, x: number, z: number): Building | null {
@@ -1364,6 +1363,122 @@ export class Simulation {
       this.recomputeCapacities();
     }
     return b.level;
+  }
+
+  /*
+   * ---------------------------------------------------------- dev edits ----
+   *
+   * The writes the developer panel performs, as sim methods rather than field
+   * pokes from UI code (TDD §22). They exist for one reason: once the sim can
+   * live behind a worker, the panel has no objects to poke, so every edit has
+   * to arrive as a command and land here. Keeping the *rules* on this side also
+   * means the clamping is the sim's, not a copy in the panel that could drift.
+   *
+   * None of these are persisted — like the upgrade `level` they touch, they are
+   * edits to live state that `snapshot()` deliberately never learns about.
+   */
+
+  /** Push the airborne dust reading to `frac`; it relaxes back on its own. */
+  devSetDust(frac: number): void {
+    this.weather.dust = clamp(frac, 0, 1);
+  }
+
+  /** Conjure a storm of `kind`, arriving within seconds. */
+  devForceStorm(kind: StormKindReal): void {
+    this.weather.debugScheduleStorm(kind, this.simTime, 4);
+  }
+
+  /** Dismiss every storm, on the map and on the forecast board. */
+  devClearStorms(): void {
+    this.weather.debugClearStorms();
+  }
+
+  /** Suspend the storm scheduler, or let the rolls run again. */
+  devSetStormScheduler(on: boolean): void {
+    if (on) this.weather.debugResumeRolls(this.simTime);
+    else this.weather.debugSuppressRolls();
+  }
+
+  /** Set a rover's charge as a fraction of its pack (0..1). */
+  devSetRoverBatteryFrac(roverId: number, frac: number): boolean {
+    const r = this.roverById(roverId);
+    if (!r) return false;
+    r.battery = clamp(frac, 0, 1) * ROVERS[r.kind].maxBatteryKWh;
+    return true;
+  }
+
+  /** Drivetrain condition, 0..100. */
+  devSetRoverCondition(roverId: number, pct: number): boolean {
+    const r = this.roverById(roverId);
+    if (!r) return false;
+    r.condition = clamp(pct, 0, 100);
+    return true;
+  }
+
+  /**
+   * Set one cargo slot to `kg`, clamped into the hopper's free room. Returns
+   * the load that actually landed, so the panel can echo the truth.
+   */
+  devSetRoverCargo(roverId: number, res: ResourceId, kg: number): number {
+    const r = this.roverById(roverId);
+    if (!r) return 0;
+    let others = 0;
+    for (const k of ALL_RESOURCES) if (k !== res) others += r.cargo[k];
+    r.cargo[res] = Math.min(Math.max(0, kg), Math.max(0, ROVERS[r.kind].capacityKg - others));
+    return r.cargo[res];
+  }
+
+  /** Empty the hopper. */
+  devClearRoverCargo(roverId: number): boolean {
+    const r = this.roverById(roverId);
+    if (!r) return false;
+    for (const k of ALL_RESOURCES) r.cargo[k] = 0;
+    return true;
+  }
+
+  /**
+   * Structural health 0..100, crossing the sim's damage thresholds honestly:
+   * dropping to `DAMAGED_HEALTH` takes a structure offline, and only climbing
+   * back to `REPAIR_RESTART_HEALTH` restarts it — the same pair of numbers a
+   * rover's repair work is judged against.
+   */
+  devSetBuildingHealth(buildingId: number, pct: number): boolean {
+    const b = this.buildingById(buildingId);
+    if (!b) return false;
+    b.health = clamp(pct, 0, 100);
+    if (b.health <= DAMAGED_HEALTH) b.damaged = true;
+    else if (b.damaged && b.health >= REPAIR_RESTART_HEALTH) b.damaged = false;
+    this.recomputeCapacities();
+    return true;
+  }
+
+  /** Panel cleanliness 0..1 (meaningful on solar, harmless elsewhere). */
+  devSetBuildingCleanliness(buildingId: number, frac: number): boolean {
+    const b = this.buildingById(buildingId);
+    if (!b) return false;
+    b.cleanliness = clamp(frac, 0, 1);
+    return true;
+  }
+
+  /** Set the damaged flag directly, leaving health alone. */
+  devSetBuildingDamaged(buildingId: number, on: boolean): boolean {
+    const b = this.buildingById(buildingId);
+    if (!b || b.damaged === on) return false;
+    b.damaged = on;
+    this.recomputeCapacities();
+    return true;
+  }
+
+  /** The colonist's health, 0..100. A dead crew is not revivable. */
+  devSetColonistHealth(pct: number): boolean {
+    if (this.colonist.dead) return false;
+    this.colonist.health = clamp(pct, 0, 100);
+    return true;
+  }
+
+  /** Top the suit tank back up. */
+  devRefillSuit(): void {
+    this.colonist.suitO2 = SUIT_O2_CAPACITY;
   }
 
   /**

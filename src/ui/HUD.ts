@@ -20,18 +20,20 @@ import {
   FLUIDS,
   ROVERS,
 } from '../sim/defs';
-import type { Building, Rover, Simulation, Colonist, RoverTask } from '../sim/Simulation';
+import type { Building, Rover, Colonist, RoverTask } from '../sim/Simulation';
+import type { SimView, AlertsView } from '../sim/host';
 import { roverStatusText, colonistStatusText } from '../sim/Simulation';
 import { stormLabel } from '../sim/weather';
 import {
   POWER_TIER_LABELS,
   SUIT_O2_CAPACITY,
   SOL_SECONDS,
+  SPEEDS,
   BUILDING_MAX_HEALTH,
   devLevelMul,
 } from '../sim/config';
 import type { PowerTier } from '../sim/config';
-import type { Alert, AlertBus, Severity } from '../sim/alerts';
+import type { Alert, Severity } from '../sim/alerts';
 
 export type OverlayMode = 'none' | 'power' | 'life' | 'weather';
 
@@ -56,7 +58,7 @@ const BUILD_INFO_HOLD_MS = 450;
 const BUILD_INFO_DRIFT_PX = 12;
 
 /** One line describing a queued rover task (route list + tooltips). */
-function taskLabel(sim: Simulation, t: RoverTask): string {
+function taskLabel(sim: SimView, t: RoverTask): string {
   switch (t.type) {
     case 'moveTo':
       return `Move to ${Math.round(t.x)}, ${Math.round(t.z)}`;
@@ -163,7 +165,7 @@ export class HUD {
   private autopauseArmed = false;
 
   /** The sim's event bus (handed over each frame) — feeds the history modal. */
-  private alertBus: AlertBus | null = null;
+  private alertBus: AlertsView | null = null;
   private histFilter: Severity | 'all' = 'all';
 
   /** Pending touch-hold on a blueprint (dossier), if any. */
@@ -1021,7 +1023,7 @@ export class HUD {
   }
 
   /** Grey out anything the colony cannot currently afford. */
-  updateAffordability(sim: Simulation): void {
+  updateAffordability(sim: SimView): void {
     for (const [k, btn] of this.buildBtns) {
       const def = BUILDINGS[k];
       let affordable = true;
@@ -1035,13 +1037,24 @@ export class HUD {
     }
   }
 
+  /**
+   * Select a speed by index into `SPEEDS`.
+   *
+   * Clamped, because the unclamped version turned an out-of-range index into a
+   * frozen colony with no symptom at all: `SPEEDS[4]` is `undefined`, the frame
+   * loop's `speed > 0` test is false for `undefined`, and the world quietly stops
+   * ticking while every button still looks right. The HUD's own buttons cannot
+   * produce that, but a caller in a test or a script can — and a game that stops
+   * without saying so is the worst possible failure to leave available.
+   */
   setSpeed(idx: number): void {
-    this.speedIdx = idx;
-    this.speedBtns.forEach((b, i) => b.classList.toggle('active', i === idx));
+    const last = Math.max(0, SPEEDS.length - 1);
+    this.speedIdx = Number.isFinite(idx) ? Math.min(Math.max(Math.round(idx), 0), last) : 0;
+    this.speedBtns.forEach((b, i) => b.classList.toggle('active', i === this.speedIdx));
   }
 
   // ------------------------------------------------------------ vitals ----
-  updateVitals(sim: Simulation): void {
+  updateVitals(sim: SimView): void {
     // ---- clock & sun ----
     this.el('clock-line').textContent = sim.clock.format();
     this.el('phase-label').textContent = sim.clock.phase();
@@ -1200,7 +1213,7 @@ export class HUD {
   }
 
   /** Small generation/load sparkline. Canvas beats 120 DOM nodes here. */
-  private drawPowerGraph(sim: Simulation): void {
+  private drawPowerGraph(sim: SimView): void {
     const canvas = this.el('pw-graph') as unknown as HTMLCanvasElement;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
@@ -1244,7 +1257,7 @@ export class HUD {
   }
 
   // ------------------------------------------------------------ alerts ----
-  updateAlerts(alerts: Alert[], bus?: AlertBus): void {
+  updateAlerts(alerts: Alert[], bus?: AlertsView): void {
     this.lastAlerts = alerts;
     if (bus) this.alertBus = bus;
     this.maybeAutopause(alerts);
@@ -1421,7 +1434,7 @@ export class HUD {
    * by reusing one button per entity and only rewriting changed labels.
    */
   updateMarkers(
-    sim: Simulation,
+    sim: SimView,
     project: (x: number, z: number) => { x: number; y: number; behind: boolean },
   ): void {
     const wrap = this.el('markers');
@@ -1520,7 +1533,7 @@ export class HUD {
    * the game loop passes `true` because it calls this method every tick and a
    * collapsed panel must not be reopened by a routine value refresh.
    */
-  showRover(r: Rover, sim: Simulation, preserveCollapse = false): void {
+  showRover(r: Rover, sim: SimView, preserveCollapse = false): void {
     const def = ROVERS[r.kind];
     if (!preserveCollapse) this.setInspectorCollapsed(false);
     const mass = ALL_RESOURCES.reduce((s, k) => s + r.cargo[k], 0);
@@ -1674,7 +1687,7 @@ export class HUD {
   }
 
   /** Render a building selection; see showRover for the refresh distinction. */
-  showBuilding(b: Building, sim: Simulation, preserveCollapse = false): void {
+  showBuilding(b: Building, sim: SimView, preserveCollapse = false): void {
     const def = BUILDINGS[b.kind];
     if (!preserveCollapse) this.setInspectorCollapsed(false);
     const key = `bld:${b.id}`;
@@ -1878,7 +1891,7 @@ export class HUD {
   }
 
   /** Render the colonist selection; see showRover for the refresh distinction. */
-  showColonist(c: Colonist, sim: Simulation, preserveCollapse = false): void {
+  showColonist(c: Colonist, sim: SimView, preserveCollapse = false): void {
     const key = `col:${c.id}`;
     if (!preserveCollapse) this.setInspectorCollapsed(false);
     const insp = this.el('inspector');

@@ -24,7 +24,9 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # mobile smoke + the two sim-boundary runs (worker, then in-process) all
+    # share one build and one server; the headroom is for software GL on runners.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
@@ -60,6 +62,24 @@ jobs:
         env:
           BASE_URL: http://127.0.0.1:5199
 
+      # The same assertions against the same build, once per transport: a
+      # divergence between the in-process host and the worker fails here instead
+      # of in someone's playthrough. The worker run is first because it is the one
+      # with a silent fallback to catch (createHost degrades on purpose).
+      - name: Run the sim-boundary smoke test (worker host)
+        run: |
+          set -o pipefail
+          node scripts/worker-smoke.mjs 2>&1 | tee worker-smoke-output.txt
+        env:
+          BASE_URL: http://127.0.0.1:5199
+
+      - name: Run the sim-boundary smoke test (in-process host)
+        run: |
+          set -o pipefail
+          SMOKE_QUERY= node scripts/worker-smoke.mjs 2>&1 | tee -a worker-smoke-output.txt
+        env:
+          BASE_URL: http://127.0.0.1:5199
+
       - name: Upload failure evidence
         if: failure()
         uses: actions/upload-artifact@v4
@@ -68,6 +88,8 @@ jobs:
           path: |
             smoke-failure.png
             smoke-output.txt
+            worker-smoke-failure.png
+            worker-smoke-output.txt
             preview.log
           if-no-files-found: ignore
 
@@ -75,7 +97,13 @@ jobs:
         if: failure() && github.event_name == 'pull_request'
         run: |
           [ -f smoke-output.txt ] || echo '(no output captured)' > smoke-output.txt
-          { echo "Mobile smoke failed on ${GITHUB_SHA::7}. Output:"; echo '```'; cat smoke-output.txt; echo '```'; } > smoke-comment.md
+          {
+            echo "Smoke gate failed on ${GITHUB_SHA::7}. Output:"
+            echo '```'
+            cat smoke-output.txt
+            [ -f worker-smoke-output.txt ] && cat worker-smoke-output.txt
+            echo '```'
+          } > smoke-comment.md
           gh pr comment ${{ github.event.pull_request.number }} --body-file smoke-comment.md
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

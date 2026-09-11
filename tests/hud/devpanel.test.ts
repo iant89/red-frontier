@@ -10,6 +10,7 @@
 import assert from 'node:assert/strict';
 import { mountHud } from '../fixtures/hud';
 import { DevMode } from '../../src/dev/DevMode';
+import { LocalSimHost } from '../../src/sim/host';
 import type { DevPanelCallbacks } from '../../src/dev/DevPanel';
 import { DevPanel } from '../../src/dev/DevPanel';
 import { ROVERS } from '../../src/sim/defs';
@@ -27,6 +28,9 @@ let spawnPoint = { x: 55, z: -55 };
 
 const dev = new DevMode((sev, text) => calls.push(`log:${sev}:${text}`));
 dev.enabled = true;
+// The panel edits through the host now, so the mode needs a colony to send
+// commands to — the same attach Game.launch performs.
+dev.attach(new LocalSimHost(sim));
 
 const cb: DevPanelCallbacks = {
   getSim: () => sim,

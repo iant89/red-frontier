@@ -9,6 +9,7 @@
 
 import assert from 'node:assert/strict';
 import { Simulation } from '../../src/sim/Simulation';
+import { LocalSimHost } from '../../src/sim/host';
 import { DevMode } from '../../src/dev/DevMode';
 import { devLevelMul } from '../../src/sim/config';
 import { ROVERS } from '../../src/sim/defs';
@@ -16,7 +17,17 @@ import type { BuildingKind } from '../../src/sim/defs';
 import { run, findSpot } from '../fixtures/sim';
 import { group, test, finish } from '../harness';
 
-const silentDev = () => new DevMode(() => {});
+/**
+ * A DevMode wired to the colony it edits, the way `Game.launch` wires it. Since
+ * the host extraction every panel edit is a *command*, the mode needs a host to
+ * speak to — and attaching one also installs the battery-pin overlay, so these
+ * cases exercise the same path the running game takes.
+ */
+const silentDev = (sim: Simulation) => {
+  const dev = new DevMode(() => {});
+  dev.attach(new LocalSimHost(sim));
+  return dev;
+};
 
 /** Fab `kind` at the first legal spot on a widening ring, or throw. */
 function devBuild(sim: Simulation, kind: BuildingKind, clearance = 22) {
@@ -195,22 +206,22 @@ test('devSetTime jumps the calendar and the sun answers to it', () => {
 
 test('storms can be conjured, dismissed, and the scheduler switched', () => {
   const sim = new Simulation({ seed: 18 });
-  const dev = silentDev();
+  const dev = silentDev(sim);
 
-  dev.forceStorm(sim, 'severe');
+  dev.forceStorm('severe');
   assert.ok(sim.weather.forecast(), 'the storm is on the forecast board');
   run(sim, 80 / 240); // past the 4 s lead, well up the ramp
   assert.equal(sim.weather.storm, 'severe', 'the conjured storm arrives');
   assert.ok(sim.weather.stormIntensity > 0.3, 'and it is blowing');
 
-  dev.clearStorms(sim);
+  dev.clearStorms();
   assert.equal(sim.weather.storm, 'calm', 'clearing dismisses it outright');
   assert.ok(!sim.weather.forecast(), 'the board is empty');
   assert.ok(!sim.weather.current(), 'nothing active');
 
-  dev.setStormScheduler(sim, false);
+  dev.setStormScheduler(false);
   assert.ok(sim.weather.rollsSuppressed, 'scheduler suspended');
-  dev.setStormScheduler(sim, true);
+  dev.setStormScheduler(true);
   assert.ok(!sim.weather.rollsSuppressed, 'scheduler resumed');
 });
 
@@ -218,11 +229,11 @@ test('storms can be conjured, dismissed, and the scheduler switched', () => {
 
 test('keep-battery-full pins the charge and revives a stranded rover', () => {
   const sim = new Simulation({ seed: 19 });
-  const dev = silentDev();
+  const dev = silentDev(sim);
   dev.enabled = true;
   const r = sim.rovers[0];
 
-  dev.setKeepBatteryFull(sim, r.id, true);
+  dev.setKeepBatteryFull(r.id, true);
   assert.equal(r.battery, ROVERS[r.kind].maxBatteryKWh, 'pinning tops up immediately');
 
   // Drain it by hand and apply a frame: the pin wins.
@@ -246,7 +257,7 @@ test('keep-battery-full pins the charge and revives a stranded rover', () => {
 
 test('setCargo writes the chosen ore and clamps it into the hopper', () => {
   const sim = new Simulation({ seed: 20 });
-  const dev = silentDev();
+  const dev = silentDev(sim);
   const r = sim.devSpawnRover('utility', 30, 30); // 500 kg hopper
 
   const landed = dev.setCargo(sim, r.id, 'iron', 900);
@@ -261,26 +272,26 @@ test('setCargo writes the chosen ore and clamps it into the hopper', () => {
 
 test('DevMode edits respect damage thresholds and sim invariants', () => {
   const sim = new Simulation({ seed: 21 });
-  const dev = silentDev();
+  const dev = silentDev(sim);
   const b = devBuild(sim, 'solar');
 
   // Dropping health below the damage line trips the structure offline.
-  dev.setHealth(sim, b.id, 10);
+  dev.setHealth(b.id, 10);
   assert.ok(b.damaged, 'below DAMAGED_HEALTH means damaged');
   // Restoring above the restart line fixes it honestly.
-  dev.setHealth(sim, b.id, 80);
+  dev.setHealth(b.id, 80);
   assert.ok(!b.damaged, 'repaired above the restart threshold');
   assert.equal(b.health, 80);
 
-  dev.setCleanliness(sim, b.id, 0.25);
+  dev.setCleanliness(b.id, 0.25);
   assert.ok(Math.abs(b.cleanliness - 0.25) < 1e-9);
 
-  dev.setBatteryFrac(sim, sim.rovers[0].id, 0.5);
+  dev.setBatteryFrac(sim.rovers[0].id, 0.5);
   assert.ok(
     Math.abs(sim.rovers[0].battery - ROVERS[sim.rovers[0].kind].maxBatteryKWh / 2) < 1e-6,
   );
 
-  dev.setCondition(sim, sim.rovers[0].id, 12);
+  dev.setCondition(sim.rovers[0].id, 12);
   assert.equal(sim.rovers[0].condition, 12);
 });
 

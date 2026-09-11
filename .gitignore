@@ -15,5 +15,8 @@ node_modules/.test-dist/
 # playwright NSS stubs built by scripts/setup-playwright.mjs (local toolchain)
 .playwright-libs/
 
-# failure screenshot dumped by scripts/mobile-smoke.mjs
+# failure evidence dumped by the browser smoke scripts
 smoke-failure.png
+worker-smoke-failure.png
+smoke-output.txt
+worker-smoke-output.txt
