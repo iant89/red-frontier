@@ -34,6 +34,8 @@ import {
 } from '../sim/config';
 import type { PowerTier } from '../sim/config';
 import type { Alert, Severity } from '../sim/alerts';
+import { isPickedClean, POI_KINDS, salvageTotalKg } from '../sim/pois';
+import type { Poi } from '../sim/pois';
 
 export type OverlayMode = 'none' | 'power' | 'life' | 'weather';
 
@@ -78,6 +80,11 @@ function taskLabel(sim: SimView, t: RoverTask): string {
     case 'recover': {
       const s = sim.roverById(t.roverId);
       return `Jump-start ${s ? s.label : 'a stranded rover'}`;
+    }
+    case 'salvage': {
+      const site = sim.poiById(t.poiId);
+      const name = site ? POI_KINDS[site.kind].label : 'a site';
+      return site && site.kind === 'supplyDrop' ? `Recover ${name}` : `Salvage ${name}`;
     }
     case 'unload':
       return 'Unload cargo at depot';
@@ -172,8 +179,12 @@ export class HUD {
   private buildInfoTimer: number | null = null;
   private buildInfoAt: { x: number; y: number } | null = null;
 
-  /** Off-screen marker nodes by entity id (stranded rovers, damaged structures). */
-  private markerNodes = new Map<number, HTMLElement>();
+  /**
+   * Off-screen marker nodes, keyed by `kind-id`. The prefix is load-bearing:
+   * rovers, structures and sites each have their own id space, so a bare id
+   * would let a stranded rover and a supply drop fight over one node.
+   */
+  private markerNodes = new Map<string, HTMLElement>();
 
   private vitalsCollapsed = false;
   private inspectorCollapsed = false;
@@ -1441,29 +1452,62 @@ export class HUD {
     const vw = window.innerWidth;
     const vh = window.innerHeight;
     const M = 46; // edge margin: markers live inside the chrome, not under it
-    const seen = new Set<number>();
+    const seen = new Set<string>();
 
-    const cands: Array<{ id: number; x: number; z: number; icon: string; label: string; cls: string }> = [];
+    const cands: Array<{
+      key: string;
+      x: number;
+      z: number;
+      icon: string;
+      label: string;
+      cls: string;
+      focus: number | null;
+    }> = [];
     for (const r of sim.rovers) {
       if (r.phase === 'disabled') {
-        cands.push({ id: r.id, x: r.x, z: r.z, icon: '🛻', label: `${r.label} stranded`, cls: 'crit' });
+        cands.push({
+          key: `rover-${r.id}`,
+          x: r.x,
+          z: r.z,
+          icon: '🛻',
+          label: `${r.label} stranded`,
+          cls: 'crit',
+          focus: r.id,
+        });
       }
     }
     for (const b of sim.buildings) {
       if (b.damaged) {
         cands.push({
-          id: b.id,
+          key: `building-${b.id}`,
           x: b.x,
           z: b.z,
           icon: '🏚',
           label: `${BUILDINGS[b.kind].label} damaged`,
           cls: 'warn',
+          focus: b.id,
         });
       }
     }
+    // A supply drop with cargo still in it is the one opportunity worth an edge
+    // marker (GDD §11: "Supply drop detected" is an Opportunity alert): it is
+    // known from the transponder, it is usually over the horizon, and it has a
+    // deadline. Buried and stripped ones are history, not a marker.
+    for (const site of sim.world.pois) {
+      if (site.kind !== 'supplyDrop' || site.buried || isPickedClean(site)) continue;
+      cands.push({
+        key: `poi-${site.id}`,
+        x: site.x,
+        z: site.z,
+        icon: '📦',
+        label: `Drop — ${site.solsToBury.toFixed(1)} sols`,
+        cls: site.solsToBury < 1 ? 'crit' : 'warn',
+        focus: null, // sites are not entities; the alert focuses them instead
+      });
+    }
 
     for (const c of cands) {
-      seen.add(c.id);
+      seen.add(c.key);
       const p = project(c.x, c.z);
       // Behind the camera the projection comes out mirrored — flip it around
       // the centre so the clamp below lands on the correct edge.
@@ -1473,31 +1517,33 @@ export class HUD {
       sx = Math.max(M, Math.min(vw - M, sx));
       sy = Math.max(M, Math.min(vh - M, sy));
 
-      let node = this.markerNodes.get(c.id);
+      let node = this.markerNodes.get(c.key);
       if (!node) {
         node = document.createElement('button');
         node.className = `marker ${c.cls}`;
         node.addEventListener('pointerdown', (e) => {
           e.stopPropagation();
-          this.cb.onAction('focus', c.id);
+          if (c.focus !== null) this.cb.onAction('focus', c.focus);
         });
         wrap.appendChild(node);
-        this.markerNodes.set(c.id, node);
+        this.markerNodes.set(c.key, node);
       }
       const html = `${c.icon} <span>${c.label}</span>`;
       if (node.dataset.html !== html) {
         node.dataset.html = html;
         node.innerHTML = html;
       }
+      const cls = `marker ${c.cls}`;
+      if (node.className !== cls) node.className = cls;
       node.title = `${c.label} — tap to focus`;
       node.style.display = onScreen ? 'none' : 'flex';
       node.style.left = `${sx}px`;
       node.style.top = `${sy}px`;
     }
-    for (const [id, node] of this.markerNodes) {
-      if (!seen.has(id)) {
+    for (const [key, node] of this.markerNodes) {
+      if (!seen.has(key)) {
         node.remove();
-        this.markerNodes.delete(id);
+        this.markerNodes.delete(key);
       }
     }
   }
@@ -1941,6 +1987,81 @@ export class HUD {
     q('c-needs').innerHTML = unmet.length
       ? `<div class="note bad">⛔ Unmet: ${unmet.map((f) => FLUIDS[f].label).join(', ')}</div>`
       : `<div class="note good">✓ All needs met.</div>`;
+  }
+
+  /**
+   * Render a point of interest (GDD §06) or a landed supply drop (§10).
+   *
+   * The panel's job is the two questions the map cannot answer on its own: what
+   * is still out there, and — for a drop — how long it has left. Everything else
+   * is one line of flavour text, because the design's point is that these are
+   * finds, not inventory screens.
+   */
+  showPoi(p: Poi, sim: SimView, preserveCollapse = false): void {
+    const key = `poi:${p.id}`;
+    if (!preserveCollapse) this.setInspectorCollapsed(false);
+    const insp = this.el('inspector');
+    if (this.inspectorKey !== key) {
+      this.inspectorKey = key;
+      const info = POI_KINDS[p.kind];
+      insp.innerHTML = `
+        <div class="i-bar"><span class="i-bar-kind">Site</span><span class="i-spacer"></span><button class="mini-btn" id="i-collapse" title="Collapse panel">▾</button><button class="mini-btn" id="i-close" data-act="deselect" title="Deselect (Esc)">×</button></div>
+        <div class="i-body">
+        <div class="i-head"><h3>${info.icon} ${info.label}</h3><span class="i-id">#${p.id}</span></div>
+        <div class="sub" id="p-blurb">${info.blurb}</div>
+        <div class="stat"><span class="k">Position</span><span class="v" id="p-pos">—</span></div>
+        <div id="p-cargo"></div>
+        <div id="p-clock"></div>
+        <div class="note" id="p-note">Select a rover, then tap the site to send it out.</div>
+        <div class="action-grid">
+          <button class="btn" data-act="recenter" title="Center the camera here (F)">🎯 <span class="btn-t">Focus</span></button>
+        </div>
+        </div>`;
+      insp.querySelectorAll('[data-act]').forEach((n) =>
+        n.addEventListener('pointerdown', (e) => {
+          e.stopPropagation();
+          this.cb.onAction((n as HTMLElement).dataset.act!);
+        }),
+      );
+      this.wireInspectorBar(insp);
+      this.setInspectorCollapsed(false);
+    }
+    const q = (id: string) => insp.querySelector(`#${id}`) as HTMLElement;
+    q('p-pos').textContent = `${Math.round(p.x)}, ${Math.round(p.z)}`;
+    if (p.manifest) q('p-blurb').textContent = `${p.manifest}. ${POI_KINDS[p.kind].blurb}`;
+
+    // What is still there: bulk salvage by resource, then surviving cells.
+    const lines: string[] = [];
+    for (const res of ALL_RESOURCES) {
+      const kg = p.salvage[res] ?? 0;
+      if (kg > 0.5) lines.push(`<div class="stat"><span class="k">${RESOURCES[res].label}</span><span class="v">${fmtKg(kg)}</span></div>`);
+    }
+    if (p.energyKWh > 0.5) {
+      lines.push(`<div class="stat"><span class="k">Cells</span><span class="v">${Math.round(p.energyKWh)} kWh</span></div>`);
+    }
+    const totalKg = salvageTotalKg(p);
+    q('p-cargo').innerHTML = lines.length
+      ? `<div class="stat"><span class="k">Salvage aboard-able</span><span class="v">${fmtKg(totalKg)}</span></div>` +
+        lines.join('')
+      : `<div class="note">${p.kind === 'settlementSite' ? 'Nothing to haul — a place to build.' : 'Already picked clean.'}</div>`;
+
+    const clock = q('p-clock');
+    if (p.kind === 'supplyDrop' && !p.buried && !isPickedClean(p)) {
+      const sols = p.solsToBury;
+      clock.innerHTML = `<div class="stat"><span class="k">Buried in</span><span class="v">${sols.toFixed(1)} sols</span></div>
+        <div class="bar-wrap"><div class="bar-fill ${sols < 1 ? 'red' : 'amber'}" style="width:${Math.max(0, Math.min(100, (sols / 3) * 100))}%"></div></div>`;
+    } else if (p.buried) {
+      clock.innerHTML = `<div class="note bad">⛔ Buried — the dust got there first.</div>`;
+    } else {
+      clock.innerHTML = '';
+    }
+
+    const idle = sim.idleRovers().length;
+    q('p-note').textContent = p.buried || isPickedClean(p)
+      ? 'Nothing left out here.'
+      : idle > 0
+        ? `${idle} rover${idle === 1 ? '' : 's'} idle — select one, then tap the site.`
+        : 'No idle rovers: queue the order or wait for one to free up.';
   }
 
   // -------------------------------------------------------------- misc ----

@@ -1,9 +1,10 @@
 /**
  * @suite hud/markers
  * @group hud
- * @covers src/ui/HUD.ts src/sim/Simulation.ts
- * @desc Off-screen markers: the edge chevrons for stranded rovers and damaged
- * structures, and the mirroring that keeps behind-the-camera ones honest.
+ * @covers src/ui/HUD.ts src/sim/Simulation.ts src/sim/pois.ts
+ * @desc Off-screen markers: the edge chevrons for stranded rovers, damaged
+ * structures and supply drops with a deadline; the mirroring that keeps
+ * behind-the-camera ones honest; and the site inspector.
  */
 
 import assert from 'node:assert/strict';
@@ -60,6 +61,86 @@ test('a damaged structure behind the camera lands on the correct edge', () => {
   sim.buildings.splice(sim.buildings.indexOf(b), 1);
   hud.updateMarkers(sim, () => ({ x: 512, y: 384, behind: false }));
   assert.equal(doc.querySelectorAll('#markers .marker').length, 0, 'repaired: marker removed');
+});
+
+test('a live supply drop gets an edge marker with its deadline, and a buried one does not', () => {
+  const drop = sim.world.addPoi({
+    kind: 'supplyDrop',
+    x: 320,
+    z: 120,
+    salvage: { iron: 640, silicon: 210 },
+    energyKWh: 0,
+    discovered: true,
+    solsToBury: 2.4,
+    buried: false,
+    manifest: 'Replacement parts',
+  });
+  hud.updateMarkers(sim, () => ({ x: 5000, y: 300, behind: false }));
+  const marker = [...doc.querySelectorAll('#markers .marker')].find((n) =>
+    (n as HTMLElement).textContent!.includes('Drop'),
+  ) as HTMLElement | undefined;
+  assert.ok(marker, 'a drop over the horizon should be marked');
+  assert.ok(marker!.textContent!.includes('2.4 sols'), `marker says: ${marker!.textContent}`);
+  assert.ok(marker!.className.includes('warn'), 'comfortable deadline reads as a warning');
+
+  // Inside its last sol the marker escalates — that is the point of showing it.
+  drop.solsToBury = 0.6;
+  hud.updateMarkers(sim, () => ({ x: 5000, y: 300, behind: false }));
+  assert.ok(marker!.className.includes('crit'), 'the last sol should read as critical');
+
+  // A site is not an entity, so the marker must not claim to focus one.
+  calls.length = 0;
+  marker!.dispatchEvent(new dom.window.Event('pointerdown', { bubbles: true }));
+  assert.equal(
+    calls.filter((c) => c.startsWith('action:focus')).length,
+    0,
+    `a drop marker should not focus an entity, saw ${calls}`,
+  );
+
+  // Buried, it is history rather than a deadline.
+  drop.buried = true;
+  hud.updateMarkers(sim, () => ({ x: 5000, y: 300, behind: false }));
+  assert.equal(
+    [...doc.querySelectorAll('#markers .marker')].filter((n) =>
+      (n as HTMLElement).textContent!.includes('Drop'),
+    ).length,
+    0,
+    'a buried drop stops being marked',
+  );
+  sim.world.pois.splice(sim.world.pois.indexOf(drop), 1);
+  hud.updateMarkers(sim, () => ({ x: 512, y: 384, behind: false }));
+});
+
+test('the site inspector shows what is out there, and how long a drop has left', () => {
+  const drop = sim.world.addPoi({
+    kind: 'supplyDrop',
+    x: 260,
+    z: -40,
+    salvage: { iron: 700, aluminum: 260 },
+    energyKWh: 45,
+    discovered: true,
+    solsToBury: 1.75,
+    buried: false,
+    manifest: 'Replacement parts',
+  });
+  hud.showPoi(drop, sim);
+  const insp = doc.querySelector('#inspector') as HTMLElement;
+  const text = insp.textContent!;
+  assert.ok(text.includes('Supply Drop'), `panel names the site: ${text.slice(0, 120)}`);
+  assert.ok(text.includes('Replacement parts'), 'the manifest Earth sent is shown');
+  assert.ok(text.includes('Iron Ore') && text.includes('700'), 'bulk salvage is listed');
+  assert.ok(text.includes('45 kWh'), 'surviving cells are listed');
+  assert.ok(text.includes('1.8 sols'), `the deadline is shown, got: ${text.slice(0, 200)}`);
+
+  // A stripped, buried container reads as lost rather than as an empty list.
+  drop.salvage = {};
+  drop.energyKWh = 0;
+  drop.buried = true;
+  hud.showPoi(drop, sim, true);
+  const after = (doc.querySelector('#inspector') as HTMLElement).textContent!;
+  assert.ok(after.includes('Buried'), 'a buried site says so');
+  assert.ok(!after.includes('1.8 sols'), 'a buried site has no deadline left');
+  sim.world.pois.splice(sim.world.pois.indexOf(drop), 1);
 });
 
 await finish('hud/markers');

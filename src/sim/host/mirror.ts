@@ -22,6 +22,7 @@
 
 import { World } from '../World';
 import type { Building, Colonist, FluidFlow, HistorySample, Rover } from '../Simulation';
+import type { Poi } from '../pois';
 import type { FluidPools } from '../lifesupport';
 import type { Alert, LogEvent, Severity } from '../alerts';
 import type { SunState } from '../clock';
@@ -104,6 +105,12 @@ export class ColonyMirror implements SimView {
       // world's own copy was generated from the seed, not from the colony.
       get deposits() {
         return self.payload.deposits;
+      },
+      // Same reasoning, twice over for sites: what was *found* is colony state,
+      // not seed state, so the mirror reads the payload rather than its own
+      // (fully generated, entirely undiscovered) scatter.
+      get pois() {
+        return self.payload.pois;
       },
       heightAt: (x, z) => ground.heightAt(x, z),
       sampleSurface: (x, z) => ground.sampleSurface(x, z),
@@ -283,6 +290,10 @@ export class ColonyMirror implements SimView {
 
   buildingById(id: number): Building | undefined {
     return this.payload.buildings.find((b) => b.id === id);
+  }
+
+  poiById(id: number): Poi | undefined {
+    return this.payload.pois.find((p) => p.id === id);
   }
 
   idleRovers(): Rover[] {

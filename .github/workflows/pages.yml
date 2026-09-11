@@ -73,10 +73,14 @@ jobs:
         env:
           BASE_URL: http://127.0.0.1:5199
 
+      # `?worker=0`, not an empty query: the worker is the default transport now,
+      # so an empty query would run the worker twice and quietly drop the
+      # in-process gate. The smoke test asserts which transport the page
+      # actually got, which is what makes that mistake fail here.
       - name: Run the sim-boundary smoke test (in-process host)
         run: |
           set -o pipefail
-          SMOKE_QUERY= node scripts/worker-smoke.mjs 2>&1 | tee -a worker-smoke-output.txt
+          SMOKE_QUERY='?worker=0' node scripts/worker-smoke.mjs 2>&1 | tee -a worker-smoke-output.txt
         env:
           BASE_URL: http://127.0.0.1:5199
 

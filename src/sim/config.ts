@@ -297,12 +297,57 @@ export function devLevelMul(level: number): number {
   return 1 + DEV_UPGRADE_STEP * (Math.max(1, level) - 1);
 }
 
+// ----------------------------------------------------------- exploration ----
+// GDD §06 (procedural POIs) and §10 (Earth supply drops); TDD §25 T6.
+
+/**
+ * Sites scattered by the world generator on a medium claim, scaled by area like
+ * the deposit count. Deliberately sparse: GDD §06's philosophy is that not
+ * every tile is a reward, and a planet littered with wrecks is a planet with
+ * nothing left to find.
+ */
+export const POI_COUNT = 14;
+
+/** A rover or the colonist must come this close before a site is on the map. */
+export const POI_DISCOVER_M = 55;
+
+/** Nothing interesting is scattered inside this radius — go and look. */
+export const POI_MIN_DIST_FROM_SPAWN = 150;
+
+/** Minimum spacing between two sites, so a "find" is always one thing. */
+export const POI_MIN_SEPARATION = 70;
+
+/** Bulk salvage a rover cuts free per game second (before weather and wear). */
+export const POI_SALVAGE_RATE_KG_S = 26;
+
+/** The first drop arrives somewhere in this window, in sols from launch. */
+export const DROP_FIRST_SOL_MIN = 2;
+export const DROP_FIRST_SOL_MAX = 4;
+
+/** Gap between later drops, in sols. */
+export const DROP_GAP_SOL_MIN = 5;
+export const DROP_GAP_SOL_MAX = 9;
+
+/** Sols of dust cover a drop survives in calm weather before it is lost. */
+export const DROP_BURY_SOLS = 3;
+
+/**
+ * How much faster the burial clock runs inside a storm (at full intensity).
+ * This is the whole design of GDD §10's cargo missions: the drop is not lost
+ * because time passed, it is lost because the sky came in.
+ */
+export const DROP_STORM_BURY_RATE = 3;
+
+/** How far out a drop lands, as a fraction of the claim's half-extent. */
+export const DROP_RING_INNER_FRAC = 0.3;
+export const DROP_RING_OUTER_FRAC = 0.85;
+
 // ---------------------------------------------------------- persistence ----
 
 export const AUTOSAVE_INTERVAL_S = 45;
 
 /** Current save schema version. Bump whenever the snapshot shape changes. */
-export const SAVE_VERSION = 6;
+export const SAVE_VERSION = 7;
 
 // -------------------------------------------------------------- history ----
 

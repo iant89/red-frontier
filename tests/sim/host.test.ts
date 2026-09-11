@@ -40,6 +40,7 @@ const SAMPLES: Record<SimCommand['type'], SimCommand> = {
   'rover/clean': { type: 'rover/clean', roverId: 1000, buildingId: 1, queue: false },
   'rover/repair': { type: 'rover/repair', roverId: 1000, buildingId: 1, queue: false },
   'rover/recover': { type: 'rover/recover', roverId: 1000, strandedId: 1001, queue: false },
+  'rover/salvage': { type: 'rover/salvage', roverId: 1000, poiId: 3, queue: false },
   'rover/stop': { type: 'rover/stop', roverId: 1000 },
   'rover/repeatRoute': { type: 'rover/repeatRoute', roverId: 1000, on: true },
   'rover/rule': { type: 'rover/rule', roverId: 1000, rule: 'autoHaul', on: true },

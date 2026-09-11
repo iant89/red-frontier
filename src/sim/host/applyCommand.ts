@@ -58,6 +58,11 @@ export function applyCommand(sim: Simulation, cmd: SimCommand): SimAck {
     case 'rover/recover':
       sim.issueRecover(cmd.roverId, cmd.strandedId, cmd.queue);
       return ACK;
+    // Salvage answers with a boolean too ("was there anything out there?"), and
+    // logs its own reason — an undiscovered site, a buried container, a wreck
+    // already stripped. The command was accepted either way.
+    case 'rover/salvage':
+      return { ok: sim.issueSalvage(cmd.roverId, cmd.poiId, cmd.queue) };
     case 'rover/stop':
       sim.stopRover(cmd.roverId);
       return ACK;

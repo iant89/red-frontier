@@ -6,10 +6,13 @@
  * worker needed — the alternative was a fork in `Game.loop`, which is how a
  * refactor like this ends up half-tested on one path and half-shipped on the other.
  *
- * The worker is selected with `?worker=1` and otherwise stays off. Deliberately:
- * the in-process host is what every existing test drives and what the mobile smoke
- * gate exercises, so the seam lands green first and the worker earns its default
- * by passing the same gates. `?worker=0` forces it off even if the default flips.
+ * The worker is the default; `?worker=0` turns it off. It did not start that
+ * way: the in-process host was the default until the seam had passed every gate
+ * on both sides (`worker-smoke` runs both transports on every pull request), and
+ * flipping it is the last step of the migration the README's milestone list
+ * called out. The escape hatch stays because a fallback that nobody can reach
+ * for is a fallback that rots — and because a browser without module workers
+ * still has to be able to say so out loud.
  *
  * Falling back is not a courtesy. A page served from `file:`, a browser without
  * module-worker support, or an environment where `new Worker` throws would each
@@ -28,6 +31,13 @@ export interface HostChoice {
   worker?: boolean;
 }
 
+/**
+ * What a page with no opinion gets. Flipped to `true` once both transports were
+ * CI-gated — see the header. Every unit suite still drives `LocalSimHost`
+ * directly, which is unaffected: this is about which host a *browser* asks for.
+ */
+export const WORKER_DEFAULT = true;
+
 /** Whether this environment can host a worker at all. */
 export function workerSupported(): boolean {
   return typeof Worker !== 'undefined' && typeof structuredClone === 'function';
@@ -35,10 +45,11 @@ export function workerSupported(): boolean {
 
 /**
  * `?worker=1` turns the boundary on, `?worker=0` turns it off, and anything else
- * (including a malformed value) leaves the default. Pure and parameterised
- * because the alternative is a test that has to navigate a browser.
+ * (including a malformed value) leaves the default — which is on, so a typo is
+ * not a silent downgrade to the fallback path. Pure and parameterised because
+ * the alternative is a test that has to navigate a browser.
  */
-export function wantsWorker(search: string, fallback = false): boolean {
+export function wantsWorker(search: string, fallback = WORKER_DEFAULT): boolean {
   const raw = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search).get('worker');
   if (raw === null) return fallback;
   const value = raw.trim().toLowerCase();
@@ -65,10 +76,13 @@ export interface HostPlan {
 /** What the factory would pick, for the loading screen and for tests. */
 export function planHost(search: string): HostPlan {
   const asked = wantsWorker(search);
-  if (!asked) return { transport: 'in-process', reason: 'default (in-process host)' };
+  if (!asked) return { transport: 'in-process', reason: 'requested via ?worker=0' };
   if (!workerSupported())
     return { transport: 'in-process', reason: 'worker requested but unavailable in this browser' };
-  return { transport: 'worker', reason: 'requested via ?worker=1' };
+  return {
+    transport: 'worker',
+    reason: search.includes('worker=') ? 'requested via ?worker=1' : 'default (worker host)',
+  };
 }
 
 async function withFallback(host: Promise<SimHost>, make: () => SimHost, why: string): Promise<SimHost> {

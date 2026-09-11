@@ -572,8 +572,32 @@ try {
       fail('long-press orders the selected rover to move', 'no bare-canvas terrain point found');
     } else {
       await longPressCanvas(page, press.sx, press.sy);
-      await settle(page);
-      const cmd = await rf(page, (id) => window.__rf.game.sim.roverById(id)?.command ?? null, selectedId);
+      /**
+       * Wait for the order to *land*, not for two frames.
+       *
+       * The colony now runs in a worker by default, so an order crosses a
+       * boundary and the view this reads back is one payload behind: command in
+       * on frame N, applied by the worker's next advance, mirrored on the frame
+       * after that. Polling with a deadline is both the honest assertion for
+       * that transport and a stricter one than a fixed sleep — a command that
+       * never arrives still fails the check, and the elapsed time in the detail
+       * says how much of the budget the boundary actually used.
+       */
+      const landed = await page.evaluate(
+        async (id) => {
+          const t0 = performance.now();
+          const deadline = t0 + 3000;
+          let cmd = null;
+          while (performance.now() < deadline) {
+            cmd = window.__rf.game.sim.roverById(id)?.command ?? null;
+            if (cmd?.type === 'moveTo') return { cmd, ms: performance.now() - t0 };
+            await new Promise((r) => requestAnimationFrame(() => r()));
+          }
+          return { cmd, ms: performance.now() - t0 };
+        },
+        selectedId,
+      );
+      const cmd = landed.cmd;
       const moved =
         cmd?.type === 'moveTo' &&
         Math.abs(cmd.x - press.x) < 1e-6 &&
@@ -581,7 +605,7 @@ try {
       check(
         'long-press orders the selected rover to move',
         moved,
-        `cmd=${JSON.stringify(cmd)} want=(${press.x},${press.z}) at screen (${Math.round(press.sx)},${Math.round(press.sy)})`,
+        `cmd=${JSON.stringify(cmd)} want=(${press.x},${press.z}) at screen (${Math.round(press.sx)},${Math.round(press.sy)}) after ${Math.round(landed.ms)} ms`,
       );
     }
   }

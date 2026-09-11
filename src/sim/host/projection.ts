@@ -25,6 +25,7 @@
 
 import type { Simulation, Rover, Building, HistorySample, FluidFlow } from '../Simulation';
 import type { Deposit } from '../World';
+import type { Poi } from '../pois';
 import type { Alert, LogEvent } from '../alerts';
 import type { SunState } from '../clock';
 import type { StormCell, StormKind, StormKindReal } from '../weather';
@@ -105,6 +106,12 @@ export interface ViewPayload {
   buildings: Building[];
   colonist: Simulation['colonist'];
   deposits: Array<Pick<Deposit, 'id' | 'resource' | 'x' | 'z' | 'amount' | 'maxAmount' | 'radius'>>;
+  /**
+   * Sites and landed drops, spread whole. Discovery and salvage progress are
+   * player-mutated state, so unlike the terrain they cannot be re-derived
+   * client-side from the seed — they have to travel.
+   */
+  pois: Poi[];
   alerts: Alert[];
   /** Log lines produced since the previous payload. */
   events: LogEvent[];
@@ -202,6 +209,10 @@ export function projectView(
       amount: d.amount,
       maxAmount: d.maxAmount,
       radius: d.radius,
+    })),
+    pois: sim.world.pois.map((p) => ({
+      ...p,
+      salvage: { ...p.salvage },
     })),
     alerts: sim.alerts.list().map(copy),
     events,

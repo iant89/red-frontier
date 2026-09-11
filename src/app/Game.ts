@@ -53,6 +53,7 @@ type Selection =
   | { type: 'rover'; id: number }
   | { type: 'building'; id: number }
   | { type: 'colonist'; id: number }
+  | { type: 'poi'; id: number }
   | null;
 
 export class Game {
@@ -115,7 +116,10 @@ export class Game {
     this.dev = new DevMode((sev, text) => this.hud.addLog(sev, text));
     this.devPanel = new DevPanel(this.dev, {
       getSim: () => this.host?.view ?? null,
-      getSelection: () => this.selected,
+      // The panel edits entities it has backdoors for; a site is not one of
+      // them (yet), so it is reported as no selection rather than widened into
+      // the panel's own type.
+      getSelection: () => (this.selected?.type === 'poi' ? null : this.selected),
       select: (sel) => {
         this.selected = sel;
         this.syncUI(true);
@@ -658,6 +662,22 @@ export class Game {
         } else {
           this.selected = { type: 'colonist', id: pick.id };
         }
+      } else if (pick.type === 'poi') {
+        // The same grammar as a deposit: with a rover selected, tapping a site
+        // sends it to salvage. Without one, the panel explains what it is.
+        const site = this.sim.poiById(pick.id);
+        if (this.selected?.type === 'rover' && site) {
+          this.order({
+            type: 'rover/salvage',
+            roverId: this.selected.id,
+            poiId: pick.id,
+            queue: this.shiftHeld,
+          });
+        } else if (this.selected?.type === 'poi' && this.selected.id === pick.id) {
+          this.selected = null;
+        } else {
+          this.selected = { type: 'poi', id: pick.id };
+        }
       } else if (pick.type === 'deposit') {
         if (this.selected?.type === 'rover') {
           this.order({
@@ -1162,6 +1182,10 @@ export class Game {
       } else if (this.selected.type === 'building') {
         const b = this.sim.buildingById(this.selected.id);
         if (b) this.hud.showBuilding(b, this.sim);
+        else this.selected = null;
+      } else if (this.selected.type === 'poi') {
+        const p = this.sim.poiById(this.selected.id);
+        if (p) this.hud.showPoi(p, this.sim, true);
         else this.selected = null;
       } else {
         this.hud.showColonist(this.sim.colonist, this.sim, true);

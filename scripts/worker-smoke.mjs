@@ -29,7 +29,7 @@
  *   npm run build && (npx vite preview --port 5199 --strictPort &)
  *   node scripts/setup-playwright.mjs        # or: npm i --no-save playwright
  *   node scripts/worker-smoke.mjs            # the worker path
- *   SMOKE_QUERY= node scripts/worker-smoke.mjs   # the same script, in-process
+ *   SMOKE_QUERY='?worker=0' node scripts/worker-smoke.mjs   # the same, in-process
  *
  * The `SMOKE_QUERY` knob is the point: the two runs are the same assertions
  * against the same build, so a divergence between the transports fails here
@@ -40,7 +40,9 @@
  *
  * Env knobs:
  *   BASE_URL        where the game is served (default above)
- *   SMOKE_QUERY     query string to load with (default '?worker=1')
+ *   SMOKE_QUERY     query string to load with (default '?worker=1';
+ *                   '?worker=0' for the in-process host, which is no longer
+ *                   the default, so it has to be asked for)
  *   SMOKE_FAILURE_SHOT  where to dump a screenshot on failure
  *                       (default ./worker-smoke-failure.png, gitignored)
  */
@@ -55,7 +57,15 @@ const QUERY = process.env.SMOKE_QUERY ?? '?worker=1';
 const SHOT = process.env.SMOKE_FAILURE_SHOT ?? join(ROOT, 'worker-smoke-failure.png');
 const VIEW = { width: 1360, height: 760 };
 
-const wantsWorker = /worker=(1|true|on)/.test(QUERY);
+/**
+ * Which transport this run should get. Derived from the query rather than
+ * hardcoded, and defaulting to the worker because that is what the app defaults
+ * to (`WORKER_DEFAULT` in `createHost.ts`): only an explicit opt-out means
+ * in-process. Getting this wrong is the specific failure the run exists to
+ * catch — an empty query used to mean "the in-process host", so a CI pair of
+ * `?worker=1` + empty would quietly test the same transport twice.
+ */
+const wantsWorker = !/worker=(0|false|off)/.test(QUERY);
 const WANT_TRANSPORT = wantsWorker ? 'worker' : 'in-process';
 
 if (process.argv.includes('--help') || process.argv.includes('-h')) {
