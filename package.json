@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.3.0",
   "type": "module",
-  "description": "Red Frontier - browser Mars survival RTS (Prototype 3: weather, dust, storms and degradation)",
+  "description": "Red Frontier - browser Mars survival RTS (Prototype 4 + exploration: weather, rover logistics, POIs, supply drops)",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
