@@ -115,6 +115,7 @@ export function createSimRuntime(send: (reply: HostReply) => void): SimRuntime {
           case 'command': {
             const s = world();
             if (!s) return;
+            let applied = 0;
             for (const raw of message.commands) {
               const decoded = decodeCommand(raw);
               if (!decoded.ok) {
@@ -124,6 +125,26 @@ export function createSimRuntime(send: (reply: HostReply) => void): SimRuntime {
                 continue;
               }
               applyCommand(s, decoded.command);
+              applied++;
+            }
+            /**
+             * Publish the world after a command lands, not only after a tick.
+             *
+             * A command mutates authoritative state, and the read model has to
+             * follow it whenever it happens — because the obvious moment to
+             * order a rover is while paused, and a paused client posts no
+             * advances, so a view that only leaves on `advance` would show a
+             * queued order *never*. The in-process host cannot have this bug (its
+             * view is the live sim), which is exactly the kind of divergence the
+             * two-transport CI gate exists to catch.
+             *
+             * The cost is one extra payload per command batch, and batches are
+             * player-initiated, so this is a few per second against the one per
+             * frame an advance already sends. Events drain with it, so a
+             * refusal's log line arrives with the refusal.
+             */
+            if (applied > 0) {
+              send({ kind: 'view', view: projectView(s, 'worker', overlays, s.drainEvents()) });
             }
             return;
           }

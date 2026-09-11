@@ -380,6 +380,33 @@ test('an order crosses as data and lands on the rover', async () => {
   assert.equal(moved.z, sim.rovers[0].z);
 });
 
+test('a command reaches the mirror with no tick at all — a paused colony shows its orders', async () => {
+  /**
+   * The bug this pins: the runtime used to publish a view only on `advance`, so
+   * an order sent while paused was applied by the sim and invisible to the HUD
+   * until the player unpaused. The in-process host cannot have that bug (its
+   * view *is* the sim), which made it a worker-only divergence — found by the
+   * mobile smoke gate the day the worker became the default transport, because
+   * that gate pauses the colony before ordering a rover.
+   */
+  const { host, port } = await connect({ seed: 701 });
+  const rover = host.view.rovers[0];
+  const repliesBefore = port.replies.length;
+  host.send({ type: 'rover/move', roverId: rover.id, x: 180, z: 40, queue: false });
+  port.flush(); // deliberately no tick(): the client is paused, so nothing is pumped
+  assert.equal(
+    port.sent.filter((m) => m.kind === 'advance').length,
+    0,
+    'precondition: not a single advance was posted',
+  );
+  assert.ok(port.replies.length > repliesBefore, 'the runtime published a view for the command');
+  assert.equal(
+    host.view.roverById(rover.id)?.command.type,
+    'moveTo',
+    'the order is on the mirror while the world is standing still',
+  );
+});
+
 test('an optimistic id is the id the sim actually used', async () => {
   const { host, port, sim } = await connect({ seed: 800 });
   const spot = openSpot(sim);
@@ -672,14 +699,23 @@ test('a handshake that fails rejects instead of hanging the loading screen', asy
   assert.ok(port.replies.length > 0, 'and the runtime answered something either way');
 });
 
-test('the transport switch is a URL, and the default stays in-process', () => {
-  assert.equal(wantsWorker(''), false, 'no parameter: the tested path');
+test('the transport switch is a URL, and the worker is the default', () => {
+  assert.equal(wantsWorker(''), true, 'no parameter: the shipped path is the worker');
   assert.equal(wantsWorker('?worker=1'), true);
   assert.equal(wantsWorker('worker=true'), true);
-  assert.equal(wantsWorker('?worker=0'), false);
+  assert.equal(wantsWorker('?worker=0'), false, 'the escape hatch still works');
   assert.equal(wantsWorker('?worker=false'), false);
-  assert.equal(wantsWorker('?worker=nonsense'), false, 'a typo is not a rollout');
-  assert.equal(planHost('').reason, 'default (in-process host)');
+  // A typo is not a silent downgrade: an unparseable value keeps the default,
+  // so a malformed URL cannot quietly put a player on the fallback transport.
+  assert.equal(wantsWorker('?worker=nonsense'), true, 'a typo is not a downgrade');
+  assert.equal(wantsWorker('', false), false, 'the default is a parameter, not a constant');
+
+  const def = planHost('');
+  assert.ok(
+    def.transport === 'worker' ? workerSupported() : /unavailable/.test(def.reason),
+    `the default plan is the worker where one can run, got: ${def.reason}`,
+  );
+  assert.equal(planHost('?worker=0').transport, 'in-process', 'asking for the fallback is honoured');
   const asked = planHost('?worker=1');
   assert.ok(
     asked.transport === 'worker' ? workerSupported() : /unavailable/.test(asked.reason),
