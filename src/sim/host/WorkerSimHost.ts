@@ -158,6 +158,21 @@ export class WorkerSimHost implements SimHost {
     }
   }
 
+  requestPlacement(command: Extract<SimCommand, { type: 'building/place' }>): Promise<SimAck> {
+    if (this.disposed) return Promise.reject(new Error('the colony has shut down'));
+    const id = this.seq++;
+    return new Promise<SimAck>((resolve, reject) => {
+      this.waiting.set(id, {
+        fulfill: (reply) => {
+          if (reply.kind === 'placement') resolve(reply.ack);
+          else reject(new Error(`the sim answered a placement request with a ${reply.kind}`));
+        },
+        reject,
+      });
+      this.post({ kind: 'placement', id, command });
+    }).finally(() => this.waiting.delete(id));
+  }
+
   /** The mirror's log ring is the client-side half of the bus; the sim drains
    *  per advance, so this cannot lose or repeat a line. */
   drainEvents(): SimLogEvent[] {
@@ -230,6 +245,7 @@ export class WorkerSimHost implements SimHost {
         this.settle(reply.id, reply);
         return;
       case 'snapshot':
+      case 'placement':
         this.settle(reply.id, reply);
         return;
       case 'error':

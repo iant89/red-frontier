@@ -37,6 +37,7 @@ export type HostRequest =
   | { kind: 'advance'; dt: number }
   /** Applied immediately, no reply: orders must not wait for the next frame. */
   | { kind: 'command'; commands: SimCommand[] }
+  | { kind: 'placement'; id: number; command: Extract<SimCommand, { type: 'building/place' }> }
   | { kind: 'overlays'; state: OverlayState }
   | { kind: 'snapshot'; id: number }
   | { kind: 'load'; id: number; snapshot: SimSnapshot };
@@ -47,6 +48,7 @@ export type HostReply =
   | { kind: 'view'; view: ViewPayload }
   | { kind: 'loaded'; id: number; view: ViewPayload }
   | { kind: 'snapshot'; id: number; snapshot: SimSnapshot }
+  | { kind: 'placement'; id: number; ack: import('./protocol').SimAck }
   | { kind: 'error'; id: number | null; error: string };
 
 /** The minimum a worker object must do for us; also what a test fake provides. */

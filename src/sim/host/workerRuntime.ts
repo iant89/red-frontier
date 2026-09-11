@@ -127,6 +127,13 @@ export function createSimRuntime(send: (reply: HostReply) => void): SimRuntime {
             }
             return;
           }
+          case 'placement': {
+            const s = world(message.id);
+            if (!s) return;
+            send({ kind: 'placement', id: message.id, ack: applyCommand(s, message.command) });
+            send({ kind: 'view', view: projectView(s, 'worker', overlays, s.drainEvents()) });
+            return;
+          }
           case 'overlays':
             overlays = message.state;
             // Apply at once, so a pin does not have to wait for the next tick to

@@ -604,7 +604,7 @@ export class Game {
     if (!this.renderer || !this.sim) return;
     if (this.uiCoversPoint(x, y)) return;
     if (this.pendingBuild) {
-      this.placeBuild(x, y);
+      void this.placeBuild(x, y);
       return;
     }
     // A click-to-place spawn the developer panel armed consumes the tap.
@@ -713,7 +713,7 @@ export class Game {
     this.syncUI(true);
   }
 
-  private placeBuild(x: number, y: number): void {
+  private async placeBuild(x: number, y: number): Promise<void> {
     const host = this.host;
     if (!this.renderer || !host || !this.pendingBuild) return;
     const pt = this.renderer.raycastTerrain(x, y);
@@ -722,7 +722,7 @@ export class Game {
     // Placing is the one gesture whose result the UI needs immediately: the new
     // structure must be selected, and only the sim knows the id it allocated.
     // `request` is the ack path the protocol reserves for exactly that.
-    const ack = host.request({ type: 'building/place', kind, x: pt.x, z: pt.z });
+    const ack = await host.requestPlacement({ type: 'building/place', kind, x: pt.x, z: pt.z });
     if (ack.ok && ack.entityId !== undefined) {
       this.selected = { type: 'building', id: ack.entityId };
       // Shift-place keeps the blueprint armed for laying out solar farms.
