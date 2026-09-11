@@ -301,6 +301,17 @@ export class ColonyMirror implements SimView {
   }
 
   canPlace(kind: BuildingKind, x: number, z: number): string | null {
+    return this.placeVerdict(kind, x, z);
+  }
+
+  /**
+   * The placement answer exposed to presentation code. Keep this named apart
+   * from the old `canPlace` mirror query: callers are asking for the sim's
+   * placement verdict, not permission to make their own siting decision. The
+   * local host resolves it against the live simulation; the worker mirror uses
+   * the same pure rule and current projected obstacles.
+   */
+  placeVerdict(kind: BuildingKind, x: number, z: number): string | null {
     return evaluateSite(kind, x, z, {
       ground: this.ground,
       buildings: this.payload.buildings,

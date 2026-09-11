@@ -55,6 +55,9 @@ export interface SimHost {
    */
   request(command: SimCommand): SimAck;
 
+  /** Ask the authoritative sim to validate and place a building. */
+  requestPlacement(command: Extract<SimCommand, { type: 'building/place' }>): Promise<SimAck>;
+
   /**
    * Take the log lines produced since the last call. A read that consumes, so
    * it belongs to the host rather than the view.

@@ -1218,6 +1218,11 @@ export class Simulation {
    * live world, and `building/place` re-checks it before anything is sited.
    */
   canPlace(kind: BuildingKind, x: number, z: number): string | null {
+    return this.placeVerdict(kind, x, z);
+  }
+
+  /** The authoritative siting verdict used by placement previews and commands. */
+  placeVerdict(kind: BuildingKind, x: number, z: number): string | null {
     return evaluateSite(kind, x, z, {
       ground: this.world,
       buildings: this.buildings,

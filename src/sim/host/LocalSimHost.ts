@@ -57,6 +57,10 @@ export class LocalSimHost implements SimHost {
     return this.dispatch(command);
   }
 
+  requestPlacement(command: Extract<SimCommand, { type: 'building/place' }>): Promise<SimAck> {
+    return Promise.resolve(this.dispatch(command));
+  }
+
   drainEvents(): SimLogEvent[] {
     return this.sim.drainEvents();
   }
