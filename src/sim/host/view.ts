@@ -28,7 +28,7 @@ import type { Simulation } from '../Simulation';
 import type { World } from '../World';
 import type { AlertBus } from '../alerts';
 import type { SolClock } from '../clock';
-import type { Weather } from '../weather';
+import type { StormCell, StormKind, StormKindReal, Weather } from '../weather';
 import type { DifficultyId, WorldOptions } from '../difficulty';
 
 /**
@@ -52,12 +52,37 @@ export type AlertsView = Pick<AlertBus, 'list' | 'history' | 'worst' | 'isActive
 export type ClockView = Pick<SolClock, 'sol' | 'frac' | 'format' | 'phase'>;
 
 /**
- * Weather, read as a snapshot of the sky. The debug hooks are excluded, so the
- * panel's "conjure a storm" button has no choice but to go through a command.
+ * Weather, read as a snapshot of the sky.
+ *
+ * An explicit interface rather than `Pick<Weather, …>`, because the mirror is
+ * *not* a `Weather`: it has no storm cells, no seeded RNG, no private state to
+ * inherit. The class satisfies it structurally, so the local host hands out the
+ * real object while the mirrored host answers the four forecast questions from
+ * what the sim computed — one shape, two implementations, both checked.
  */
-export type WeatherView = Readonly<
-  Omit<Weather, 'update' | 'debugScheduleStorm' | 'debugClearStorms' | 'debugResumeRolls'>
->;
+export interface WeatherView {
+  readonly time: number;
+  readonly windSpeed: number;
+  readonly windDirRad: number;
+  readonly dust: number;
+  readonly visibility: number;
+  readonly storm: StormKind;
+  readonly stormIntensity: number;
+  readonly solarTransmission: number;
+  /** False while the developer panel has the sky flying by hand. */
+  readonly rollsSuppressed: boolean;
+  forecast(): { kind: StormKind; label: string; arrivesIn: number } | null;
+  current(): StormCell | null;
+  threat(): {
+    kind: StormKindReal;
+    label: string;
+    distKm: number;
+    bearingRad: number;
+    arrivesIn: number;
+    radiusKm: number;
+  } | null;
+  passesIn(): number;
+}
 
 /**
  * The whole read model. `Readonly<…>` guards the *slots* (no `view.rovers = []`);
@@ -105,34 +130,21 @@ export type SimFields = Readonly<
  * The methods a view may answer. Each is a read of state the view already
  * carries, with no side effects — which is what makes them safe to serve from a
  * cache across a worker boundary.
+ *
+ * The list is *only* what `ui/`, `render/`, `dev/` and `app/` call, and that is
+ * load-bearing: every entry is a method `host/mirror.ts` must implement, so an
+ * unused query is not merely dead code, it is a toll on the wire.
  */
 export type SimQuery = Pick<
   Simulation,
   | 'roverById'
   | 'buildingById'
-  | 'onlineBuildings'
-  | 'onlineWarehouses'
   | 'idleRovers'
-  | 'shelters'
-  | 'depositAt'
-  | 'buildingAt'
-  | 'nearDepot'
-  | 'nearCharger'
   | 'needsMaintenance'
   | 'canPlace'
-  | 'defsFor'
-  | 'lightsNeeded'
   | 'storageCapacity'
-  | 'storageRoom'
-  | 'storageTotal'
-  | 'storageTotalCapacity'
-  | 'storageFull'
-  | 'fullResources'
-  | 'batteryCapacity'
-  | 'solsOfReserve'
   | 'reserveSols'
   | 'netRatePerSol'
-  | 'instantRatePerSol'
 >;
 
 /**

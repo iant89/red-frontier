@@ -33,6 +33,7 @@ import './sim/determinism.test';
 import './sim/persistence.test';
 import './sim/devtools.test';
 import './sim/host.test';
+import './sim/worker.test';
 import './render/particles.test';
 import './ui/build-status.test';
 import './hud/chrome.test';
@@ -50,4 +51,4 @@ import './hud/devpanel.test';
 
 // Each suite prints one line as it runs; `report` prints the total, every
 // failure, and exits non-zero if anything broke.
-report(33);
+report(35);

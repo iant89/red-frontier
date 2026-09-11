@@ -12,7 +12,7 @@
 
 import type { Rover } from '../sim/Simulation';
 import type { SimCommand, SimHost, SimView } from '../sim/host';
-import { createLocalHost, restoreLocalHost } from '../sim/host';
+import { createHost, planHost, restoreHost } from '../sim/host';
 import { GameRenderer } from '../render/Renderer';
 import type { OverlayMode } from '../render/Renderer';
 import { CameraRig } from './CameraRig';
@@ -215,10 +215,16 @@ export class Game {
       loader.setActiveStep(1);
       loader.setProgress(0.2, 'Seeding Martian geology…');
       await nextFrame();
-      // The world comes up behind a host rather than in a constructor call here:
-      // an in-process host seeds the same Simulation today, and the day the sim
-      // moves onto a worker this is the only line that changes (TDD §16).
-      const host = createLocalHost({
+      // The world comes up behind a host rather than in a constructor call here,
+      // and the host is chosen by a factory rather than by this file: seeding,
+      // mirroring the terrain and (when asked for) standing up a worker are one
+      // await, so the frame loop, the renderer and the panels never learn which
+      // side of a thread boundary the colony is on (TDD §16).
+      const plan = planHost(location.search);
+      if (plan.transport === 'worker')
+        loader.setProgress(0.3, 'Spinning up the simulation thread…');
+      await nextFrame();
+      const host = await createHost({
         seed,
         difficulty: config.difficulty,
         worldHalf: size.worldHalf,
@@ -298,9 +304,10 @@ export class Game {
       await nextFrame();
       // The host boots the world and restores it in one move, so a corrupt or
       // future-versioned save fails before a renderer or a camera has anything
-      // pointed at it. This is also the call that stops blocking the frame loop
-      // the day the host is a worker.
-      const host = restoreLocalHost(record.data as object);
+      // pointed at it. With a worker host that restore happens off-thread, and
+      // the terrain the renderer is about to build is derived locally from the
+      // seed the save names — which is why the restore path needs no second call.
+      const host = await restoreHost(record.data as object);
       loader.setActiveStep(2);
       loader.setProgress(0.68, 'Rebuilding terrain mesh…');
       await nextFrame();

@@ -15,9 +15,12 @@
  * structural rather than a promise — the snapshot is produced inside the host,
  * and there is no path from this file to it.
  *
- * One thing still writes live state directly: the battery pin. It is a per-step
- * enforcement rather than an edit, so it is registered as a host
- * {@link SimOverlay} and runs beside the sim, outside every save.
+ * The battery pin is the one thing that is not an edit but a *per-step
+ * enforcement*, so it is expressed as overlay **state** published to the host
+ * (`host.syncOverlays`) and applied by the sim-side registry in
+ * `host/overlays.ts` — a name plus the ids to grip, not a closure, because a
+ * worker cannot accept a function. The pin therefore runs right after each tick,
+ * on whichever side the world lives, outside every save.
  *
  * The Game owns one instance for the lifetime of the page.
  */
@@ -25,8 +28,10 @@
 import type { SimHost } from '../sim/host/SimHost';
 import type { SimView, SimWritable } from '../sim/host';
 import type { SimAck, SimCommand } from '../sim/host';
+import { BATTERY_PIN_OVERLAY, EMPTY_OVERLAYS, runOverlays } from '../sim/host';
+import type { OverlayState } from '../sim/host';
 import type { BuildingKind, ResourceId, RoverKind } from '../sim/defs';
-import { RESOURCES, ROVERS } from '../sim/defs';
+import { RESOURCES } from '../sim/defs';
 import type { StormKindReal } from '../sim/weather';
 
 /** What the panel is currently asking us to drop on the next terrain tap. */
@@ -40,14 +45,11 @@ export interface SpawnSpec {
 
 export type DevLog = (severity: string, text: string) => void;
 
-/** The host overlay name the battery pin registers under. */
-const BATTERY_PIN_OVERLAY = 'dev.keepBatteryFull';
-
 export class DevMode {
   /** Master switch. When false, {@link applyTo} does nothing at all. */
   enabled = false;
 
-  /** Rovers whose batteries must stay pinned at full while the mode is on. */
+  /** Rovers whose batteries this mode has asked to pin, until proven stale. */
   private keepBatteryFull = new Set<number>();
 
   /** The spawn the panel has armed, if any (Game consumes it on a tap). */
@@ -63,20 +65,18 @@ export class DevMode {
   }
 
   /**
-   * Wire the mode to a colony. Attaching also installs the battery-pin overlay,
-   * so the Game's frame loop no longer has to know developer mode exists.
+   * Wire the mode to a colony, and hand it the pins to hold. Re-attaching (a new
+   * mission, a host swap) republishes them, which is the whole reason the state
+   * is derived here rather than pushed once in the constructor.
    */
   attach(host: SimHost): void {
     this.host = host;
-    host.attachOverlay({
-      name: BATTERY_PIN_OVERLAY,
-      afterStep: (sim) => this.applyTo(sim),
-    });
+    this.publish();
   }
 
   /** Unwire it (mission over, host replaced) without dropping the mode's UI state. */
   detach(): void {
-    this.host?.detachOverlay(BATTERY_PIN_OVERLAY);
+    this.host?.syncOverlays(EMPTY_OVERLAYS);
     this.host = null;
   }
 
@@ -85,35 +85,43 @@ export class DevMode {
     this.enabled = false;
     this.keepBatteryFull.clear();
     this.armedSpawn = null;
+    this.publish();
   }
 
   /**
-   * Per-step enforcement of the battery pins. Called by the host's overlay after
-   * each step, and safe to call by hand (the dev-mode suite does) because it is
-   * idempotent: a pinned rover that is already full is left alone.
+   * The overlay state to publish: nothing at all unless the mode is on, and
+   * never a pin on a rover the colony no longer has.
+   *
+   * That last part is a *read* of the view rather than bookkeeping at delete
+   * time, because a rover dies for reasons this class cannot see. Asking the
+   * view is also the honest version: with a worker host the view is the world's
+   * own report, so a pin is dropped as soon as the world has stopped carrying
+   * the rover, not as soon as the panel guesses.
    */
-  applyTo(sim: SimWritable): void {
-    if (!this.enabled) return;
-    for (const id of [...this.keepBatteryFull]) {
-      const r = sim.rovers.find((rv) => rv.id === id);
-      if (!r) {
-        this.keepBatteryFull.delete(id);
-        continue;
-      }
-      const def = ROVERS[r.kind];
-      if (r.battery < def.maxBatteryKWh) {
-        r.battery = def.maxBatteryKWh;
-        // A stranded rover being force-fed can think again immediately.
-        if (r.phase === 'disabled') {
-          r.phase = 'idle';
-          r.goal = 'idle';
-          r.command = { type: 'idle' };
-          r.pending = [];
-          r.recharge = true; // limp home, normally
-          r.statusText = 'Returning to charge';
-        }
+  overlayState(): OverlayState {
+    if (!this.enabled) return EMPTY_OVERLAYS;
+    const view = this.host?.view;
+    if (view) {
+      for (const id of [...this.keepBatteryFull]) {
+        if (!view.rovers.some((r) => r.id === id)) this.keepBatteryFull.delete(id);
       }
     }
+    if (this.keepBatteryFull.size === 0) return EMPTY_OVERLAYS;
+    return { [BATTERY_PIN_OVERLAY]: [...this.keepBatteryFull] };
+  }
+
+  /** Tell the host what to hold. Cheap; call it after any change to the mode. */
+  private publish(): void {
+    this.host?.syncOverlays(this.overlayState());
+  }
+
+  /**
+   * Apply the pins to a world by hand. The host calls the same registry after
+   * every step; this exists for the suite that drives a bare `Simulation`, and
+   * keeping both on one implementation is the point.
+   */
+  applyTo(sim: SimWritable): void {
+    runOverlays(sim, this.overlayState());
   }
 
   // -------------------------------------------------------- command plumbing ----
@@ -187,13 +195,12 @@ export class DevMode {
 
   /** Pin (or unpin) this rover's battery at full while dev mode is on. */
   setKeepBatteryFull(id: number, on: boolean): void {
-    if (on) {
-      this.keepBatteryFull.add(id);
-      // Top up right now, then let the pin hold it there.
-      this.send({ type: 'dev/rover/battery', roverId: id, frac: 1 });
-    } else {
-      this.keepBatteryFull.delete(id);
-    }
+    if (on) this.keepBatteryFull.add(id);
+    else this.keepBatteryFull.delete(id);
+    // Publish first: the top-up below is a one-shot nudge, and a pin asked for
+    // after it would leave the rover briefly dischargeable again.
+    this.publish();
+    if (on) this.send({ type: 'dev/rover/battery', roverId: id, frac: 1 });
   }
 
   isKeepBatteryFull(id: number): boolean {

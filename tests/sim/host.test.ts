@@ -1,7 +1,7 @@
 /**
  * @suite sim/host
  * @group unit
- * @covers src/sim/host/protocol.ts src/sim/host/applyCommand.ts src/sim/host/LocalSimHost.ts src/sim/host/view.ts src/app/Game.ts src/dev/DevMode.ts src/dev/DevPanel.ts src/ui/HUD.ts src/render/Renderer.ts
+ * @covers src/sim/host/protocol.ts src/sim/host/applyCommand.ts src/sim/host/LocalSimHost.ts src/sim/host/view.ts src/sim/host/mirror.ts src/sim/host/projection.ts src/sim/sim.worker.ts src/app/Game.ts src/dev/DevMode.ts src/dev/DevPanel.ts src/ui/HUD.ts src/render/Renderer.ts
  * @desc The host seam: the command protocol's shape and its runtime gate, a
  * LocalSimHost round trip, the developer overlay, replay equality across the
  * protocol, and the architecture guards that keep the presentation layers off
@@ -455,5 +455,55 @@ function findOpenSpot(host: SimHost): { x: number; z: number } {
   }
   throw new Error('no open spot on the map');
 }
+
+/** Strip comments so a guard matches code, not prose about a "play window". */
+function code(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+}
+
+test('the sim side of the wire has no DOM to lean on', () => {
+  // The runtime imports the whole simulation, so if *any* sim file reaches for a
+  // browser global the worker will not boot — and it would fail at import time,
+  // inside a thread with no stack trace worth reading. Cheaper to forbid here.
+  const offenders: string[] = [];
+  const forbidden = /\b(document|window|localStorage|requestAnimationFrame|HTMLElement|HTMLCanvasElement)\b/;
+  for (const file of tsFiles(`${SRC}/sim`)) {
+    if (file.endsWith('sim.worker.ts')) continue; // the bolt is allowed its `self`
+    if (forbidden.test(code(readFileSync(file, 'utf8')))) offenders.push(file.replace(SRC, 'src'));
+  }
+  assert.deepEqual(offenders, [], 'src/sim must stay headless: a Worker has no DOM, and the save path has no window');
+});
+
+test('the worker entry imports the runtime and nothing else', () => {
+  const source = code(readFileSync(`${SRC}/sim/sim.worker.ts`, 'utf8'));
+  const from = [...source.matchAll(/from\s+'([^']+)'/g)].map((m) => m[1]);
+  assert.deepEqual(from, ['./host/workerRuntime'], 'seven lines, one dependency: if this grows, the boundary has leaked');
+  assert.ok(!/new Worker|postMessage\s*\(\s*\{\s*kind:\s*'advance'/.test(source), 'and it drives nothing itself');
+});
+
+test('every query the view promises is answered by the mirror', () => {
+  // Adding a member to `SimQuery` without implementing it in `mirror.ts` would
+  // otherwise surface as a runtime `undefined` on the worker path only, on the
+  // day someone turns the worker on. The types already catch it in `Simulation`;
+  // this catches it in the *protocol*, which is where the cost is paid.
+  const view = readFileSync(`${SRC}/sim/host/view.ts`, 'utf8');
+  const pick = view.match(/export type SimQuery = Pick<\n\s*Simulation,\n([^>]*?)>;\n/s);
+  assert.ok(pick, 'the SimQuery pick list is still declared the documented way');
+  const names = (pick?.[1] ?? '')
+    .split('|')
+    .map((raw) => raw.trim().replace(/'/g, ''))
+    .filter((n) => n.length > 0);
+  assert.ok(names.length >= 8, `found ${names.length} queries, which is fewer than the view has`);
+  const mirror = code(readFileSync(`${SRC}/sim/host/mirror.ts`, 'utf8'));
+  const missing = names.filter((n) => !new RegExp(`\\b${n}\\s*[(:=]`).test(mirror));
+  assert.deepEqual(missing, [], 'mirror.ts must answer each of these');
+
+  // And the payload has to carry what the mirror needs to answer them: the
+  // fields a projection forgets are the fields a HUD shows as zero.
+  const projection = code(readFileSync(`${SRC}/sim/host/projection.ts`, 'utf8'));
+  for (const key of ['rovers', 'buildings', 'colonist', 'storage', 'pools', 'power', 'weather', 'alerts', 'deposits', 'history']) {
+    assert.match(projection, new RegExp(`\\b${key}:`), `the payload carries ${key}`);
+  }
+});
 
 await finish('sim/host');

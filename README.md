@@ -35,8 +35,17 @@ npm run test:sim        # every tests/sim suite
 npm run test:hud        # every tests/hud suite
 npm run test:unit       # the fast formula-level suites
 npm test -- power       # any suite whose name/desc matches "power"
-npm run test:list       # all 34 suites and what each covers
+npm run test:list       # all 35 suites and what each covers
 ```
+
+One URL flag is worth knowing while developing:
+
+- **`?worker=1`** runs the colony inside a module worker and renders from a
+  mirrored view (TDD §16). `?worker=0` forces the in-process host. The worker is
+  opt-in on purpose: the in-process path is what every suite and the mobile smoke
+  gate drive, so the seam lands green first. If a worker cannot start (a `file:`
+  page, a browser without module workers) the factory logs why and falls back
+  instead of showing a blank screen.
 
 ## How to survive
 
@@ -232,14 +241,21 @@ src/
     host/           the seam: SimCommand protocol, SimView read model, the host
       protocol.ts     every legal write, as plain serializable data
       view.ts         SimView — the read model, derived from Simulation by Pick
+      rules.ts        the siting + maintenance verdicts, shared by both sides
       applyCommand.ts the dispatch table (sim-side, worker-reusable)
-      LocalSimHost.ts the in-process host; a WorkerSimHost is the next step
+      overlays.ts     runtime edits as *data* (a name + ids), never closures
+      projection.ts   the view payload a host answers with
+      LocalSimHost.ts the in-process host: the live sim, narrowed to a view
+      mirror.ts       a SimView built from payloads + terrain from the seed
+      workerRuntime.ts the sim side of the wire (also driven headless in tests)
+      WorkerSimHost.ts the worker host: posts ticks, mirrors state, optimistic acks
+      createHost.ts   one factory, either transport (?worker=1 picks the worker)
   dev/              developer mode: runtime edit state (DevMode) + the panel (DevPanel)
   render/           three.js renderer (terrain, entities, day/night, overlays)
     particles/      true particle system (wind, storm grit, dust devils, rover trails)
   ui/               DOM HUD (vitals, alerts, inspectors, build palette)
   lib/              deterministic RNG + simplex noise
-tests/              34 headless suites (sim/*, hud/*, render/*, ui/*) + linked serial test
+tests/              35 headless suites (sim/*, hud/*, render/*, ui/*) + linked serial test
 scripts/            esbuild test runner: parallel scheduling, filters, --affected, --watch
 ```
 
@@ -250,12 +266,28 @@ scripts/            esbuild test runner: parallel scheduling, filters, --affecte
   `SimCommand` (TDD §16's "commands = player intent"). A view is not a sim — the
   compiler refuses `sim.step()`, `sim.placeBuilding()`, a field assignment — and
   `tests/sim/host.test.ts` greps the tree so no one re-imports the class anyway.
-  A `WorkerSimHost` therefore becomes an implementer of an interface rather than
-  a hunt for whoever was reaching into the world.
-- **The simulation is authoritative.** It has zero DOM and zero three.js
-  imports; rendering and UI only read it (`renderer.sync(view)` per frame), and
-  it runs on its own fixed-step clock whether the host is on this thread or on
-  another one.
+  Two hosts implement the interface today: `LocalSimHost` (the live sim, narrowed
+  to a view) and `WorkerSimHost` (a colony inside a module worker, mirrored on
+  this side). `?worker=1` picks the second one and nothing else in `app/`, `ui/`,
+  `render/` or `dev/` changes — the in-process host stays the default, so the
+  seam ships before the behaviour does.
+- **State crosses as data, in one shape.** Entities are spread whole into a
+  `ViewPayload` (a field-picked list always drifts), derived numbers are computed
+  where the smoothing lives, and `satisfaction` travels as entries so a payload
+  stays JSON-printable. Terrain is *not* sent: heights, slope and surface geology
+  are pure functions of the seed, so the mirror derives them locally — which is
+  what lets the build ghost answer `canPlace` synchronously by running the same
+  `evaluateSite` the simulation runs (one tick of lag, never a different rule).
+  Dev-mode overlays are a name plus entity ids applied by a sim-side registry,
+  because a worker cannot be handed a closure.
+- **The simulation is authoritative, and the frame loop sets its pace.** It has
+  zero DOM and zero three.js imports; rendering and UI only read it
+  (`renderer.sync(view)` per frame). Both hosts are stepped by the client — the
+  worker gets one `advance{dt}` per delivered frame rather than running its own
+  timer, because a timer in a hidden tab is throttled to about 1 Hz and the
+  colony would race ahead unseen. An advance still in flight banks its `dt`
+  instead of queueing, so a stutter delivers one bigger tick, which is exactly
+  what the fixed-substep accumulator already assumes.
 - **Determinism is enforced, not hoped for.** Seeded PRNG, integer tick counter,
   stable iteration order. The tick accumulator holds its remainder in
   `[0, step)` and telescopes, so 60 s delivered in 3 600 ragged browser frames
@@ -360,19 +392,29 @@ What is covered, by TDD §21's categories:
   callback fires, the inspectors, the mobile collapse and dismiss gestures, the
   alert history, autopause and the off-screen markers.
 
-`npm test` runs all 249 checks in isolated parallel child processes, with the
+`npm test` runs all 282 checks in isolated parallel child processes, with the
 longest suites launched first; on a two-worker machine it takes about one minute.
 `npm run test:serial` keeps the linked single-process run available for debugging.
 The renderer needs a GPU and is covered separately by the mobile smoke test.
 
 ## Next milestones (per GDD §16 / TDD §25)
 
-1. **Finish the Web Worker move** (TDD T1–T2 hardening). The seam is in:
-   `src/sim/host/` holds the command protocol, the read model and an
-   in-process host. Remaining is `WorkerSimHost` — a worker entry that owns the
-   `Simulation`, drives its own 20 Hz timer, and answers views on a
-   double-buffered snapshot (TDD §4's "render interpolates between sim
-   snapshots") — plus the one query that needs mirroring, `canPlace`, which the
-   build ghost calls on every mouse move.
+1. **Finish the Web Worker move** (TDD T1–T2 hardening). `WorkerSimHost` is in:
+   a module worker owns the `Simulation`, the client pumps it one `advance{dt}`
+   per frame, and the main thread renders a `ColonyMirror` fed by view payloads
+   plus a terrain derived from the seed the worker reported. It is selected with
+   `?worker=1` and off by default. Remaining, in the order that makes it worth
+   doing:
+   - run the mobile smoke gate against `?worker=1` in CI, then flip the default
+     once a release has lived with both paths green;
+   - make the ghost's placement verdict exact rather than one tick stale, by
+     having the `building/place` ack carry the refusal instead of the client
+     guessing (the refusal path already exists; it is the ack that must become
+     real);
+   - the 20 Hz worker timer plus render interpolation TDD §4 asks for, *if* the
+     frame-pumped version ever measures as the bottleneck — a change confined to
+     `WorkerSimHost`, which is the whole point of the seam;
+   - transferables for the terrain and `OffscreenCanvas` for the renderer
+     (TDD §16 P2/P3), each needing its own guard.
 2. **Prototype 4+** — research, procedural exploration, supply drops, rover
    recovery missions, and more colonists.

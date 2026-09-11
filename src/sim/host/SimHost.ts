@@ -6,35 +6,22 @@
  * `SimHost` is the seam that replaces that: a read model in, a command stream
  * out, and the tick loop owned by whoever implements the interface.
  *
- * Only {@link LocalSimHost} exists today. That is deliberate: the extraction is
- * worth landing on its own, because it converts "the sim is decoupled" from an
- * aspiration in a README into a type the compiler enforces. A `WorkerSimHost`
- * then implements this same interface by moving `step()` into a timer inside the
- * worker and turning `send()` into `postMessage`, and nothing downstream of that
- * change needs to know it happened.
+ * Both {@link LocalSimHost} and {@link WorkerSimHost} implement it, and neither is
+ * special-cased by the callers below. That is the payoff of the extraction: it
+ * converted "the sim is decoupled" from an aspiration in a README into a type the
+ * compiler enforces, and the worker host then only had to *implement* something
+ * that was already the only door.
+ *
+ * What the interface deliberately refuses to be: synchronous about state that
+ * lives on the other side of a port. `request` is the one place a caller may want
+ * an answer before a frame, and it is documented as optimistic there; `canPlace`
+ * is not on this interface at all, because a placement preview cannot wait for a
+ * round trip — it is served by the mirrored view running the same rule locally.
  */
 
 import type { SimAck, SimCommand } from './protocol';
-import type { SimSnapshot, SimView, SimWritable } from './view';
-import type { SimLogEvent } from './view';
-
-/**
- * A runtime overlay: code that edits live state every step, from outside the
- * sim, and is therefore saved nowhere. Developer mode's keep-battery-full pin is
- * the only one today (TDD §22), and the contract it depends on — "the panel's
- * modifiers never reach the save file" — is kept by the fact that overlays are
- * registered on the *host*, never stored in the world.
- *
- * The point of routing overlays through the host rather than a per-frame call in
- * `Game.loop` is that a worker host runs the same overlay *inside the worker*,
- * right after each tick. Overlay code must therefore be DOM-free and importable
- * from a sim context; {@link SimWritable} is what enforces that it cannot reach
- * for anything else.
- */
-export interface SimOverlay {
-  readonly name: string;
-  afterStep(sim: SimWritable): void;
-}
+import type { SimSnapshot, SimView, SimLogEvent } from './view';
+import type { OverlayState } from './overlays';
 
 /** How the host reaches the sim — surfaced so UI can be honest about latency. */
 export type SimTransport = 'in-process' | 'worker';
@@ -48,8 +35,10 @@ export interface SimHost {
 
   /**
    * Advance the world by `frameDt` game seconds. An in-process host runs the
-   * fixed substeps here; a worker host ignores this call because its own timer
-   * drives the tick, and the render loop merely asks for the newest view.
+   * fixed substeps here and the view is already current on return; a worker host
+   * posts the advance and reports back when it lands, so its view is one round
+   * trip behind. Neither runs the world on its own clock while the tab is
+   * backgrounded, because the *frame loop* is what asks for time.
    */
   step(frameDt: number): void;
 
@@ -58,10 +47,11 @@ export interface SimHost {
 
   /**
    * Intent whose result the caller needs *now* — a fabricated entity's id, the
-   * level an upgrade landed on. An in-process host answers from the sim
-   * directly; a worker host must answer optimistically from its mirrored view
-   * and let the next snapshot correct it. Kept separate from `send` so the
-   * places that genuinely depend on a reply stay few and visible.
+   * level an upgrade landed on. An in-process host answers from the sim directly;
+   * a worker host answers optimistically from the ids the sim has announced and
+   * lets the next payload correct it. Kept separate from `send` so the places
+   * that genuinely depend on a reply stay few and visible — and so a refusal
+   * across a port can only ever be a no-op, never a lie about the world.
    */
   request(command: SimCommand): SimAck;
 
@@ -71,9 +61,18 @@ export interface SimHost {
    */
   drainEvents(): SimLogEvent[];
 
-  /** Register an overlay; re-registering the same name replaces it. */
-  attachOverlay(overlay: SimOverlay): void;
-  detachOverlay(name: string): void;
+  /**
+   * Publish the runtime overlays to apply after every step. An overlay edits live
+   * state from outside the sim and is therefore saved nowhere — developer mode's
+   * keep-battery-full pin is the only one today (TDD §22), and "never reaches
+   * the save file" is a property of *this* call: the grips are held on the host,
+   * and a snapshot is taken from the world without them.
+   *
+   * State rather than code, because a worker cannot accept a closure. The names
+   * and their behaviour live on the sim side (`host/overlays.ts`); a name with no
+   * implementation is ignored, so an older worker never throws at a newer panel.
+   */
+  syncOverlays(state: OverlayState): void;
 
   /**
    * Serialize the colony, and restore one. Asynchronous by contract: the whole

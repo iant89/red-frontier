@@ -17,14 +17,15 @@ import { Simulation } from '../Simulation';
 import type { SimAck, SimCommand } from './protocol';
 import { decodeCommand } from './protocol';
 import { applyCommand } from './applyCommand';
-import type { SimHost, SimOverlay } from './SimHost';
+import type { SimHost } from './SimHost';
+import { runOverlays, type OverlayState } from './overlays';
 import type { SimBootParams, SimLogEvent, SimSnapshot, SimView } from './view';
 
 export class LocalSimHost implements SimHost {
   readonly transport = 'in-process' as const;
 
   private readonly sim: Simulation;
-  private readonly overlays = new Map<string, SimOverlay>();
+  private overlays: OverlayState = {};
   private disposed = false;
 
   constructor(sim: Simulation) {
@@ -43,8 +44,9 @@ export class LocalSimHost implements SimHost {
     if (this.disposed) return;
     this.sim.step(frameDt);
     // Overlays ride the same cadence they always did — once per delivered
-    // frame, so a pinned battery keeps its grip while the world runs.
-    for (const overlay of this.overlays.values()) overlay.afterStep(this.sim);
+    // frame, so a pinned battery keeps its grip while the world runs. Identical
+    // code to the worker's, which is the entire reason they are functions here.
+    runOverlays(this.sim, this.overlays);
   }
 
   send(command: SimCommand): void {
@@ -59,12 +61,8 @@ export class LocalSimHost implements SimHost {
     return this.sim.drainEvents();
   }
 
-  attachOverlay(overlay: SimOverlay): void {
-    this.overlays.set(overlay.name, overlay);
-  }
-
-  detachOverlay(name: string): void {
-    this.overlays.delete(name);
+  syncOverlays(state: OverlayState): void {
+    this.overlays = state;
   }
 
   async requestSnapshot(): Promise<SimSnapshot> {
@@ -77,7 +75,7 @@ export class LocalSimHost implements SimHost {
 
   dispose(): void {
     this.disposed = true;
-    this.overlays.clear();
+    this.overlays = {};
   }
 
   /** The one place the protocol's runtime gate runs, for every host flavour. */

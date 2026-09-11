@@ -14,6 +14,7 @@
  */
 
 import { World } from './World';
+import { evaluateSite, maintenanceNeed } from './rules';
 import type { Deposit } from './World';
 import { clamp } from '../lib/rng';
 import {
@@ -498,7 +499,18 @@ export class Simulation {
 
   // ------------------------------------------------- derived capacities ----
 
-  /** Recompute bulk + fluid capacity from whatever is online. */
+    /**
+   * The id the next created entity will carry. Public and read-only because the
+   * *client* needs it: an id-allocating command sent to a worker must be
+   * answered before the round trip finishes, and the only honest way to do that
+   * is to know the number the sim is going to hand out. `tests/sim/worker.test.ts`
+   * pins that the reservation is right, and that a wrong one is harmless.
+   */
+  get nextEntityId(): number {
+    return this.nextId;
+  }
+
+/** Recompute bulk + fluid capacity from whatever is online. */
   recomputeCapacities(): void {
     let cap = BASE_STORAGE_PER_RESOURCE;
     const fluid = { ...POD_FLUID_CAPACITY };
@@ -1164,11 +1176,7 @@ export class Simulation {
    * truth the HUD and the tap-to-order gesture both read.
    */
   needsMaintenance(buildingId: number): 'repair' | 'clean' | null {
-    const b = this.buildingById(buildingId);
-    if (!b || b.state !== 'online') return null;
-    if (b.health < BUILDING_MAX_HEALTH - 0.5) return 'repair';
-    if (BUILDINGS[b.kind].generation === 'solar' && b.cleanliness < 0.995) return 'clean';
-    return null;
+    return maintenanceNeed(this.buildingById(buildingId));
   }
 
   orderColonist(order: ColonistOrder): void {
@@ -1204,26 +1212,17 @@ export class Simulation {
   }
 
   // -------------------------------------------------------- placement ----
+  /**
+   * The siting rule lives in `rules.ts` so the mirrored view can run the *same*
+   * function against the same seed. This is the authoritative call: it sees the
+   * live world, and `building/place` re-checks it before anything is sited.
+   */
   canPlace(kind: BuildingKind, x: number, z: number): string | null {
-    if (!this.world.inBounds(x, z)) return 'Outside the playable region.';
-    const def = BUILDINGS[kind];
-    if (!this.world.canDrive(x, z)) return 'No safe approach — drop-off or unreachable.';
-    const slope = this.world.slopeAt(x, z);
-    const maxSlope = def.pressurized ? 0.15 : 0.24;
-    if (slope > maxSlope || !this.world.canBuild(x, z)) return 'Terrain too steep here.';
-    if (Math.hypot(SPAWN_X - x, SPAWN_Z - z) < def.radius + POD_RADIUS + 1.5)
-      return 'Too close to the landing pod.';
-    for (const b of this.buildings) {
-      const d = Math.hypot(b.x - x, b.z - z);
-      if (d < def.radius + BUILDINGS[b.kind].radius + 1.5)
-        return 'Too close to an existing structure.';
-    }
-    for (const dep of this.world.deposits) {
-      if (dep.amount <= 0) continue;
-      if (Math.hypot(dep.x - x, dep.z - z) < dep.radius + def.radius + 2)
-        return 'Cannot build on a resource deposit.';
-    }
-    return null;
+    return evaluateSite(kind, x, z, {
+      ground: this.world,
+      buildings: this.buildings,
+      deposits: this.world.deposits,
+    });
   }
 
   placeBuilding(kind: BuildingKind, x: number, z: number): Building | null {
