@@ -28,6 +28,7 @@ import {
   POWER_TIER_LABELS,
   SUIT_O2_CAPACITY,
   SOL_SECONDS,
+  SPEEDS,
   BUILDING_MAX_HEALTH,
   devLevelMul,
 } from '../sim/config';
@@ -1036,9 +1037,20 @@ export class HUD {
     }
   }
 
+  /**
+   * Select a speed by index into `SPEEDS`.
+   *
+   * Clamped, because the unclamped version turned an out-of-range index into a
+   * frozen colony with no symptom at all: `SPEEDS[4]` is `undefined`, the frame
+   * loop's `speed > 0` test is false for `undefined`, and the world quietly stops
+   * ticking while every button still looks right. The HUD's own buttons cannot
+   * produce that, but a caller in a test or a script can — and a game that stops
+   * without saying so is the worst possible failure to leave available.
+   */
   setSpeed(idx: number): void {
-    this.speedIdx = idx;
-    this.speedBtns.forEach((b, i) => b.classList.toggle('active', i === idx));
+    const last = Math.max(0, SPEEDS.length - 1);
+    this.speedIdx = Number.isFinite(idx) ? Math.min(Math.max(Math.round(idx), 0), last) : 0;
+    this.speedBtns.forEach((b, i) => b.classList.toggle('active', i === this.speedIdx));
   }
 
   // ------------------------------------------------------------ vitals ----

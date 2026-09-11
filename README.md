@@ -42,10 +42,22 @@ One URL flag is worth knowing while developing:
 
 - **`?worker=1`** runs the colony inside a module worker and renders from a
   mirrored view (TDD §16). `?worker=0` forces the in-process host. The worker is
-  opt-in on purpose: the in-process path is what every suite and the mobile smoke
-  gate drive, so the seam lands green first. If a worker cannot start (a `file:`
-  page, a browser without module workers) the factory logs why and falls back
-  instead of showing a blank screen.
+  opt-in on purpose: the in-process path is what every suite drives, so the seam
+  lands green first. If a worker cannot start (a `file:` page, a browser without
+  module workers) the factory logs why and falls back instead of showing a blank
+  screen. Both transports are gated: `scripts/worker-smoke.mjs` boots the game in
+  headless Chromium and asserts the boundary — that the page got the transport it
+  asked for, that orders and placements cross, that the ghost's verdict is the
+  sim's verdict, that a dev pin holds inside the worker and never reaches the
+  snapshot — and CI runs it twice, once per `SMOKE_QUERY`, so a divergence between
+  the two fails the build rather than a playthrough:
+
+  ```bash
+  npm run build && npx vite preview --port 5199 --strictPort &
+  node scripts/setup-playwright.mjs        # or: npm i --no-save playwright
+  node scripts/worker-smoke.mjs            # the worker path
+  SMOKE_QUERY= node scripts/worker-smoke.mjs   # the same assertions, in-process
+  ```
 
 ## How to survive
 
@@ -392,7 +404,7 @@ What is covered, by TDD §21's categories:
   callback fires, the inspectors, the mobile collapse and dismiss gestures, the
   alert history, autopause and the off-screen markers.
 
-`npm test` runs all 282 checks in isolated parallel child processes, with the
+`npm test` runs all 283 checks in isolated parallel child processes, with the
 longest suites launched first; on a two-worker machine it takes about one minute.
 `npm run test:serial` keeps the linked single-process run available for debugging.
 The renderer needs a GPU and is covered separately by the mobile smoke test.
@@ -405,8 +417,9 @@ The renderer needs a GPU and is covered separately by the mobile smoke test.
    plus a terrain derived from the seed the worker reported. It is selected with
    `?worker=1` and off by default. Remaining, in the order that makes it worth
    doing:
-   - run the mobile smoke gate against `?worker=1` in CI, then flip the default
-     once a release has lived with both paths green;
+   - ~~gate the worker path in CI~~ — done: `worker-smoke` runs both transports on
+     every pull request. Remaining is to **flip the default**, once a release has
+     lived with both paths green, and then to delete the fallback;
    - make the ghost's placement verdict exact rather than one tick stale, by
      having the `building/place` ack carry the refusal instead of the client
      guessing (the refusal path already exists; it is the ack that must become
