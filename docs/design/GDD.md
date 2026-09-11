@@ -1,173 +1,315 @@
-# Red Frontier — Game Design Document (reference)
+# Red Frontier — Game Design Document
 
-Source: Ian Thomas's shared Dropbox (`Red_Frontier_GDD.pdf`, v1.0). Captured as working reference.
+Source: Ian Thomas's shared Dropbox (`Red_Frontier_GDD.pdf`, v1.0), realigned to the
+live codebase on branch `arena/01a091e4-red-frontier` (package `0.3.0`, README
+**Prototype 4** + first exploration slice).
 
 **Tagline:** Mars • 2066 | Real-Time Strategy • Survival • Automation • Exploration
 **Design premise:** *One human. A handful of machines. An entire planet that does not want you there.*
+
+---
+
+## 0 — Implementation status (living)
+
+This document is still the **design target**. Section 0 is the honest map of what
+the browser build actually does today versus what the later vertical slices still
+owe. Status vocabulary:
+
+| Tag | Meaning |
+|---|---|
+| **IN** | Shipped and gated by tests / playable in the build |
+| **PARTIAL** | Present in a reduced form; design depth still open |
+| **OUT** | Not in `src/` yet — still a design commitment |
+
+**Where the build sits on the §16 roadmap:** **P1–P4 are IN**, plus the first slice
+of **P6** (POIs, SALVAGE, supply drops). **P5** (refining / manufacturing / multi-
+utility networks) and **P7–P8** are OUT. TDD §25 **T1–T5** are IN; **T6** is PARTIAL.
+
+| Pillar / system | Status | Notes |
+|---|---|---|
+| Terrain + orbit camera + day/night | **IN** | Seeded local window on a Mars globe landing site |
+| One human colonist + EVA suit O₂ | **IN** | Single crew; skills / multi-colonist OUT |
+| Rovers (mining, utility, cargo) | **IN** | Scout kind still OUT |
+| Mining, inventory, staged construction | **IN** | Materials Reserved + assembly; full stage names simplified |
+| Power grid (solar / battery / RTG / priorities) | **IN** | Pure resolver, tier shedding 0–3 |
+| Water → oxygen → food life support | **IN** | Fluids in building tanks; no field-fluid logistics |
+| Weather, dust, storms, degradation | **IN** | Devil / regional / severe / planetary + forecast |
+| Rover task queue, haul routes, automation rules | **IN** | Garage charge / service / assemble |
+| POIs, SALVAGE, Earth supply drops | **PARTIAL** | Discover + strip + bury clock; no survey confidence / narrative logs |
+| Refining, manufacturing, component recipes | **OUT** | Ore is stockpiled; no Refinery / smelting chain |
+| Water / atmosphere / heat / data / logistics nets | **OUT** | Power is the only utility network |
+| Research tech tree | **OUT** | No `research` symbol in `src/` |
+| Multi-colonist skills / medicine | **OUT** | Architecture hooks only (one `Colonist`) |
+| Nuclear / underground / closed-loop endgame | **OUT** | RTG Array is a small baseload stand-in, not a reactor |
+| Desktop + mobile UI, alerts, save/load | **IN** | localStorage slots; autosave |
+| Developer mode panel | **IN** | Runtime-only overlays; fabrications save |
+
+**MVP feature set (§16) — scorecard**
+
+| MVP item | Status |
+|---|---|
+| Procedural local Mars terrain, day/night, basic weather | **IN** |
+| One human | **IN** |
+| Two rovers (start); three kinds buildable | **IN** (no Scout) |
+| Resources: iron, regolith, water (ice), silicon, aluminum | **IN** |
+| Buildings: habitat, solar, battery, water extractor, oxygen generator, greenhouse, storage, workshop | **IN** (+ garage, RTG Array beyond MVP) |
+| Sim: mining, construction, electricity, water, oxygen, food | **IN** |
+| Environment: dust accumulation, dust storm, wind damage | **IN** |
+| UI: responsive desktop + mobile | **IN** |
+| Persistence: local save/load | **IN** (localStorage, versioned v3→v7) |
+
+**Deliberate design locks already enforced in code** (do not "fix" without a design change):
+
+- Bulk solids ride rovers; **fluids never do**. Supply drops contain no water/food cargo.
+- Storage is **per-resource**, not one shared pool.
+- Soft failure: rovers strand and get jump-started; most disasters are recoverable.
+- Developer-mode *modifiers* never enter the save; *fabricated objects* do.
+
+---
 
 ## 01 — Executive Summary & Design Pillars
 
 - Genre: RTS / survival / automation / exploration
 - Platform: modern desktop + mobile web browsers
 - Setting: Mars, 2066
-- Perspective: 3D isometric / freely rotatable 3/4 camera
-- Single-player at launch
+- Perspective: 3D isometric / freely rotatable 3/4 camera — **IN** (orbit rig)
+- Single-player at launch — **IN** (multiplayer still out of scope)
 - Player = humanity's first long-duration Mars colonist, with autonomous rovers and constrained inventory.
 - Central fantasy: engineering — take a fragile outpost and turn it into a resilient, self-sustaining civilization (not empire building).
 - Pillars: **Survival**, **Engineering**, **Automation**, **Exploration**.
 - Core loop: Explore → Survey → Extract → Process → Build → Maintain → Automate → Expand → Explore farther.
+  - **IN today:** Explore (partial) → Extract → Build → Maintain → Automate.
+  - **OUT today:** Survey confidence, Process/refine, Expand beyond one human / one claim window.
 
 ## 02 — Core Gameplay & Simulation Systems
 
-- Interacting systems; failure propagates (emergent stories).
+- Interacting systems; failure propagates (emergent stories). — **PARTIAL** (power ↔ weather ↔ life support ↔ rover work; full industrial cascade waits on P5)
 - Dependency chain: Weather → Solar/Terrain/Damage → Power/Mining/Maintenance → Life Support/Industry → Food/Population → Labor → Automation → Expansion.
-- Time: Martian sols (≈24h 39m 35s). Pause, 1×, 2×, 4× speed. Fixed timestep independent of rendering.
-- Survival systems: electricity (network w/ gen/storage/loads/priorities/failures), water (extract/store/purify/distribute/recycle), oxygen (resource + atmosphere property in pressurized structures), food (controlled agriculture), temperature, radiation, maintenance/component wear.
-- Cascading failure example: dust storm → solar drops → batteries drain → water pumps shut down → greenhouse irrigation stops → food declines. Player picks emergency power priorities, sends rover to repair exposed array.
+- Time: Martian sols (≈24h 39m 35s). Pause, 1×, 2×, 4× speed. Fixed timestep independent of rendering. — **IN** (`SIM_TICK` 20 Hz; sol = 240 game seconds at 1×)
+- Survival systems:
+  - Electricity (network w/ gen/storage/loads/priorities/failures) — **IN**
+  - Water (extract/store/…/recycle) — **PARTIAL** (extract → tank → consume/recycle in habitat; no multi-node water pipe network)
+  - Oxygen — **PARTIAL** (tank resource + pressurized flag; no per-volume atmosphere sim / breach propagation)
+  - Food (controlled agriculture) — **PARTIAL** (single greenhouse process; no crop varieties)
+  - Temperature, radiation — **OUT**
+  - Maintenance / component wear — **PARTIAL** (building health + cleanliness + rover drivetrain; no part-level inventory)
+
+Cascading failure example (dust storm → solar drops → batteries drain → …) — **IN** for the power and exposure path; irrigation stoppage follows if the extractor browns out.
 
 ## 03 — Resources & Industrial Economy
 
-Raw resources: Regolith (construction/shielding/concrete), Iron ore (steel), Aluminum ore, Silica (glass/silicon), Magnesium (alloys), Sulfur (chemicals), Water ice (water/oxygen/agriculture), Carbon-bearing material (industrial chem), Rare minerals (advanced mfg).
+**Bulk resources (rover cargo) — IN**
 
-Refined: Steel←Iron, Aluminum←Aluminum ore, Glass←Silica, Silicon←Silica, Ceramics←Minerals, Concrete←Regolith+binders, Carbon composites←Carbon+chemicals.
+| Id | Role |
+|---|---|
+| Regolith | construction / shielding |
+| Iron ore | structures / machinery (smelting still OUT) |
+| Aluminum ore | frames / trusses (smelting still OUT) |
+| Silica | glass / silicon feedstock (refining still OUT) |
+| Water ice | bridge into the fluid economy via Water Extractor |
 
-Industrial components (manufactured locally, data-driven recipes): pipes, wires, glass panels, motors, pumps, valves, circuit boards, battery cells, sensors, computers, solar cells.
+GDD-original extras (Magnesium, Sulfur, carbon-bearing, rare minerals) — **OUT**.
 
-Rep chain: Iron deposit → Mining → Iron ore → Crushing → Smelting → Steel → Component manufacturing → Construction.
+**Fluids (building tanks only) — IN:** water, oxygen, food.
+
+**Refined materials & industrial components** (steel, glass, pipes, boards, …) — **OUT**.
+Ore the rovers haul is stockpiled and spent as construction cost directly. The
+replication chain *Iron deposit → mine → crush → smelt → steel → components →
+build* has no middle yet — that is **P5**.
 
 ## 04 — Buildings & Infrastructure
 
-Buildings are functional machines: construction cost, utility interfaces, operating loads, wear, failure modes, maintenance.
+Buildings are functional machines: construction cost, power interfaces, operating
+loads, wear, failure modes, maintenance. — **PARTIAL** (power + process + exposure + health/dirt; no multi-utility ports)
 
-| Building | Power | Function |
-|---|---|---|
-| Emergency Habitat | 5 kW | initial shelter / life support |
-| Solar Panel | 0 kW | generation |
-| Battery Bank | 0.2 kW | energy storage |
-| Water Extractor | 18 kW | ice extraction |
-| Oxygen Generator | 12 kW | O2 production |
-| Greenhouse | 8 kW | food |
-| Warehouse | 1 kW | storage |
-| Workshop | 5 kW | repair / fabrication |
-| Refinery | 35 kW | material processing |
-| Laboratory | 10 kW | research |
-| Rover Garage | 3 kW | vehicle service |
-| Repair Bay | 8 kW | advanced maintenance |
-| Nuclear Reactor | Variable | reliable base-load power |
+| Building | Power (draw / gen) | Status | Function in build |
+|---|---|---|---|
+| Emergency / Habitat | 5 kW draw | **IN** | pressurized shelter, 55% water reclaim, fluid tanks |
+| Solar Array | 0 / 28 kW peak | **IN** | sun-tracking generation |
+| Battery Bank | 0.2 kW idle / 200 kWh | **IN** | energy storage |
+| Water Extractor | 18 kW | **IN** | ice → water |
+| Oxygen Generator | 12 kW | **IN** | water → O₂ |
+| Greenhouse | 8 kW | **IN** | water + light → food |
+| Warehouse | 1 kW | **IN** | +600 kg per bulk resource |
+| Workshop | 5 kW | **IN** | repair / nearby build speed (light role) |
+| Rover Garage | 3 kW | **IN** (beyond original table) | 2× charge, drivetrain service, assemble rovers |
+| RTG Array | 0 / 5 kW baseload | **IN** (stand-in) | storm-proof trickle power |
+| Refinery | 35 kW | **OUT** | material processing |
+| Laboratory | 10 kW | **OUT** | research |
+| Repair Bay | 8 kW | **OUT** | advanced maintenance |
+| Nuclear Reactor | variable | **OUT** | base-load power |
 
-Utility networks: Power, Water, Atmosphere, Waste, Data, Logistics. Infrastructure overlays (power/water/oxygen/heat/comms/logistics) toggleable; highlight broken links/overloaded segments.
+Landing pod (not a blueprint): 14 kW RTG, 90 kWh battery, starter warehouse + life support — **IN**.
+
+Utility networks: Power **IN**; Water / Atmosphere / Waste / Data / Logistics pipe networks **OUT**.
+Infrastructure overlays toggleable — **PARTIAL** (`none` / `power` / `life` / `weather`).
 
 ## 05 — Rovers & Automation
 
-| Rover | Cargo | Speed | Battery | Role |
+| Rover | Cargo | Battery | Status | Role in build |
 |---|---|---|---|---|
-| Scout | 100 kg | High | 20 kWh | exploration / mapping |
-| Utility | 500 kg | Medium | 40 kWh | general work |
-| Mining | 1,500 kg | Low | 80 kWh | drilling / extraction |
-| Cargo | 3,000 kg | Low | 120 kWh | long-distance logistics |
+| Scout | 100 kg | 20 kWh | **OUT** | exploration / mapping |
+| Utility | 500 kg | 40 kWh | **IN** | general work / build |
+| Mining | 1,500 kg | 80 kWh | **IN** | drilling / extraction |
+| Cargo | 3,000 kg | 120 kWh | **IN** | long-haul logistics |
 
-Task system: MOVE, MINE, UNLOAD, HAUL, BUILD, REPAIR, CLEAN, SCOUT, SALVAGE, RECOVER, RETURN, CHARGE, WAIT — first-class, queueable/repeatable.
-Automation rules (player-authored): IF battery <20% → return to charger; IF cargo >90% → return to warehouse; IF storm warning → return to shelter. Automation is a progression mechanic.
-Rover failure: wheel/motor/battery/sensor/navigation/dust failures; stranded (recoverable) rather than destroyed → recovery expeditions.
+Task system — **IN** (first-class, queueable, some repeatable):
+
+| Task | Status |
+|---|---|
+| MOVE, MINE, UNLOAD, WAIT | **IN** |
+| BUILD (construct), REPAIR, CLEAN | **IN** |
+| RECOVER (jump-start stranded) | **IN** |
+| SALVAGE | **IN** |
+| CHARGE | **IN** (implicit park-at-charger / garage behaviour + charge-floor rule) |
+| HAUL | **IN** as repeating mine route + auto-haul rule |
+| SCOUT | **OUT** |
+| RETURN | **PARTIAL** (charge-floor / storm-shelter recalls) |
+
+Automation rules (player-authored per rover) — **IN:** auto-haul, auto maintenance (repair/clean), storm sheltering, auto-rescue, charge floor 10–60%. Deposit reservations spread the fleet. Explicit player orders always win.
+
+Rover failure: drivetrain wear (soft slowdown), battery-flat strand + yellow strobe, jump-start recovery — **IN**. Wheel/motor/sensor part failures as distinct systems — **OUT**.
 
 ## 06 — Mars World Generation & Exploration
 
-Large local region around landing site, streaming chunks (not whole planet).
+Large local region around landing site — **IN** as a seeded playable square
+(`worldHalf` from difficulty sizes; default-scale ~640 m half-extent), not a
+whole-planet streamer. Landing site is picked on a compact Mars globe
+(biomes, MOLA-scale elevation) before the local window is generated.
 
-| Terrain | Rover difficulty | Value |
+| Terrain idea | Status |
+|---|---|
+| Flat / rocky plains, craters, canyons, dunes-ish local geology | **PARTIAL** via globe biome + local height/slope/material |
+| Ice field / lava tube as special rules | **PARTIAL** (ice-cave POI is salvage + water-ish scrap, not a ruleset) |
+| Chunk streaming | **OUT** (fixed window; terrain is a pure function of seed) |
+
+Procedural deposits (size/concentration) — **IN**. Survey confidence — **OUT** (amounts are exact once found).
+
+POIs — **PARTIAL**:
+
+| Kind | In build | Behaviour today |
 |---|---|---|
-| Flat plain | Low | general resources |
-| Rocky plain | Medium | high mineral potential |
-| Dunes | High | low resources / mobility hazard |
-| Crater | Medium | geological interest |
-| Canyon | High | high resource potential |
-| Ice field | Medium | major water source |
-| Lava tube | Very high | potential protected habitat |
+| Wrecked rover | yes | salvage scrap (not repairable back into fleet) |
+| Abandoned mission | yes | salvage |
+| Meteorite | yes | salvage (iron-heavy) |
+| Ice cave | yes | salvage |
+| Science cache | yes | salvage |
+| Settlement site | yes | marker only — nothing to haul |
+| Supply drop | yes | scheduled Earth cargo, 3-sol burial clock (×3 in storm) |
 
-Procedural deposits: size/concentration/depth/extraction difficulty. Survey improves confidence (estimates before).
-POIs: abandoned missions, repairable/salvageable old rovers, meteorites/geological samples, ice caves/lava tubes, scientific equipment/data caches, Earth supply containers, ideal future settlement spots.
-Philosophy: map begins mostly unknown; exploration expands options (not every tile = reward).
+Philosophy holds: map begins mostly unknown; sites appear within ~55 m discovery radius; nothing inside ~150 m of the pad.
 
 ## 07 — Weather, Climate & Environmental Hazards
 
-| Event | Visibility | Solar | Damage | Effect |
-|---|---|---|---|---|
-| Dust devil | Reduced | Minor ↓ | Localized | short tactical disruption |
-| Regional storm | Low | Major ↓ | Moderate | logistics risky |
-| Severe storm | Very low | Severe ↓ | High | external work dangerous |
-| Planetary dust event | Extreme | Very severe ↓ | Extended | colony-wide crisis |
+| Event | Status |
+|---|---|
+| Dust devil | **IN** |
+| Regional storm | **IN** |
+| Severe storm | **IN** |
+| Planetary dust event | **IN** |
 
-Weather variables: wind speed/direction, dust density, temperature, solar irradiance, visibility, atmospheric pressure, radiation/SPE.
-Forecasting: early uncertain; improved by comms/science/weather sensors.
-Storm prep: charge batteries, shelter rovers, clean arrays, secure externals, fill water/O2 reserves, isolate damaged structures, shut down non-essential industry.
+Weather variables in sim: wind, dust density, solar irradiance (via dust transmission + sun), visibility, storm intensity — **IN**. Atmospheric pressure / radiation / SPE as gameplay — **OUT**.
+
+Forecasting with lead time — **IN** (noisy schedule + HUD forecast). Sensors/research reducing uncertainty — **OUT**.
+
+Storm prep levers that work today: charge batteries, shelter rovers (auto rule), clean arrays, power priorities. — **IN**
 
 ## 08 — Agriculture, Life Support & Population
 
-- Atmosphere: pressurized volumes track pressure, O2%, CO2, temperature, humidity, volume. Breach → pressure loss → escalation.
-- Water loop: Ice extraction → purification → storage → habitation/agriculture → wastewater → reclamation (late-game very high recovery).
-- Food loop: humans consume food → biological waste processed → nutrients recovered → crops grow → harvested. Crops have distinct water/light/temp/nutrient needs.
-- Population: begins with 1 human; later colonists add labor/expertise but increase O2/water/food/space/medical demand.
-- Skills: Engineering (electrical/mechanical/construction), Science (geology/biology/research), Operations (logistics/machinery/rover control), Agriculture, Medical.
+- Atmosphere: pressurized flag on habitat/greenhouse/pod; colonist must be indoors to live long-term. Full volume gas mix / breach cascade — **OUT**.
+- Water loop: ice haul → extractor → tanks → habitation/agriculture → habitat reclaim (~55%). Multi-stage purification / wastewater pools — **OUT**.
+- Food loop: greenhouse process (water + light → food); colonist consumes per sol. Crop varieties / nutrients — **OUT**.
+- Population: **exactly one human**. Further colonists — **OUT**.
+- Skills ladder — **OUT**.
+- Suit O₂ on EVA with fatal-path refusal — **IN**.
 
 ## 09 — Research & Progression
 
-- Performed via physical laboratories; needs data, samples, power, infrastructure. Tech solves problems the player encountered.
-- Tiers: 1 Survival (basic solar, water extraction, oxygen, agriculture, rover repair); 2 Industrialization (steel, aluminum, glass, batteries, automated mining); 3 Automation (rover scheduling, hauling, solar cleaning, repair robotics); 4 Advanced colony (nuclear, underground, advanced agriculture); 5 Independence (electronics mfg, advanced robotics, closed-loop ecology); 6 Endgame (terraforming research, planetary engineering, megastructures).
-- Arc: Survival → Stability → Industrialization → Automation → Expansion → Colonization → Independence.
+Entire section — **OUT**. No laboratories, no tech DAG, no unlock gates beyond "can you afford and power it". Progression today is *spatial and logistical*: more power, more storage, more rovers, farther POIs.
+
+When P7 lands, tiers 1–6 in the original GDD remain the target arc:
+Survival → Industrialization → Automation → Advanced colony → Independence → Endgame.
 
 ## 10 — Supply Drops, Earth & Narrative
 
-- Cargo missions arrive at uncertain locations, marked by transponders; player decides to dispatch rovers/human before storms bury cargo.
-- Cargo types: food/seeds, electronics, medical, batteries, replacement parts, scientific equipment, specialized machinery, experimental tech.
-- Earth comms have realistic delay — submit requests, not instant orders.
-- Narrative primarily environmental: logs, radio messages, abandoned hardware, discoveries, milestones. No conventional enemy armies; physics/weather/distance/equipment failure/scarcity are antagonists.
+- Cargo missions with uncertain landing, transponder, burial pressure — **IN**
+  (first drop 2–4 sols, then every 5–9; 30–85% of the way to the claim edge; 3-sol burial clock, storm-accelerated).
+- Cargo types in build: battery cells, replacement parts, specialised machinery, scientific equipment (bulk + cells). No fluids.
+- Earth comms delay / request board — **OUT**.
+- Narrative layer (logs, radio, milestone stories) — **OUT** (alerts + event log only).
 
 ## 11 — UI/UX & Accessibility
 
-- Desktop: left click select, right click context order, drag box-select, wheel zoom, middle drag pan, hotkeys.
-- Mobile: tap select, tap terrain context movement/placement, long press command menu, pinch zoom, two-finger pan/rotate.
-- Alerts: Critical (e.g. habitat pressure falling) / Warning (solar needs cleaning) / Information (supply drop detected) / Opportunity (new ice deposit surveyed).
-- Accessibility: scalable text, high-contrast alert mode, color-independent icons, reduced motion, pause-friendly, 44px+ touch targets, tooltips.
+- Desktop: left select, right context, drag pan/rotate, wheel zoom, hotkeys — **IN**
+- Mobile: tap select, long-press context, pinch zoom, two-finger pan — **IN**
+- Alerts: Critical / Warning / Information / Opportunity — **IN** (condition bus ≠ event log)
+- Accessibility (scalable text, high-contrast, reduced motion, 44px targets) — **PARTIAL** (pause-friendly, touch targets, icon+text alerts; full a11y pass still open)
+- Mission wizard (difficulty, world size, landing site on globe) — **IN**
+- Main menu / load game / build palette / inspectors / fleet / garage UI — **IN**
 
 ## 12 — Visual, Audio & Presentation
 
-- Visual target: OSRS clarity/stylization + modern rendering quality; not photorealism.
-- Low-poly clean silhouettes, PBR materials, dynamic sun/shadow, dust particles/haze, detailed machinery/rover animations, contrast of rust Mars vs white/metallic habitats; green vegetation & blue water as meaningful signals.
-- Camera: freely rotatable 3/4 camera, zoom levels (character/building/base/local/strategic), follow selected units, camera bookmarks.
-- Audio: outside sparse/isolated; inside pumps/fans/airlocks/machinery soundscape; restrained music, prominent at discoveries/milestones.
+- Visual: stylized Mars, three.js WebGL2 renderer, day/night sky, dust haze, particles (wind, grit, devils, rover trails), sun-tracking panels — **IN**
+- WebGPU primary path — **OUT** (TDD still lists it as future)
+- Camera: rotatable 3/4, zoom, follow selection — **IN**; bookmarks — **OUT**
+- Audio (sparse exterior / machine interior / restrained music) — **OUT** (no `audio/` module)
 
 ## 13 — Victory, Failure & Difficulty
 
-- Primary victory: full self-sufficiency (continuous critical survival resources + self-manufacture of maintenance parts w/o routine Earth resupply).
-- Victory paths: Independence, Scientific, Industrial, Exploration, Population, Terraforming.
-- Failure: final human dies; no survivable pressurized habitat; permanent loss of critical water; irrecoverable power; food reserves+production both fail; unrecoverable infrastructure.
-- Soft failure philosophy: most disasters recoverable (emergency, not auto game-over).
-- Difficulty params: resource abundance, weather severity, Earth support, equipment failure rate — independently configurable.
+- Primary victory / multi-path victories — **OUT** (no victory checker)
+- Failure: final human dies — **IN** (`gameOver`). Other hard-loss conditions (no habitat, permanent water loss, …) — **PARTIAL** / mostly soft via the life-support cascade.
+- Soft failure philosophy — **IN**
+- Difficulty — **IN** as presets (**Settler / Pioneer / Survivor**) plus advanced world options (storm/supply multipliers, world size). Independently configurable axes match the GDD intent.
 
 ## 14 — Browser Technical Architecture
 
-- Separate simulation from rendering & UI. Layers: UI (DOM/CSS), Renderer (WebGPU primary/WebGL2 fallback), Simulation (worker), World (terrain chunks/streaming), Persistence (IndexedDB + optional cloud), Audio (Web Audio).
-- Recommended: **TypeScript** client+sim, WebGPU, WebGL2 fallback, Web Workers for sim, IndexedDB saves.
-- Fixed timestep sim ~20 Hz; rendering 30–144+ FPS. Renderer consumes state, does not define logic.
-- ECS/data-oriented entity model. Web Workers prevent long sim steps freezing the UI.
+See **TDD** for the living technical picture. Short version vs original GDD §14:
+
+| Layer | Original target | Current |
+|---|---|---|
+| UI | DOM/CSS | **IN** (`src/ui`) |
+| Renderer | WebGPU + WebGL2 fallback | **WebGL2 via three.js** (no WebGPU yet) |
+| Simulation | Worker | **Worker default** + in-process fallback (`?worker=0`) |
+| World | streaming chunks | **Fixed seeded window** + globe landing |
+| Persistence | IndexedDB | **localStorage** versioned snapshots |
+| Audio | Web Audio | **OUT** |
 
 ## 15 — Performance, Persistence & Scalability
 
-- World streaming chunks; high detail near camera, distant retain sim state with reduced visuals.
-- Simulation LOD: nearby full sim, distant simplified, far industrial systems statistical.
-- Target scale: Early 20–100 entities; Medium 100–1,000; Large 1,000–5,000; Late 5,000+.
-- Persistence: auto+manual slots, IndexedDB, optional cloud, import/export saves, save sim state not renderer state.
-- Developer mode (TDD §22): an in-game tooling panel for weather/time control, setting selected-object properties, and spawning/upgrading — as hard contract, the mode's edits are runtime-only and **never written to the save file**; nothing the panel does outlives a reload. (Objects it fabricates, however, join the world for real and do save.)
-- Multiplayer out of scope initially; later server-authoritative.
+- World streaming / sim LOD tiers — **OUT** (world is small enough to sim entire)
+- Target entity scale (thousands) — not yet stressed; soak covers ~20 sols of a starter colony
+- Persistence: auto + manual slots, import-friendly versioned JSON — **IN**; cloud — **OUT**
+- Developer mode — **IN** (see TDD §22): runtime-only modifiers; fabrications are real
 
 ## 16 — Development Roadmap & MVP
 
-Vertical slices: P1 terrain/camera/human/rover/resource nodes/mining/inventory/construction; P2 power/batteries/O2/water/food/temp/day-night; P3 wind/dust/accumulation/storms/degradation; P4 rover tasks/automation/logistics/charging/mining routes; P5 refining/manufacturing/utility networks/maintenance; P6 procedural exploration/supply drops/salvage/expeditions; P7 colonists/skills/agriculture depth/medicine; P8 nuclear/underground/advanced robotics/closed-loop ecosystem.
+Vertical slices and current state:
 
-**MVP feature set:** World=procedural local Mars terrain, day/night, basic weather; Player=one human; Vehicles=two rovers; Resources=iron, regolith, water, silicon, aluminum; Buildings=habitat, solar, battery, water extractor, oxygen generator, greenhouse, storage, workshop; Simulation=mining, construction, electricity, water, oxygen, food; Environment=dust accumulation, dust storm, wind damage; UI=responsive desktop+mobile; Persistence=local save/load.
+| Slice | Theme | Status |
+|---|---|---|
+| **P1** | terrain / camera / human / rover / resources / mining / inventory / construction | **IN** |
+| **P2** | power / batteries / O₂ / water / food / day-night | **IN** |
+| **P3** | wind / dust / storms / degradation | **IN** |
+| **P4** | rover tasks / automation / logistics / charging / mining routes / garage | **IN** |
+| **P5** | refining / manufacturing / utility networks / maintenance depth | **OUT** — next Engineering pillar |
+| **P6** | procedural exploration / supply drops / salvage / expeditions | **PARTIAL** — discover/salvage/drops IN; survey, narrative, repairable wrecks, multi-site expeditions OUT |
+| **P7** | colonists / skills / agriculture depth / medicine | **OUT** |
+| **P8** | nuclear / underground / advanced robotics / closed-loop | **OUT** |
+
+**Ordering note (unchanged conflict with TDD §25):** GDD puts refining at P5 and
+exploration at P6; TDD folds POIs into T6 and never gives refining its own tier.
+The live project took **P4 → first P6 slice** before P5. Choosing the next pillar
+— **Engineering (P5)** vs finishing **Exploration (P6)** — is still an open
+product call, not something the documents decided.
 
 ## 17 — Design Principles & Final Direction
 
+Still the north star:
+
 - Every major gameplay system should interact with ≥2 other systems.
-- Research solves encountered problems; disasters create recoverable emergencies; UI exposes the simulation; automation shifts player role from operator to systems architect.
-- End-state fantasy: zoom out from one person/two rovers/a few crates → solar fields, mines, greenhouses, habitats, underground facilities, autonomous logistics, resilient life support. Payoff: "I built that."
+- Research solves encountered problems; disasters create recoverable emergencies; UI exposes the simulation; automation shifts the player from operator to systems architect.
+- End-state fantasy: zoom out from one person / two rovers / a few crates → solar fields, mines, greenhouses, habitats, underground facilities, autonomous logistics, resilient life support. Payoff: *"I built that."*
+
+What the current build already delivers of that fantasy: one person, a growing
+rover fleet, a powered life-support chain that can fail in bad weather, and a
+planet with wrecks and Earth drops worth leaving the pad for.
