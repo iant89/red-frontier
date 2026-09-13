@@ -96,6 +96,12 @@ export class DevMode {
     this.publish();
   }
 
+  /** Switch on: the master switch flips and any pins republish. */
+  enable(): void {
+    this.enabled = true;
+    this.publish();
+  }
+
   /**
    * The overlay state to publish: nothing at all unless the mode is on, and
    * never a pin on a rover the colony no longer has.

@@ -43,6 +43,8 @@ export interface DevPanelCallbacks {
   armSpawn(spec: SpawnSpec | null): void;
   /** Transient guidance line (the HUD's hintbar) while a spawn is armed. */
   setHint(text: string | null): void;
+  /** Flip the developer-mode master switch (independent of panel visibility). */
+  onToggleEnabled(on: boolean): void;
   onClose(): void;
 }
 
@@ -103,6 +105,12 @@ export class DevPanel {
     }
   }
 
+  /** Reflect the developer-mode master switch on the panel's toggle. */
+  setEnabled(on: boolean): void {
+    const box = this.el('dv-enabled') as HTMLInputElement;
+    if (box && box.checked !== on) box.checked = on;
+  }
+
   /** Reflect the Game un-arming (or arming) a click-to-place spawn. */
   setArmed(spec: SpawnSpec | null): void {
     for (const [id, el] of this.els) {
@@ -147,8 +155,11 @@ export class DevPanel {
         <span class="dev-ic">🛠</span><b>Developer mode</b>
         <span class="dev-badge">unsaved</span>
         <span class="i-spacer"></span>
-        <button class="mini-btn" id="dv-close" title="Close developer mode (\`)">×</button>
+        <button class="mini-btn" id="dv-close" title="Close panel">×</button>
       </div>
+      <label class="toggle dev-enable" title="Master switch — closing the panel leaves this on">
+        <input type="checkbox" id="dv-enabled" />
+        <span><b>Dev mode active</b> — edits apply live</span></label>
       <div class="dev-note">Live edits to the running colony — the mode and its
         upgrade levels are never written to the save file.</div>
       <div class="dev-status" id="dv-status" style="display:none"></div>
@@ -229,6 +240,13 @@ export class DevPanel {
     this.el('dv-close').addEventListener('pointerdown', (e) => {
       e.stopPropagation();
       this.cb.onClose();
+    });
+
+    // The master switch is independent of panel visibility: closing the panel
+    // must leave dev mode running (see Game.setDevEnabled).
+    this.el('dv-enabled').addEventListener('change', () => {
+      const on = (this.el('dv-enabled') as HTMLInputElement).checked;
+      this.cb.onToggleEnabled(on);
     });
 
     // ---- environment wiring ------------------------------------------------
@@ -382,6 +400,10 @@ export class DevPanel {
     if (!this.visible) return;
     const sim = this.cb.getSim();
     if (!sim) return;
+
+    // Keep the master switch in step with the mode's own state (a new mission
+    // resets dev mode off underneath the panel).
+    this.setEnabled(this.dev.enabled);
 
     // ---- environment readouts ---------------------------------------------
     this.el('dv-clock').textContent = sim.clock.format();
