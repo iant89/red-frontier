@@ -116,6 +116,32 @@ credited as "the mover" for free.
 `panByPixels` itself was left alone — as the issue predicted, the 1:1
 screen-space maths was already correct, so no sensitivity tuning was needed.
 
+### Follow-up: the look also zoomed (device report, fixed)
+
+The first real-phone report after this shipped: holding one finger down and
+looking with the other zoomed the camera at the same time (radius 170 → 126
+on a 90 px look in the lab repro). Two causes, both in the two-finger path:
+
+1. **The dolly was always live.** `twoPointerGesture` applied
+   `prevDist / dist` every frame, and a look drifts the span purely by
+   geometry (tangential travel moves it second-order). The dominance gate only
+   ran one way — it suppressed the orbit during a pinch, but nothing
+   suppressed the dolly during a look. The map now classifies each frame as
+   either a zoom or a look from *accumulated* travel (span drift since
+   touch-down vs the mover's travel), so a look holds its zoom exactly and a
+   slow pinch still zooms at any event rate.
+2. **The map read the wrong travel.** `Game` passed the raw pointers, whose
+   `travel` accumulates since touch-down, while the reset in `resetPinch`
+   zeroes `gestureTravel` — so after panning with one finger, the look
+   credited the wrong finger as the mover. The call now projects
+   `{ dx, dy, travel: gestureTravel }` explicitly.
+
+Covered by `tests/ui/gestures.test.ts` (a look asserts `dolly === 1`, a slow
+pinch asserts the dolly survives) and by two new `mobile-smoke.mjs` checks —
+single-finger drag and two-finger look both assert the radius never moves.
+The smoke suite never asserted zoom stability before, which is how the
+always-live dolly shipped.
+
 ### Open questions
 
 - ~~Does the new one-finger-pan map apply to touch only, or does the desktop

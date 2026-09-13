@@ -88,8 +88,8 @@ export class Game {
   private pointers = new Map<number, ActivePointer>();
   private pointerCount = 0;
   private pinchLast = 0;
-  private midLastX = 0;
-  private midLastY = 0;
+  /** Finger span when the current two-finger gesture began (pinch drift baseline). */
+  private pinchStart = 0;
   private lastAuto = 0;
   private lastInspector = 0;
   private started = false;
@@ -443,9 +443,9 @@ export class Game {
   private resetPinch(): void {
     const arr = [...this.pointers.values()];
     if (arr.length < 2) return;
-    this.pinchLast = Math.hypot(arr[0].x - arr[1].x, arr[0].y - arr[1].y);
-    this.midLastX = (arr[0].x + arr[1].x) / 2;
-    this.midLastY = (arr[0].y + arr[1].y) / 2;
+    const dist = Math.hypot(arr[0].x - arr[1].x, arr[0].y - arr[1].y);
+    this.pinchLast = dist;
+    this.pinchStart = dist;
     // Travel is measured from the start of the two-finger gesture, so whichever
     // finger went down first doesn't get counted as "the mover" for free.
     for (const q of arr) {
@@ -496,7 +496,17 @@ export class Game {
       a.dragging = true;
       b.dragging = true;
       const dist = Math.hypot(a.x - b.x, a.y - b.y);
-      const g = twoPointerGesture(a, b, this.pinchLast, dist);
+      // The map classifies on per-gesture travel, so project it explicitly:
+      // passing the pointers themselves would hand it `travel` (accumulated
+      // since touch-down, including any one-finger pan from before the second
+      // finger landed) and the look would credit the wrong finger.
+      const g = twoPointerGesture(
+        { dx: a.dx, dy: a.dy, travel: a.gestureTravel },
+        { dx: b.dx, dy: b.dy, travel: b.gestureTravel },
+        this.pinchLast,
+        dist,
+        this.pinchStart,
+      );
       if (g.dolly !== 1) this.rig.dolly(g.dolly);
       // Two fingers look around; pan is the one-finger gesture now. Driving
       // both off the same gesture is what made panning feel broken (#1).
@@ -509,8 +519,6 @@ export class Game {
         );
       }
       this.pinchLast = dist;
-      this.midLastX = (a.x + b.x) / 2;
-      this.midLastY = (a.y + b.y) / 2;
       a.dx = 0;
       a.dy = 0;
       b.dx = 0;

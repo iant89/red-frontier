@@ -75,42 +75,71 @@ test('two fingers both travelling far is not a look gesture', () => {
 
 group('Two fingers');
 
-test('one finger resting, the other dragging, orbits', () => {
+test('one finger resting, the other dragging, orbits — and never zooms', () => {
   const rest = d(0, 0, 2);
   const mover = d(25, -8, 140);
-  const g = twoPointerGesture(rest, mover, 200, 202);
+  const g = twoPointerGesture(rest, mover, 200, 202, 200);
   assert.ok(g.orbit, 'should orbit');
   assert.deepEqual([g.orbit!.dx, g.orbit!.dy], [25, -8]);
+  assert.equal(g.dolly, 1, 'a look must not also zoom the camera');
 });
 
 test('the travelling finger drives the orbit regardless of pointer order', () => {
   const rest = d(0, 0, 2);
   const mover = d(25, -8, 140);
-  const a = twoPointerGesture(rest, mover, 200, 202);
-  const b = twoPointerGesture(mover, rest, 200, 202);
+  const a = twoPointerGesture(rest, mover, 200, 202, 200);
+  const b = twoPointerGesture(mover, rest, 200, 202, 200);
   assert.deepEqual(a.orbit, b.orbit, 'argument order must not matter');
+  assert.equal(a.dolly, 1);
+  assert.equal(b.dolly, 1);
+});
+
+test('a long tangential look holds its zoom: span drift is second-order', () => {
+  // One finger planted, the other dragged 90px straight up from a 100px span:
+  // the span drifted ~35px purely by geometry. That drift must not zoom.
+  const rest = d(0, 0, 1);
+  const mover = d(0, -11, 90);
+  const g = twoPointerGesture(rest, mover, 131, 134.5, 100);
+  assert.ok(g.orbit, 'the look continues');
+  assert.equal(g.dolly, 1, 'tangential span drift must not zoom the camera');
 });
 
 test('pinching apart zooms and does not sneak in an orbit', () => {
-  // Fingers separating fast: the span change dominates the finger movement.
-  const g = twoPointerGesture(d(0, 0, 2), d(40, 0, 90), 100, 140);
+  // One-sided pinch: the mover dragged 90px radially, so the span drifted ~90.
+  const g = twoPointerGesture(d(0, 0, 2), d(11, 0, 90), 185, 190, 100);
   assert.ok(g.dolly < 1, `separating fingers zoom in: ${g.dolly}`);
   assert.equal(g.orbit, null, 'a straight pinch must not also swing the camera');
 });
 
 test('pinching together zooms the other way', () => {
-  const g = twoPointerGesture(d(0, 0, 2), d(-40, 0, 90), 140, 100);
+  const g = twoPointerGesture(d(0, 0, 2), d(-11, 0, 90), 105, 100, 190);
   assert.ok(g.dolly > 1, `converging fingers zoom out: ${g.dolly}`);
+  assert.equal(g.orbit, null);
 });
 
-test('zoom stays live during a look — the span still drives the dolly', () => {
-  const g = twoPointerGesture(d(0, 0, 2), d(20, 0, 140), 200, 210);
-  assert.ok(g.dolly !== 1, 'a small span change still dollies');
-  assert.ok(g.orbit, 'and the look continues');
+test('a symmetric pinch zooms: both fingers travel, the span doubles it', () => {
+  const g = twoPointerGesture(d(-9, 0, 45), d(9, 0, 45), 185, 190, 100);
+  assert.ok(g.dolly < 1, `separating fingers zoom in: ${g.dolly}`);
+  assert.equal(g.orbit, null, 'neither finger is an anchor');
+});
+
+test('a slow pinch still zooms — no per-event floor on the dolly', () => {
+  // A quarter-pixel frame at a high event rate: accumulated drift still
+  // dominates accumulated travel, so the dolly applies.
+  const g = twoPointerGesture(d(0, 0, 1), d(0.3, 0, 12), 189.3, 189, 200);
+  assert.ok(g.dolly !== 1, 'a slow span change still dollies');
+  assert.equal(g.orbit, null);
+});
+
+test('anchor wobble during a look zooms nothing and orbits nothing', () => {
+  // Only the anchor moved this frame (sub-pixel breathing against the glass).
+  const g = twoPointerGesture(d(0.4, 0.2, 3), d(0, 0, 60), 201.4, 201, 200);
+  assert.equal(g.dolly, 1, 'wobble under the pinch floor must not zoom');
+  assert.equal(g.orbit, null, 'the mover did not move this frame');
 });
 
 test('two resting fingers do nothing at all', () => {
-  const g = twoPointerGesture(d(0, 0, 1), d(0.2, 0.1, 1), 150, 150);
+  const g = twoPointerGesture(d(0, 0, 1), d(0.2, 0.1, 1), 150, 150, 150);
   assert.equal(g.orbit, null);
   assert.equal(g.dolly, 1, 'no span change means no zoom');
 });
@@ -118,7 +147,7 @@ test('two resting fingers do nothing at all', () => {
 test('there is no midpoint pan on two fingers any more', () => {
   // Both fingers sweeping together used to pan *and* dolly, which fought each
   // other and made panning feel broken. Now it is not a pan at all.
-  const g = twoPointerGesture(d(30, 0, 150), d(30, 0, 150), 120, 120);
+  const g = twoPointerGesture(d(30, 0, 150), d(30, 0, 150), 120, 120, 120);
   assert.equal(g.dolly, 1, 'a rigid translation changes no span');
   assert.equal(g.orbit, null, 'and neither finger is an anchor');
 });
