@@ -41,6 +41,9 @@ export interface PickTarget {
 }
 
 const TERRAIN_SEGS = 280;
+/** Base radius the selection ring geometry is built at; scaled per entity. */
+const SELECTION_RING_RADIUS = 1.4;
+const SELECTION_RING_THICKNESS = 0.35;
 
 /**
  * Site colours (GDD §06/§10). Deliberately off the rust palette the terrain is
@@ -142,7 +145,7 @@ export class GameRenderer {
     this.scene.add(this.poiRoot);
     this.scene.add(this.overlayRoot);
 
-    this.selectionRing = this.makeRing(0xffffff, 1.4, 0.35);
+    this.selectionRing = this.makeRing(0xffffff, SELECTION_RING_RADIUS, SELECTION_RING_THICKNESS);
     this.selectionRing.visible = false;
     this.scene.add(this.selectionRing);
 
@@ -1412,7 +1415,11 @@ export class GameRenderer {
     }
     const y = this.world.heightAt(entity.x, entity.z);
     this.selectionRing.position.set(entity.x, y + 0.2, entity.z);
-    this.selectionRing.scale.set(entity.radius, 1, entity.radius);
+    // Scale uniformly: the ring geometry lives in its own XY plane and is laid
+    // flat with rotation.x = -PI/2, and three.js composes T * R * S, so a
+    // non-uniform scale here is applied in the mesh's own axes *before* the
+    // rotation — scaling X but not Y produced an ellipse (issue #9).
+    this.selectionRing.scale.setScalar(entity.radius / SELECTION_RING_RADIUS);
     this.selectionRing.visible = true;
   }
 

@@ -20,7 +20,7 @@ work). They will drift — treat them as a starting point, not a promise.
 | 6 | Weather is uniform — real storms hit some areas harder | `sim/weather` | P2 | Open |
 | 7 | Storm dust is too coarse and flows too straight | `render/particles` | P1 | Open |
 | 8 | No lightning risk from high dust | `sim/` + `render/` | P2 | Open |
-| 9 | Rover selection ring isn't a circle | `render/Renderer` | P1 | Open |
+| 9 | Rover selection ring isn't a circle | `render/Renderer` | P1 | Done |
 | 10 | Rover selection ring needs a pulsing white glow | `render/Renderer` | P3 | Open |
 | 11 | Rovers have no collision or proximity awareness | `sim/` | P1 | Open |
 | 12 | Draggable panels scroll their own title bar | `ui/HUD` + `style.css` | P2 | Open |
@@ -384,7 +384,7 @@ electrical-hazard code anywhere in `src/`. This is a new feature, not a fix.
 
 ## 9. Rover selection ring isn't a circle
 
-**P1 · Open · `src/render/Renderer.ts`**
+**P1 · Done · `src/render/Renderer.ts`**
 
 > When a rover is selected, the circle that appears under it is not a circle.
 
@@ -419,10 +419,19 @@ non-uniformly scales, which is why it looks right.
 
 ### Acceptance criteria
 
-- [ ] Selection ring is a true circle under every rover type.
-- [ ] Ring radius scales with the rover's own radius.
-- [ ] Even thickness all the way around, at every zoom level.
-- [ ] Still sits flat on the terrain and doesn't z-fight on slopes.
+- [x] Selection ring is a true circle under every rover type.
+- [x] Ring radius scales with the rover's own radius.
+- [x] Even thickness all the way around, at every zoom level.
+- [x] Still sits flat on the terrain and doesn't z-fight on slopes — position
+      and the `+0.2` ground offset are unchanged.
+
+### Resolution
+
+`setSelection` now scales uniformly with
+`scale.setScalar(entity.radius / SELECTION_RING_RADIUS)`, dividing out the
+1.4-unit radius the geometry is built at so the ring's world radius matches
+`entity.radius` exactly. The build radius and thickness are now named
+constants (`SELECTION_RING_RADIUS`, `SELECTION_RING_THICKNESS`).
 
 ---
 
