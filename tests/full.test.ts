@@ -13,6 +13,7 @@
 
 import { report } from './harness';
 
+import './audio/system.test';
 import './sim/power.test';
 import './sim/world.test';
 import './sim/setup.test';
@@ -54,4 +55,4 @@ import './hud/devpanel.test';
 
 // Each suite prints one line as it runs; `report` prints the total, every
 // failure, and exits non-zero if anything broke.
-report(35);
+report(39);

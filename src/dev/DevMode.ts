@@ -44,6 +44,12 @@ export interface SpawnSpec {
 }
 
 export type DevLog = (severity: string, text: string) => void;
+/**
+ * A presentation observer for accepted/rejected developer actions. It is kept
+ * outside the host boundary: audio can react to an edit without the simulation
+ * learning that a sound system exists.
+ */
+export type DevCommandObserver = (command: SimCommand, ack: SimAck) => void;
 
 export class DevMode {
   /** Master switch. When false, {@link applyTo} does nothing at all. */
@@ -59,9 +65,11 @@ export class DevMode {
   private host: SimHost | null = null;
 
   private log: DevLog;
+  private commandObserver?: DevCommandObserver;
 
-  constructor(log: DevLog) {
+  constructor(log: DevLog, commandObserver?: DevCommandObserver) {
     this.log = log;
+    this.commandObserver = commandObserver;
   }
 
   /**
@@ -138,7 +146,15 @@ export class DevMode {
    */
   private send(command: SimCommand): SimAck {
     if (!this.host) throw new Error('DevMode is not attached to a SimHost');
-    return this.host.request(command);
+    const ack = this.host.request(command);
+    // A sound/visual observer must never turn a valid developer edit into a
+    // failed command. The host's acknowledgement remains the only authority.
+    try {
+      this.commandObserver?.(command, ack);
+    } catch {
+      /* presentation feedback is optional */
+    }
+    return ack;
   }
 
   // ------------------------------------------------------------- time ----

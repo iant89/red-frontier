@@ -31,6 +31,7 @@ import { NewGameWizard } from '../ui/NewGameWizard';
 import { LoadGameScreen } from '../ui/LoadGameScreen';
 import { WORLD_SIZES, DEFAULT_WORLD_OPTIONS, hashSeed } from '../sim/difficulty';
 import type { NewGameConfig } from '../sim/difficulty';
+import { AudioSystem } from '../audio/AudioSystem';
 
 void SAVE_VERSION;
 
@@ -74,6 +75,8 @@ export class Game {
   renderer: GameRenderer | null = null;
   rig: CameraRig | null = null;
   hud: HUD;
+  /** Presentation-only soundscape; it only reads the host view. */
+  private audio: AudioSystem;
 
   /** Developer mode: runtime-only editor state (never reaches the save file). */
   private dev: DevMode;
@@ -110,10 +113,12 @@ export class Game {
 
   constructor() {
     this.canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
+    this.audio = new AudioSystem();
+    // The graph starts lazily on the first user gesture (browser autoplay
+    // policy), but its first scene is already the main-menu ambience.
+    this.audio.setScene('menu');
     this.hud = new HUD({
-      onSpeed: () => {
-        /* HUD owns the speed index; the loop reads it */
-      },
+      onSpeed: (idx) => this.audio.setPaused(idx === 0),
       onPickBuild: (k) => this.setPendingBuild(k),
       onAction: (a, arg) => this.handleAction(a, arg),
       onStart: (seedText, near) => this.quickStart(seedText, near),
@@ -121,7 +126,13 @@ export class Game {
       onMenu: () => this.returnToMenu(),
       onDev: () => this.toggleDevMode(),
     });
-    this.dev = new DevMode((sev, text) => this.hud.addLog(sev, text));
+    this.dev = new DevMode(
+      (sev, text) => this.hud.addLog(sev, text),
+      (command, ack) => {
+        if (ack.ok) this.audio.command(command.type);
+        else this.audio.reject();
+      },
+    );
     this.devPanel = new DevPanel(this.dev, {
       getSim: () => this.host?.view ?? null,
       // The panel edits entities it has backdoors for; a site is not one of
@@ -163,6 +174,7 @@ export class Game {
 
   private showMainMenu(): void {
     this.closeMenu();
+    this.audio.setScene('menu');
     const menu = new MainMenu({
       saves: this.store.list(),
       onNewGame: () => this.openNewGame(),
@@ -369,6 +381,10 @@ export class Game {
     this.hud.updateVitals(host.view);
     this.syncUI(true);
     this.started = true;
+    this.audio.setScene('game');
+    this.audio.setPaused(this.hud.speedIdx === 0);
+    this.audio.update(host.view, this.hud.speedIdx === 0 || !!host.view.gameOver);
+    this.audio.missionStarted();
   }
 
   // -------------------------------------------------------------- input ----
@@ -563,6 +579,7 @@ export class Game {
     // must never trigger game hotkeys.
     const tag = (e.target as HTMLElement | null)?.tagName;
     if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+    this.audio.activateFromUserGesture();
 
     if ((e.ctrlKey || e.metaKey) && key === 's') {
       e.preventDefault();
@@ -575,35 +592,46 @@ export class Game {
       return;
     }
     if (e.key === 'Escape') {
-      if (this.hud.closeAlertHistory() || this.hud.closeBuildInfo()) return;
+      if (this.hud.closeAlertHistory() || this.hud.closeBuildInfo()) {
+        this.audio.command('rover/stop');
+        return;
+      }
       if (this.dev.armedSpawn) {
         this.setArmedSpawn(null);
+        this.audio.command('rover/stop');
         return;
       }
       if (this.pendingBuild) this.setPendingBuild(null);
       else this.selected = null;
+      this.audio.command('rover/stop');
       return;
     }
     if (e.key === ' ') {
       e.preventDefault();
-      this.hud.setSpeed(this.hud.speedIdx === 0 ? 1 : 0);
+      const next = this.hud.speedIdx === 0 ? 1 : 0;
+      this.hud.setSpeed(next);
+      this.audio.setPaused(next === 0);
       return;
     }
     if (key === 'v') {
       this.renderer?.setOverlay(this.hud.cycleOverlay() as OverlayMode);
+      this.audio.select();
       return;
     }
     if (key === 'f') {
       this.centerOnSelected();
+      this.audio.select();
       return;
     }
     if (key === 'h') {
       this.hud.openAlertHistory();
+      this.audio.select();
       return;
     }
     if (key === '.') {
       this.cycleIdle();
       this.syncUI(true);
+      this.audio.select();
       return;
     }
     // Number keys select build blueprints in palette order.
@@ -611,6 +639,7 @@ export class Game {
     if (idx >= 0 && idx < BUILDING_ORDER.length) {
       const kind = BUILDING_ORDER[idx];
       this.setPendingBuild(this.pendingBuild === kind ? null : kind);
+      this.audio.select();
     }
   }
 
@@ -671,6 +700,9 @@ export class Game {
     }
     const pick = this.renderer.pickTargetAt(x, y);
     if (pick) {
+      // World selections are not DOM controls, so they get their own quiet
+      // confirmation rather than relying on the menu/HUD click listener.
+      this.audio.select();
       if (pick.type === 'rover') {
         // With a rover selected, tapping a stranded one dispatches a rescue —
         // the same grammar as deposit → mine (P4's RECOVER task).
@@ -775,7 +807,12 @@ export class Game {
    * look unchanged — only the writes had to be told where they end up.
    */
   private order(command: SimCommand): void {
-    this.host?.send(command);
+    const host = this.host;
+    if (!host) return;
+    // The audio director is presentation-only: it hears the player's intent,
+    // while the host remains the sole authority that may mutate the colony.
+    this.audio.command(command.type);
+    host.send(command);
   }
 
   private setPendingBuild(kind: BuildingKind | null): void {
@@ -794,11 +831,21 @@ export class Game {
     // Placing is the one gesture whose result the UI needs immediately: the new
     // structure must be selected, and only the sim knows the id it allocated.
     // `request` is the ack path the protocol reserves for exactly that.
-    const ack = await host.requestPlacement({ type: 'building/place', kind, x: pt.x, z: pt.z });
-    if (ack.ok && ack.entityId !== undefined) {
-      this.selected = { type: 'building', id: ack.entityId };
-      // Shift-place keeps the blueprint armed for laying out solar farms.
-      if (!this.shiftHeld) this.setPendingBuild(null);
+    try {
+      const ack = await host.requestPlacement({ type: 'building/place', kind, x: pt.x, z: pt.z });
+      if (ack.ok && ack.entityId !== undefined) {
+        this.audio.command('building/place');
+        this.selected = { type: 'building', id: ack.entityId };
+        // Shift-place keeps the blueprint armed for laying out solar farms.
+        if (!this.shiftHeld) this.setPendingBuild(null);
+      } else {
+        this.audio.reject();
+      }
+    } catch {
+      // A host can disappear while a placement request is in flight (for
+      // example, when returning to the menu). Its rejection is feedback, not a
+      // reason to leave an unhandled promise behind.
+      this.audio.reject();
     }
   }
 
@@ -1036,15 +1083,20 @@ export class Game {
       (snapshot) => {
         try {
           this.store.update(id, snapshot, sol);
-          if (!quiet) this.hud.flashSave(`Saved · ${stamp}`);
+          if (!quiet) {
+            this.hud.flashSave(`Saved · ${stamp}`);
+            this.audio.saved();
+          }
         } catch (e) {
           // Quota is the realistic failure here; say so rather than failing silently.
           this.hud.flashSave('Save failed — browser storage full?');
+          this.audio.reject();
           console.error(e);
         }
       },
       (e) => {
         this.hud.flashSave('Save failed — the colony could not be read');
+        this.audio.reject();
         console.error(e);
       },
     );
@@ -1059,6 +1111,9 @@ export class Game {
     // not be left ticking through the reload the menu needs.
     this.dev.detach();
     this.host?.dispose();
+    // Fade the live colony layers back to the command-deck bed during the
+    // hand-off; a reload creates the same menu scene again on the next page.
+    this.audio.setScene('menu');
     // A clean boot is the only honest teardown for a WebGL colony: the menu
     // (and its splash) rebuilds in under a second.
     window.setTimeout(() => window.location.reload(), 700);
@@ -1102,7 +1157,12 @@ export class Game {
     // keeps its grip without this loop knowing developer mode exists.
     for (const ev of host.drainEvents()) {
       this.hud.addLog(ev.severity, ev.text, ev.stamp);
+      this.audio.event(ev);
     }
+    // This lives outside the simulation tick. `loop()` still runs at speed 0,
+    // so a paused player hears the frozen wind/storm ambience rather than a
+    // dead soundscape.
+    this.audio.update(view, speed === 0 || !!view.gameOver);
 
     this.renderer.sync(view);
     this.rig.update();

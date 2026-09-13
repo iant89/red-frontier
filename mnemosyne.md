@@ -29,3 +29,6 @@ Persistent notes for future coding sessions.
   do not try to re-derive them from the seed client-side the way the terrain is.
 - Supply drops contain bulk resources and sometimes battery cells, never fluids. Exposed water or food would freeze, and the current rover logistics model has no
   field-fluid recovery path; do not bypass that boundary by teleporting fluid cargo into colony tanks.
+- `src/audio/AudioSystem.ts` is presentation-only procedural Web Audio: it never writes sim state, starts on the first real input gesture to satisfy autoplay policy,
+  and is deliberately updated at simulation speed 0 so paused colonies retain environmental ambience and brownout/storm reminders. Keep new `SimCommand` values
+  represented in its exhaustive `COMMAND_CUES` map; `tests/audio/system.test.ts` pins that contract.
