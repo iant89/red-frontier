@@ -69,6 +69,7 @@ export type SimCommand =
   | { type: 'dev/storm/clear' }
   | { type: 'dev/storm/scheduler'; on: boolean }
   | { type: 'dev/dust'; frac: number }
+  | { type: 'dev/lightning/strike' }
   | { type: 'dev/spawn/rover'; kind: RoverKind; x: number; z: number }
   | { type: 'dev/spawn/building'; kind: BuildingKind; x: number; z: number }
   | { type: 'dev/spawn/deposit'; resource: ResourceId; x: number; z: number; kg: number }
@@ -113,6 +114,7 @@ export const COMMAND_TYPES: readonly SimCommandType[] = [
   'dev/storm/clear',
   'dev/storm/scheduler',
   'dev/dust',
+  'dev/lightning/strike',
   'dev/spawn/rover',
   'dev/spawn/building',
   'dev/spawn/deposit',
@@ -222,6 +224,7 @@ export const COMMAND_SHAPES: Record<SimCommandType, CommandShape> = {
   'dev/storm/clear': {},
   'dev/storm/scheduler': { on: 'bool' },
   'dev/dust': { frac: 'unit' },
+  'dev/lightning/strike': {},
   'dev/spawn/rover': { kind: 'roverKind', x: 'coord', z: 'coord' },
   'dev/spawn/building': { kind: 'buildingKind', x: 'coord', z: 'coord' },
   'dev/spawn/deposit': { resource: 'resourceId', x: 'coord', z: 'coord', kg: 'amount' },

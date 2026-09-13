@@ -57,6 +57,7 @@ const SAMPLES: Record<SimCommand['type'], SimCommand> = {
   'dev/storm/clear': { type: 'dev/storm/clear' },
   'dev/storm/scheduler': { type: 'dev/storm/scheduler', on: false },
   'dev/dust': { type: 'dev/dust', frac: 0.5 },
+  'dev/lightning/strike': { type: 'dev/lightning/strike' },
   'dev/spawn/rover': { type: 'dev/spawn/rover', kind: 'cargo', x: 30, z: -30 },
   'dev/spawn/building': { type: 'dev/spawn/building', kind: 'solar', x: 45, z: 45 },
   'dev/spawn/deposit': { type: 'dev/spawn/deposit', resource: 'ice', x: 50, z: 50, kg: 2000 },

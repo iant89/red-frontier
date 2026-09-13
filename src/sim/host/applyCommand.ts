@@ -124,6 +124,9 @@ export function applyCommand(sim: Simulation, cmd: SimCommand): SimAck {
     case 'dev/dust':
       sim.devSetDust(cmd.frac);
       return ACK;
+    case 'dev/lightning/strike':
+      sim.devForceLightningStrike();
+      return ACK;
     case 'dev/spawn/rover':
       return { ok: true, entityId: sim.devSpawnRover(cmd.kind, cmd.x, cmd.z).id };
     case 'dev/spawn/building': {

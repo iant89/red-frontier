@@ -47,6 +47,7 @@ export interface WeatherPayload {
   storm: StormKind;
   stormIntensity: number;
   solarTransmission: number;
+  lightning: { x: number; z: number; t: number } | null;
   rollsSuppressed: boolean;
   forecast: { kind: StormKind; label: string; arrivesIn: number } | null;
   current: StormCell | null;
@@ -173,6 +174,7 @@ export function projectView(
       storm: sim.weather.storm,
       stormIntensity: sim.weather.stormIntensity,
       solarTransmission: sim.weather.solarTransmission,
+      lightning: sim.weather.lastStrike ? { ...sim.weather.lastStrike } : null,
       rollsSuppressed: sim.weather.rollsSuppressed,
       forecast: sim.weather.forecast(),
       current: sim.weather.current() ? { ...sim.weather.current()! } : null,

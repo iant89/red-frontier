@@ -45,6 +45,7 @@ const cb: DevPanelCallbacks = {
     calls.push(`arm:${spec?.type ?? 'null'}`);
   },
   setHint: (t) => calls.push(`hint:${t ?? ''}`),
+  onToggleEnabled: (on) => calls.push(`enabled:${on}`),
   onClose: () => calls.push('close'),
 };
 
@@ -79,6 +80,22 @@ test('the close button reports through onClose', () => {
   const before = calls.filter((c) => c === 'close').length;
   fire('dv-close', 'pointerdown');
   assert.equal(calls.filter((c) => c === 'close').length, before + 1);
+});
+
+test('the dev-mode master switch sits at the top and reports through onToggleEnabled', () => {
+  const box = q<HTMLInputElement>('dv-enabled');
+  assert.ok(box, 'the toggle is mounted in the panel head');
+  // setEnabled mirrors the mode's own state into the checkbox.
+  panel.setEnabled(true);
+  assert.equal(box.checked, true, 'the switch reflects an enabled mode');
+  panel.setEnabled(false);
+  assert.equal(box.checked, false, 'and an off one');
+  // Flipping the checkbox reports through the callback, not the dev object —
+  // Game is the one that flips the master switch.
+  calls.length = 0;
+  box.checked = true;
+  fire('dv-enabled', 'change');
+  assert.ok(calls.includes('enabled:true'), 'the toggle reports through onToggleEnabled');
 });
 
 group('Developer panel — environment');

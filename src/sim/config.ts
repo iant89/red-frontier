@@ -227,6 +227,70 @@ export const STORM_CELL_GEOM: Record<
  */
 export const STORM_DAMAGE_K = 0.38;
 
+// -------------------------------------------------------------- lightning ----
+// Prototype 5 (GDD §7): electrostatic discharges in dust storms. Strike risk
+// rises with airborne dust, calm clear air never strikes, and the damage model
+// reuses the storm-exposure ladder — a solar array or a battery bank is a far
+// better target for a bolt than a sealed habitat or a nose-down RTG.
+
+/**
+ * Below this airborne-dust reading there is not enough lofted grit to build a
+ * static charge — the hard gate that keeps clear, calm weather bolt-free.
+ */
+export const LIGHTNING_DUST_MIN = 0.15;
+
+/** A strike also needs the storm actually blowing past this intensity. */
+export const LIGHTNING_INTENSITY_MIN = 0.15;
+
+/**
+ * Strikes per game second at full hazard (dust 1, intensity 1, multiplier 1,
+ * storm factor 1). Tuned so a severe storm flashes a few times a minute and a
+ * planetary event strobes almost continuously — spectacle first, harm second.
+ */
+export const LIGHTNING_BASE_RATE = 0.06;
+
+/** Exponent on the dust reading in the hazard curve. */
+export const LIGHTNING_DUST_EXP = 1.6;
+
+/** How much a given storm class electrifies the sky, relative to regional. */
+export const LIGHTNING_STORM_FACTOR: Record<
+  'devil' | 'regional' | 'severe' | 'planetary',
+  number
+> = {
+  devil: 0.5,
+  regional: 1,
+  severe: 1.7,
+  planetary: 2.3,
+};
+
+/** Fraction of strikes aimed at an exposed entity rather than a random spot. */
+export const LIGHTNING_ANCHOR_CHANCE = 0.25;
+
+/** Radius (world units) inside which a strike hurts an entity. */
+export const LIGHTNING_STRIKE_RADIUS = 24;
+
+/** Near-direct-hit radius — a rover inside this takes the battery spike. */
+export const LIGHTNING_CORE_RADIUS = 10;
+
+/** Jitter applied to an aimed strike, so it does not land pixel-perfect. */
+export const LIGHTNING_AIM_JITTER = 9;
+
+/**
+ * Building health lost to a full-exposure direct hit: `K × exposure × vuln`.
+ * Deliberately modest — a direct hit bruises, a rare direct hit on a solar
+ * array can trip it, and the storm's own wind does the rest of the work.
+ */
+export const LIGHTNING_DAMAGE_K = 16;
+
+/** Drivetrain condition a rover loses to a direct hit (scaled by falloff). */
+export const LIGHTNING_ROVER_CONDITION = 18;
+
+/** Fraction of a rover's pack a near-direct hit can flash away. */
+export const LIGHTNING_ROVER_BATTERY_FRAC = 0.35;
+
+/** Colonist health lost to a direct hit while on EVA. */
+export const LIGHTNING_COLONIST_DAMAGE = 30;
+
 /** A building at or below this health is damaged: offline until repaired. */
 export const DAMAGED_HEALTH = 25;
 /** Repair work that brings a damaged building back to this health restarts it. */
@@ -347,7 +411,7 @@ export const DROP_RING_OUTER_FRAC = 0.85;
 export const AUTOSAVE_INTERVAL_S = 45;
 
 /** Current save schema version. Bump whenever the snapshot shape changes. */
-export const SAVE_VERSION = 7;
+export const SAVE_VERSION = 8;
 
 // -------------------------------------------------------------- history ----
 

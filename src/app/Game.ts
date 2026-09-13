@@ -124,7 +124,7 @@ export class Game {
       onStart: (seedText, near) => this.quickStart(seedText, near),
       onOverlay: (m) => this.renderer?.setOverlay(m),
       onMenu: () => this.returnToMenu(),
-      onDev: () => this.toggleDevMode(),
+      onDev: () => this.toggleDevPanel(),
     });
     this.dev = new DevMode(
       (sev, text) => this.hud.addLog(sev, text),
@@ -147,7 +147,8 @@ export class Game {
         this.rig ? { x: this.rig.target.x, z: this.rig.target.z } : { x: 0, z: 0 },
       armSpawn: (spec) => this.setArmedSpawn(spec),
       setHint: (t) => this.hud.hint(t),
-      onClose: () => this.toggleDevMode(false),
+      onToggleEnabled: (on) => this.setDevEnabled(on),
+      onClose: () => this.setDevPanelVisible(false),
     });
     this.store = new SaveStore();
     // The mission menu owns the pre-game screen; the HUD owns everything after.
@@ -368,6 +369,7 @@ export class Game {
     this.dev.disable();
     this.devPanel.setVisible(false);
     this.devPanel.setArmed(null);
+    this.devPanel.setEnabled(false);
     this.hud.setDevActive(false);
     this.hud.setBuild(null);
     this.lastAuto = performance.now();
@@ -588,7 +590,7 @@ export class Game {
     }
     if (e.code === 'Backquote') {
       e.preventDefault();
-      this.toggleDevMode();
+      this.toggleDevPanel();
       return;
     }
     if (e.key === 'Escape') {
@@ -852,32 +854,42 @@ export class Game {
   // ------------------------------------------------------- developer mode ----
 
   /**
-   * Flip the developer panel and every live modifier it carries. Nothing the
-   * panel does is persisted — the mode itself lives outside the sim, and its
-   * upgrade levels are runtime-only by sim design.
+   * The developer-mode master switch, decoupled from panel visibility: the
+   * panel's own toggle drives this, so closing the panel leaves the mode on.
+   * Nothing it does is persisted — the mode itself lives outside the sim, and
+   * its upgrade levels are runtime-only by sim design.
    */
-  private toggleDevMode(force?: boolean): void {
+  private setDevEnabled(on: boolean): void {
     if (!this.started) return;
-    const on = force ?? !this.dev.enabled;
-    const changed = on !== this.dev.enabled;
+    if (on === this.dev.enabled) return;
     if (on) {
-      this.dev.enabled = true;
+      this.dev.enable();
     } else {
       // Every modifier stops dead: pins released, any armed spawn disarmed.
       this.setArmedSpawn(null);
       this.dev.disable();
     }
-    this.devPanel.setVisible(on);
+    this.devPanel.setEnabled(on);
     this.hud.setDevActive(on);
-    if (changed) {
-      this.hud.addLog(
-        'info',
-        on
-          ? '🛠 Developer mode ON — world edits are live and stay out of the save file.'
-          : '🛠 Developer mode OFF — modifiers released.',
-      );
-    }
+    this.hud.addLog(
+      'info',
+      on
+        ? '🛠 Developer mode ON — world edits are live and stay out of the save file.'
+        : '🛠 Developer mode OFF — modifiers released.',
+    );
     this.syncUI(true);
+  }
+
+  /** Show or hide the developer panel without touching the master switch. */
+  private setDevPanelVisible(on: boolean): void {
+    if (!this.started) return;
+    this.devPanel.setVisible(on);
+    this.syncUI(true);
+  }
+
+  /** The 🛠 button and the backtick key open and close the panel only. */
+  private toggleDevPanel(): void {
+    this.setDevPanelVisible(!this.devPanel.isVisible());
   }
 
   /**

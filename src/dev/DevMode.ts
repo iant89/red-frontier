@@ -96,6 +96,12 @@ export class DevMode {
     this.publish();
   }
 
+  /** Switch on: the master switch flips and any pins republish. */
+  enable(): void {
+    this.enabled = true;
+    this.publish();
+  }
+
   /**
    * The overlay state to publish: nothing at all unless the mode is on, and
    * never a pin on a rover the colony no longer has.
@@ -184,6 +190,12 @@ export class DevMode {
   /** Push the airborne-dust reading straight to `frac` (0..1); it relaxes back. */
   setDust(frac: number): void {
     this.send({ type: 'dev/dust', frac });
+  }
+
+  /** Drop a lightning bolt on the most exposed target right now. */
+  forceLightningStrike(): void {
+    this.send({ type: 'dev/lightning/strike' });
+    this.log('warn', '⚡ Lightning strike conjured (developer).');
   }
 
   /** Switch the storm scheduler off entirely, or let it roll again. */

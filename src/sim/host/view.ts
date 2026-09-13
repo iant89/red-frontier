@@ -77,6 +77,8 @@ export interface WeatherView {
   readonly storm: StormKind;
   readonly stormIntensity: number;
   readonly solarTransmission: number;
+  /** The most recent lightning strike, for the renderer's flash. */
+  readonly lightning: { x: number; z: number; t: number } | null;
   /** False while the developer panel has the sky flying by hand. */
   readonly rollsSuppressed: boolean;
   forecast(): { kind: StormKind; label: string; arrivesIn: number } | null;
