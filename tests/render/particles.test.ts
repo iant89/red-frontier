@@ -1,7 +1,7 @@
 /**
  * @suite render/particles
  * @group unit
- * @covers src/render/particles/ParticlePool.ts src/render/particles/effects.ts src/render/particles/ParticlePoints.ts src/render/WeatherFX.ts
+ * @covers src/render/particles/ParticlePool.ts src/render/particles/effects.ts src/render/particles/ParticlePoints.ts src/render/WeatherFX.ts src/sim/weather.ts
  * @desc The true particle system, headlessly: pool lifecycle and determinism,
  * wind/storm/devil/trail emitters, and the weather FX controller that drives
  * them from sim readings. No GPU needed — only final rendering needs one.
@@ -17,10 +17,13 @@ import {
   DustDevil,
   DevilManager,
   RoverTrailEmitter,
+  MAX_DEVILS,
+  devilBand,
   type FxContext,
 } from '../../src/render/particles/effects';
 import { ParticlePoints, makeSoftSprite } from '../../src/render/particles/ParticlePoints';
 import { WeatherFX, type WeatherFxInput, type WeatherFxWeather } from '../../src/render/WeatherFX';
+import { Weather } from '../../src/sim/weather';
 import { group, test, finish } from '../harness';
 
 function makeCtx(over: Partial<FxContext> = {}, seed = 1234): FxContext {
@@ -32,6 +35,7 @@ function makeCtx(over: Partial<FxContext> = {}, seed = 1234): FxContext {
     windX: 0,
     windZ: 0,
     windSpeed: 0,
+    windRamp: 0,
     dust: 0.08,
     storm: 'calm',
     stormIntensity: 0,
@@ -268,27 +272,28 @@ test('the devil funnel holds together instead of blowing apart', () => {
   assert.ok(mean < 18, `the funnel hugs its devil, mean radius=${mean.toFixed(2)}`);
 });
 
-test('the devil manager wants devils inside storms — they travel with the weather', () => {
-  const mgr = new DevilManager();
-  assert.equal(mgr.wantedFor(makeCtx({ storm: 'calm' })), 0);
-  assert.equal(mgr.wantedFor(makeCtx({ storm: 'planetary', stormIntensity: 1 })), 0, 'a uniform wall has no vortices');
-  assert.equal(mgr.wantedFor(makeCtx({ storm: 'devil', stormIntensity: 0.3 })), 1);
-  assert.equal(mgr.wantedFor(makeCtx({ storm: 'devil', stormIntensity: 0.8 })), 2);
-  // Big storms carry devils in their fronts once properly blowing…
-  assert.equal(mgr.wantedFor(makeCtx({ storm: 'regional', stormIntensity: 0.4 })), 0, 'not yet in the wall');
-  assert.equal(mgr.wantedFor(makeCtx({ storm: 'regional', stormIntensity: 0.6 })), 1, 'the front spins devils up');
-  assert.equal(mgr.wantedFor(makeCtx({ storm: 'regional', stormIntensity: 0.9 })), 2);
-  assert.equal(mgr.wantedFor(makeCtx({ storm: 'severe', stormIntensity: 0.7 })), 1);
-  assert.equal(mgr.wantedFor(makeCtx({ storm: 'severe', stormIntensity: 0.95 })), 2);
-
+test('the devil manager staffs a storm and stands down when it passes', () => {
   const pool = new ParticlePool(4000, mulberry32(15));
+  const mgr = new DevilManager();
   runEmitter((c, p) => mgr.update(c, p), makeCtx({ storm: 'calm' }), pool, 1);
   assert.equal(mgr.activeCount, 0, 'clear skies, no devils');
   const stormy = makeCtx({ windX: 3, windZ: 1, windSpeed: 8, storm: 'devil', stormIntensity: 0.7 });
   runEmitter((c, p) => mgr.update(c, p), stormy, pool, 4);
   assert.ok(mgr.activeCount >= 1, 'a devil storm spins devils up');
-  runEmitter((c, p) => mgr.update(c, p), makeCtx({ time: stormy.time, storm: 'calm' }), pool, 12);
+  runEmitter((c, p) => mgr.update(c, p), makeCtx({ time: stormy.time, storm: 'calm' }), pool, 25);
   assert.equal(mgr.activeCount, 0, 'devils dissipate once the storm passes');
+});
+
+test('a planetary dust wall carries no vortices at all', () => {
+  const pool = new ParticlePool(4000, mulberry32(151));
+  const mgr = new DevilManager();
+  runEmitter(
+    (c, p) => mgr.update(c, p),
+    makeCtx({ windX: 20, windZ: 6, windSpeed: 50, storm: 'planetary', stormIntensity: 1, dust: 0.98 }),
+    pool,
+    8,
+  );
+  assert.equal(mgr.activeCount, 0, 'a uniform sheet of dust has no coherent funnels in it');
 });
 
 test('a devil is born on the ground and climbs into the air', () => {
@@ -459,15 +464,478 @@ test('trail dust spawns behind the rover, at its rear wheels', () => {
   assert.ok(Math.abs(mx - 10) < 1.5, `centred on the truck, mean x=${mx.toFixed(2)}`);
 });
 
+group('Dust devils');
+
+/** Two devils, spun up and standing in contact, ready to meet. */
+function contactPair(
+  mgr: DevilManager,
+  big: DustDevil,
+  small: DustDevil,
+  gap = 3,
+): { ctx: FxContext; pool: ParticlePool } {
+  const pool = new ParticlePool(3000, mulberry32(77));
+  for (const d of [big, small]) {
+    d.strength = 1;
+    d.growth = 1;
+    d.target = 1;
+  }
+  small.x = big.x + gap;
+  small.z = big.z;
+  mgr.devils.push(big, small);
+  const ctx = makeCtx({
+    storm: 'devil',
+    stormIntensity: 0.9,
+    windX: 4,
+    windZ: 0,
+    windSpeed: 10,
+  });
+  return { ctx, pool };
+}
+
+test('devil counts are rolled per storm band, not a fixed ladder', () => {
+  // Calm and planetary are the two skies that never carry vortices.
+  for (let s = 0; s < 8; s++) {
+    assert.equal(new DevilManager().wantedFor(makeCtx({ storm: 'calm' }, s)), 0);
+    assert.equal(new DevilManager().wantedFor(makeCtx({ storm: 'planetary', stormIntensity: 1 }, s)), 0);
+  }
+
+  const rolled: Record<string, Set<number>> = {};
+  for (const [storm, k] of [
+    ['devil', 0.8],
+    ['regional', 0.95],
+    ['severe', 0.95],
+  ] as const) {
+    const counts = new Set<number>();
+    for (let s = 0; s < 24; s++) {
+      const want = new DevilManager().wantedFor(makeCtx({ storm, stormIntensity: k }, 1000 + s * 7919));
+      const band = devilBand(storm, k)!;
+      assert.ok(
+        want >= band[0] && want <= band[1],
+        `${storm}@${k} rolled ${want}, outside its band [${band[0]}, ${band[1]}]`,
+      );
+      assert.ok(want <= MAX_DEVILS, `never more than ${MAX_DEVILS} devils (got ${want})`);
+      counts.add(want);
+    }
+    rolled[storm] = counts;
+    assert.ok(counts.size > 1, `${storm}@${k} is still a fixed count: ${[...counts].join('/')}`);
+  }
+  // A big regional front can carry a handful…
+  assert.ok(Math.max(...rolled.regional) >= 3, `a big front carries several (${[...rolled.regional]})`);
+  // …and a weak one sometimes spins up nothing at all.
+  const weak = new Set<number>();
+  for (let s = 0; s < 24; s++) {
+    weak.add(new DevilManager().wantedFor(makeCtx({ storm: 'regional', stormIntensity: 0.6 }, 31 + s * 104729)));
+  }
+  assert.ok(weak.has(0), `a weak front sometimes makes none (${[...weak]})`);
+  assert.ok(Math.max(...weak) >= 1, `and sometimes still makes one (${[...weak]})`);
+});
+
+test('a band holds its roll instead of re-rolling every frame', () => {
+  const mgr = new DevilManager();
+  const ctx = makeCtx({ storm: 'regional', stormIntensity: 0.95 }, 4242);
+  const first = mgr.wantedFor(ctx);
+  const band = devilBand('regional', 0.95)!;
+  assert.ok(first >= band[0] && first <= band[1], `rolled inside the band (${first})`);
+
+  // Two hundred frames inside one band: the sky must not spawn and kill a
+  // devil on alternate frames.
+  const held = new Set<number>([first]);
+  for (let i = 0; i < 200; i++) {
+    ctx.time += 0.05;
+    held.add(mgr.wantedFor(ctx));
+  }
+  assert.equal(held.size, 1, `the storm kept its devils (${[...held].join('/')})`);
+
+  // A band change is held for a moment, then re-rolled once — not per frame.
+  ctx.stormIntensity = 0.6;
+  assert.equal(mgr.wantedFor(ctx), first, 'the old count holds when the band first changes');
+  for (let i = 0; i < 10; i++) {
+    ctx.time += 0.05;
+    mgr.wantedFor(ctx);
+  }
+  assert.equal(mgr.wantedFor(ctx), first, 'still holding half a second later');
+  for (let i = 0; i < 40; i++) {
+    ctx.time += 0.05;
+    mgr.wantedFor(ctx);
+  }
+  const after = mgr.wantedFor(ctx);
+  const newBand = devilBand('regional', 0.6)!;
+  assert.ok(
+    after >= newBand[0] && after <= newBand[1],
+    `re-rolled into the new band (${after} vs [${newBand[0]}, ${newBand[1]}])`,
+  );
+});
+
+test('a sharp wind ramp spins up a devil with no storm declared', () => {
+  const pool = new ParticlePool(4000, mulberry32(31));
+  const mgr = new DevilManager();
+  const ctx = makeCtx({ storm: 'calm', windX: 6, windZ: 0, windSpeed: 12, windRamp: 1.2 }, 5);
+  runEmitter((c, p) => mgr.update(c, p), ctx, pool, 1);
+  assert.equal(mgr.devils.length, 0, 'one second of gusting is not a front yet');
+  runEmitter((c, p) => mgr.update(c, p), ctx, pool, 3);
+  assert.ok(mgr.activeCount >= 1, `the front arrives with a devil (${mgr.activeCount})`);
+
+  // A hard but *steady* wind, with no ramp behind it, spins nothing up.
+  const steady = new DevilManager();
+  runEmitter(
+    (c, p) => steady.update(c, p),
+    makeCtx({ storm: 'calm', windX: 12, windZ: 4, windSpeed: 40 }, 5),
+    pool,
+    30,
+  );
+  assert.equal(steady.devils.length, 0, 'a steady gale makes no devils of its own');
+});
+
+test('a wind that keeps rising stays well inside the devil ceiling', () => {
+  const mgr = new DevilManager();
+  const pool = new ParticlePool(4000, mulberry32(32));
+  // Ramping hard, and never stopping, for four minutes of sim time.
+  const ctx = makeCtx({ storm: 'calm', windX: 14, windZ: 0, windSpeed: 30, windRamp: 3 }, 6);
+  let peak = 0;
+  for (let i = 0; i < 4800; i++) {
+    ctx.time += 0.05;
+    mgr.update(ctx, pool);
+    pool.update(0.05, ctx.time);
+    peak = Math.max(peak, mgr.devils.length);
+  }
+  assert.ok(mgr.devils.length >= 1, 'the wind did spin devils up');
+  // One devil per ramp, each held ~45 s, never more often than every 30 s.
+  assert.ok(peak <= 2, `a climbing wind cannot carpet the map (peak ${peak})`);
+  assert.ok(peak <= MAX_DEVILS, `and never breaches the ceiling of ${MAX_DEVILS}`);
+});
+
+test('two devils in the same storm walk their own paths', () => {
+  const pool = new ParticlePool(4000, mulberry32(33));
+  const a = new DustDevil({ x: 0, z: 0, groundY: 0 }, mulberry32(41));
+  const b = new DustDevil({ x: 0, z: 0, groundY: 0 }, mulberry32(42));
+  const ctx = makeCtx({ storm: 'devil', stormIntensity: 0.9, windX: 12, windZ: 2, windSpeed: 24 }, 43);
+  // Released from the same spot into the same wind: they must not hold station.
+  runEmitter(
+    (c, p) => {
+      a.update(c, p);
+      b.update(c, p);
+    },
+    ctx,
+    pool,
+    15,
+  );
+  const sep = Math.hypot(a.x - b.x, a.z - b.z);
+  assert.ok(sep > 8, `their tracks diverge (${sep.toFixed(1)} m apart after 15 s)`);
+
+  // …but the meander still reads as downwind travel, not free drifting.
+  const w = Math.hypot(12, 2);
+  for (const d of [a, b]) {
+    const down = (d.x * 12 + d.z * 2) / w;
+    const cross = (d.x * 2 - d.z * 12) / w;
+    assert.ok(down > 15, `still walks downwind (${down.toFixed(1)} m in 15 s)`);
+    assert.ok(Math.abs(cross) < down * 0.6, `wandering, not drifting freely (cross ${cross.toFixed(1)})`);
+  }
+  // Their headings differ, which is what stopped them travelling in formation.
+  const pa = { x: a.x, z: a.z };
+  const pb = { x: b.x, z: b.z };
+  runEmitter(
+    (c, p) => {
+      a.update(c, p);
+      b.update(c, p);
+    },
+    ctx,
+    pool,
+    2,
+  );
+  const ha = Math.atan2(a.x - pa.x, a.z - pa.z);
+  const hb = Math.atan2(b.x - pb.x, b.z - pb.z);
+  assert.ok(Math.abs(ha - hb) > 0.05, `and they are not walking parallel (Δ${Math.abs(ha - hb).toFixed(3)} rad)`);
+});
+
+test('devils crowd apart instead of travelling as one clump', () => {
+  const mgr = new DevilManager();
+  const a = new DustDevil({ x: 0, z: 0, groundY: 0, baseRadius: 3, height: 50 }, mulberry32(44));
+  const b = new DustDevil({ x: 1, z: 0, groundY: 0, baseRadius: 3, height: 50 }, mulberry32(45));
+  mgr.devils.push(a, b);
+  const before = Math.hypot(b.x - a.x, b.z - a.z);
+  for (let i = 0; i < 20; i++) mgr.separate(0.05);
+  const after = Math.hypot(b.x - a.x, b.z - a.z);
+  assert.ok(after > before + 1, `a second of crowding peels them apart (${before.toFixed(2)} → ${after.toFixed(2)} m)`);
+
+  const far = new DevilManager();
+  const c = new DustDevil({ x: 0, z: 0, groundY: 0, baseRadius: 3, height: 50 }, mulberry32(46));
+  const d = new DustDevil({ x: 200, z: 0, groundY: 0, baseRadius: 3, height: 50 }, mulberry32(47));
+  far.devils.push(c, d);
+  for (let i = 0; i < 200; i++) far.separate(0.05);
+  assert.equal(Math.hypot(d.x - c.x, d.z - c.z), 200, 'a devil across the map is left alone');
+});
+
+test('a bigger devil swallows a smaller one and visibly grows', () => {
+  const mgr = new DevilManager();
+  const big = new DustDevil({ x: 0, z: 0, groundY: 0, baseRadius: 6, height: 60 }, mulberry32(48));
+  const small = new DustDevil({ x: 0, z: 0, groundY: 0, baseRadius: 2, height: 40 }, mulberry32(49));
+  const { ctx } = contactPair(mgr, big, small, 4);
+  const r0 = big.baseR;
+  const h0 = big.height;
+  const emit0 = big.emitScale;
+
+  mgr.resolveContacts(ctx);
+  assert.equal(mgr.interactions, 1, 'the contact resolved once');
+  assert.ok(mgr.twinCount === 0 && mgr.danceCount === 0, 'a size mismatch is not a pairing');
+  assert.equal(small.target, 0, 'the little one is torn apart');
+  assert.ok(big.baseR > r0, `the survivor swells (${r0.toFixed(2)} → ${big.baseR.toFixed(2)} m)`);
+  assert.ok(big.height > h0, `and grows taller (${h0.toFixed(1)} → ${big.height.toFixed(1)} m)`);
+  assert.ok(big.emitScale > emit0, `and throws more dust (${emit0.toFixed(2)} → ${big.emitScale.toFixed(2)}×)`);
+  assert.equal(big.target, 1, 'the survivor carries on');
+});
+
+test('a devil cannot gorge itself past its ceiling', () => {
+  const mgr = new DevilManager();
+  const big = new DustDevil({ x: 0, z: 0, groundY: 0, baseRadius: 6, height: 60 }, mulberry32(50));
+  for (let i = 0; i < 12; i++) {
+    const small = new DustDevil({ x: 0, z: 0, groundY: 0, baseRadius: 1.5, height: 30 }, mulberry32(51 + i));
+    const { ctx } = contactPair(mgr, big, small, 1);
+    ctx.time = i * 20; // clear of the pair cooldown between meals
+    mgr.resolveContacts(ctx);
+    mgr.devils.length = 1;
+  }
+  assert.ok(big.baseR <= 6 * 1.8 + 1e-9, `growth is capped (${big.baseR.toFixed(2)} m)`);
+  assert.ok(big.emitScale <= 2.2 + 1e-9, `and so is the emission boost (${big.emitScale.toFixed(2)}×)`);
+  assert.ok(big.baseR > 6, 'but it did grow');
+});
+
+test('a size mismatch usually ends in a dance, and the little one dies off', () => {
+  let danced = 0;
+  let eaten = 0;
+  for (let s = 0; s < 24; s++) {
+    const mgr = new DevilManager();
+    const big = new DustDevil({ x: 0, z: 0, groundY: 0, baseRadius: 5, height: 55 }, mulberry32(52));
+    const small = new DustDevil({ x: 0, z: 0, groundY: 0, baseRadius: 3, height: 45 }, mulberry32(53));
+    const { ctx, pool } = contactPair(mgr, big, small, 3);
+    ctx.rand = mulberry32(200 + s * 13);
+    mgr.resolveContacts(ctx);
+    if (mgr.danceCount === 1) {
+      danced++;
+      assert.equal(big.target, 1, 'the big one is not interrupted');
+      // The little one circles the big one, which keeps walking its own path.
+      const bx0 = big.x;
+      const bz0 = big.z;
+      const r = mgr.pairs[0].r;
+      for (let i = 0; i < 40; i++) {
+        ctx.time += 0.05;
+        mgr.resolveContacts(ctx);
+        big.update(ctx, pool);
+        small.update(ctx, pool);
+        pool.update(0.05, ctx.time);
+      }
+      const gap = Math.hypot(small.x - big.x, small.z - big.z);
+      assert.ok(Math.abs(gap - r) < 1e-6, `the little one holds its orbit (${gap.toFixed(4)} vs ${r.toFixed(4)})`);
+      assert.ok(
+        Math.hypot(big.x - bx0, big.z - bz0) > 1,
+        `while the big one carries on downwind on its own path (${Math.hypot(big.x - bx0, big.z - bz0).toFixed(1)} m)`,
+      );
+    } else {
+      assert.equal(small.target, 0, 'otherwise it is simply eaten');
+      eaten++;
+    }
+  }
+  assert.ok(danced > 0, `some mismatches dance (${danced} of 24)`);
+  assert.ok(eaten > 0, `and some are swallowed instead (${eaten} of 24)`);
+  assert.equal(danced + eaten, 24, 'every contact resolved one way or the other');
+
+  // The dance ends with the little one winding down, having circled the big
+  // one for a while rather than merging with it.
+  const mgr = new DevilManager();
+  const big = new DustDevil({ x: 0, z: 0, groundY: 0, baseRadius: 5, height: 55 }, mulberry32(54));
+  const small = new DustDevil({ x: 0, z: 0, groundY: 0, baseRadius: 3, height: 45 }, mulberry32(55));
+  const { ctx } = contactPair(mgr, big, small, 3);
+  ctx.rand = mulberry32(213); // a seed that dances
+  mgr.resolveContacts(ctx);
+  if (mgr.danceCount === 1) {
+    const r0 = small.baseR;
+    const scratch = new ParticlePool(8, mulberry32(1));
+    for (let i = 0; i < 280; i++) {
+      ctx.time += 0.05;
+      mgr.resolveContacts(ctx);
+      big.update(ctx, scratch);
+      small.update(ctx, scratch);
+    }
+    assert.equal(mgr.danceCount, 0, 'the dance ended');
+    assert.equal(small.target, 0, 'and the little one is gone');
+    assert.equal(big.target, 1, 'the big one never noticed');
+    assert.equal(small.baseR, r0, 'nothing was consumed');
+  }
+});
+
+test('matched devils either twin up or cancel — one outcome, chosen by the roll', () => {
+  let twins = 0;
+  let cancelled = 0;
+  for (let s = 0; s < 24; s++) {
+    const mgr = new DevilManager();
+    const a = new DustDevil({ x: 0, z: 0, groundY: 0, baseRadius: 3, height: 50 }, mulberry32(56));
+    const b = new DustDevil({ x: 0, z: 0, groundY: 0, baseRadius: 3.1, height: 50 }, mulberry32(57));
+    const { ctx } = contactPair(mgr, a, b, 3);
+    ctx.rand = mulberry32(300 + s * 17);
+    mgr.resolveContacts(ctx);
+    if (mgr.twinCount === 1) {
+      twins++;
+      assert.equal(a.target, 1);
+      assert.equal(b.target, 1);
+    } else {
+      cancelled++;
+      assert.equal(a.target, 0, 'both spin down');
+      assert.equal(b.target, 0, 'and both disappear');
+    }
+    assert.equal(mgr.interactions, 1, 'exactly one resolution per contact');
+  }
+  assert.ok(twins > 0, `matched devils sometimes twin (${twins} of 24)`);
+  assert.ok(cancelled > 0, `and sometimes cancel outright (${cancelled} of 24)`);
+});
+
+/** Matched devils, on a seed that rolls a twin pairing rather than a cancellation. */
+function twinningSetup(): { mgr: DevilManager; a: DustDevil; b: DustDevil; ctx: FxContext; pool: ParticlePool } | null {
+  for (let s = 0; s < 40; s++) {
+    const mgr = new DevilManager();
+    const a = new DustDevil({ x: 0, z: 0, groundY: 0, baseRadius: 3, height: 50 }, mulberry32(58));
+    const b = new DustDevil({ x: 0, z: 0, groundY: 0, baseRadius: 3.1, height: 50 }, mulberry32(59));
+    const { ctx, pool } = contactPair(mgr, a, b, 3);
+    ctx.rand = mulberry32(500 + s * 31);
+    mgr.resolveContacts(ctx);
+    if (mgr.twinCount === 1) return { mgr, a, b, ctx, pool };
+  }
+  return null;
+}
+
+test('twins orbit a shared centre until they split or wind down', () => {
+  const setup = twinningSetup();
+  assert.ok(setup, 'matched devils can form a twin pair');
+  const { mgr, a, b, ctx, pool } = setup!;
+  const pair = mgr.pairs[0];
+  const cx0 = pair.cx;
+
+  for (let i = 0; i < 100; i++) {
+    ctx.time += 0.05;
+    mgr.resolveContacts(ctx);
+    a.update(ctx, pool);
+    b.update(ctx, pool);
+    pool.update(0.05, ctx.time);
+  }
+  const mid = { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 };
+  assert.ok(
+    Math.abs(Math.hypot(a.x - mid.x, a.z - mid.z) - pair.r) < 1e-6,
+    'both ride the shared orbit, half a turn apart',
+  );
+  assert.ok(
+    Math.abs(mid.x - (cx0 + 4 * 0.22 * 5)) < 0.5,
+    `and the pair drifts downwind as a unit (${mid.x.toFixed(2)} m in 5 s)`,
+  );
+
+  // It resolves rather than orbiting forever.
+  runEmitter(
+    (c, p) => {
+      mgr.resolveContacts(c);
+      a.update(c, p);
+      b.update(c, p);
+    },
+    ctx,
+    pool,
+    20,
+  );
+  assert.equal(mgr.twinCount, 0, 'the pairing ended');
+  const sep = Math.hypot(a.x - b.x, a.z - b.z);
+  const resolved = a.target === 0 || b.target === 0 || sep > (a.baseR + b.baseR) * 1.15;
+  assert.ok(resolved, `split apart or wound down (sep ${sep.toFixed(1)} m, targets ${a.target}/${b.target})`);
+});
+
+test('a devil already winding down is not a merge target', () => {
+  const mgr = new DevilManager();
+  const live = new DustDevil({ x: 0, z: 0, groundY: 0, baseRadius: 3, height: 50 }, mulberry32(60));
+  const dying = new DustDevil({ x: 0, z: 0, groundY: 0, baseRadius: 3, height: 50 }, mulberry32(61));
+  const { ctx } = contactPair(mgr, live, dying, 2);
+  dying.target = 0;
+  dying.strength = 0.6;
+  mgr.resolveContacts(ctx);
+  assert.equal(mgr.interactions, 0, 'a dying devil is left to finish dying');
+  assert.equal(mgr.twinCount, 0);
+  assert.equal(live.target, 1, 'and the live one carries on');
+
+  // Neither is a devil that has only just started spinning up.
+  const fresh = new DevilManager();
+  const weak = new DustDevil({ x: 0, z: 0, groundY: 0, baseRadius: 3, height: 50 }, mulberry32(62));
+  const strong = new DustDevil({ x: 0, z: 0, groundY: 0, baseRadius: 3, height: 50 }, mulberry32(63));
+  const c2 = contactPair(fresh, strong, weak, 2);
+  weak.strength = 0.2;
+  fresh.resolveContacts(c2.ctx);
+  assert.equal(fresh.interactions, 0, 'a devil that has barely spun up is not a partner yet');
+});
+
+test('resolutions settle instead of thrashing', () => {
+  const mgr = new DevilManager();
+  const pool = new ParticlePool(6000, mulberry32(64));
+  // Five devils dropped on top of each other, in a severe storm, for two minutes.
+  for (let i = 0; i < MAX_DEVILS; i++) {
+    const d = new DustDevil({ x: i * 3, z: 0, groundY: 0, baseRadius: 4, height: 50 }, mulberry32(65 + i));
+    mgr.devils.push(d);
+  }
+  const ctx = makeCtx({ storm: 'severe', stormIntensity: 1, windX: 18, windZ: 6, windSpeed: 50, dust: 0.9 }, 70);
+  for (let i = 0; i < 2400; i++) {
+    ctx.time += 0.05;
+    mgr.update(ctx, pool);
+    pool.update(0.05, ctx.time);
+  }
+  // One resolution per contact, a cooldown after each: five devils cannot
+  // grind through dozens of merges.
+  assert.ok(mgr.interactions <= 6, `the cluster settled quickly (${mgr.interactions} resolutions)`);
+  assert.ok(mgr.devils.length <= MAX_DEVILS, `and the sky never held more than ${MAX_DEVILS}`);
+});
+
+test('a handful of devils still fits the particle budget', () => {
+  const pool = new ParticlePool(9000, mulberry32(66));
+  const devils: DustDevil[] = [];
+  for (let i = 0; i < MAX_DEVILS; i++) {
+    const d = new DustDevil({ x: i * 60, z: 0, groundY: 0, baseRadius: 6, height: 70 }, mulberry32(67 + i));
+    d.grow(1.8); // the worst case: every devil already fed to its cap
+    devils.push(d);
+  }
+  const storm = new StormEmitter();
+  const wind = new WindEmitter();
+  const ctx = makeCtx({ storm: 'severe', stormIntensity: 1, windX: 18, windZ: 6, windSpeed: 55, dust: 0.9 }, 72);
+  let peak = 0;
+  for (let i = 0; i < 600; i++) {
+    ctx.time += 0.05;
+    for (const d of devils) d.update(ctx, pool);
+    storm.update(ctx, pool);
+    wind.update(ctx, pool);
+    pool.update(0.05, ctx.time);
+    peak = Math.max(peak, pool.alive);
+  }
+  assert.ok(peak < 7500, `the worst case leaves headroom in the pool (peak ${peak} of 9000)`);
+});
+
+test('devil behaviour is deterministic under a seeded RNG', () => {
+  const drive = (seed: number): string => {
+    const pool = new ParticlePool(3000, mulberry32(seed));
+    const mgr = new DevilManager();
+    const ctx = makeCtx(
+      { storm: 'severe', stormIntensity: 0.95, windX: 16, windZ: 5, windSpeed: 48, dust: 0.8, windRamp: 0.9 },
+      seed,
+    );
+    runEmitter((c, p) => mgr.update(c, p), ctx, pool, 12);
+    return JSON.stringify([
+      mgr.devils.map((d) => [d.x.toFixed(6), d.z.toFixed(6), d.baseR.toFixed(6), d.strength.toFixed(6), d.target]),
+      mgr.interactions,
+      mgr.twinCount,
+      mgr.danceCount,
+    ]);
+  };
+  assert.equal(drive(1234), drive(1234), 'same seed, same sky');
+  assert.notEqual(drive(1234), drive(4321), 'different seed, different weather');
+});
+
 group('WeatherFX controller');
 
 function calmWeather(): WeatherFxWeather {
   return { windSpeed: 8, windDirRad: 0.7, dust: 0.08, visibility: 1, storm: 'calm', stormIntensity: 0 };
 }
 
-function makeFx(seed = 99): { fx: WeatherFX; cam: THREE.PerspectiveCamera } {
+function makeFx(seed = 99, maxParticles?: number): { fx: WeatherFX; cam: THREE.PerspectiveCamera } {
   const scene = new THREE.Scene();
-  const fx = new WeatherFX(scene, { rand: mulberry32(seed) });
+  const fx = new WeatherFX(scene, { rand: mulberry32(seed), maxParticles });
   fx.setViewport(900, 55);
   const cam = new THREE.PerspectiveCamera(55, 1, 0.5, 4200);
   cam.position.set(120, 110, 150);
@@ -541,6 +1009,64 @@ test('a moving rover leaves a trail; a parked one leaves nothing', () => {
   const parked = drive(false);
   const cruising = drive(true);
   assert.ok(cruising > parked + 10, `the mover trails dust (${parked} vs ${cruising})`);
+});
+
+test('a rising wind spins a devil up through the FX controller', () => {
+  const dt = 0.05;
+  const steps = 200; // ten sim seconds of wind that will not stop climbing
+  const rising = makeFx(26);
+  const input = makeInput(calmWeather());
+  for (let i = 0; i < steps; i++) {
+    input.time += dt;
+    input.weather = { ...calmWeather(), windSpeed: 8 + 3 * input.time };
+    rising.fx.sync(input, rising.cam, dt);
+  }
+  assert.ok(rising.fx.devilCount >= 1, `the gust front arrives before any storm is declared (${rising.fx.devilCount})`);
+
+  // A hard but steady wind, however, spins nothing up: it is the *ramp* that
+  // does it, not the speed.
+  const steady = makeFx(27);
+  const still = makeInput({ ...calmWeather(), windSpeed: 45 });
+  for (let i = 0; i < steps; i++) {
+    still.time += dt;
+    steady.fx.sync(still, steady.cam, dt);
+  }
+  assert.equal(steady.fx.devilCount, 0, 'a steady gale makes no devils of its own');
+});
+
+test('a real storm arrives with devils; calm weather never has them', () => {
+  const drive = (withStorm: boolean, seed: number): { devils: number; firstAt: number; peak: number } => {
+    const weather = new Weather(seed);
+    weather.debugSuppressRolls();
+    if (withStorm) weather.debugScheduleStorm('severe', 0, 20);
+    // A small pool: this test is about the devils, not the dust budget, and
+    // the sim-side run covers thousands of ticks.
+    const { fx, cam } = makeFx(seed + 1, 1200);
+    const input = makeInput(calmWeather());
+    const dt = 0.05;
+    let firstAt = -1;
+    let peak = 0;
+    for (let i = 0; i < 3600; i++) {
+      // Three sim minutes: the front arrives, peaks and is still blowing.
+      input.time += dt;
+      weather.tick(dt, input.time, 1);
+      input.weather = weather.reading;
+      fx.sync(input, cam, dt);
+      peak = Math.max(peak, fx.devilCount);
+      if (firstAt < 0 && fx.devilCount > 0) firstAt = input.time;
+    }
+    return { devils: fx.devilCount, firstAt, peak };
+  };
+
+  // The real sim's ambient wind wanders all the time; it must never be enough.
+  for (const seed of [11, 12, 13]) {
+    const calm = drive(false, seed);
+    assert.equal(calm.devils, 0, `three minutes of clear weather spins nothing up (seed ${seed})`);
+  }
+  const storm = drive(true, 11);
+  assert.ok(storm.firstAt > 0, 'the storm brought devils with it');
+  assert.ok(storm.peak >= 2, `and more than the old two at once (peak ${storm.peak})`);
+  assert.ok(storm.peak <= MAX_DEVILS, `never more than ${MAX_DEVILS} (peak ${storm.peak})`);
 });
 
 test('pause freezes the system exactly', () => {
