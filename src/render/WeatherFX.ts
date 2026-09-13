@@ -4,7 +4,9 @@
  * The sim stays authoritative and GPU-free — it only ever reports wind, dust,
  * storm class and intensity. This controller reads those readings every frame
  * and drives the particle emitters (ambient wind dust, storm grit, dust
- * devils, rover wheel trails) that make the sky *visible*.
+ * devils, rover wheel trails) that make the sky *visible*. It also derives the
+ * one thing the sim doesn't report: how fast the wind is rising, which is what
+ * spins a dust devil up ahead of a declared storm.
  *
  * Like the old dust field it replaces, FX runs on **sim time**: `dt <= 0`
  * (paused) freezes every particle exactly where it is, and emission rates are
@@ -88,6 +90,14 @@ export class WeatherFX {
   private readonly rand: Rand;
   /** Previous rover positions, for deriving speed (the sim stores none). */
   private readonly prev = new Map<number, { x: number; z: number; t: number }>();
+  /** Last wind reading, for deriving d(windSpeed)/dt. */
+  private prevWind: { speed: number; t: number } | null = null;
+  /**
+   * Smoothed wind acceleration (m/s per sim second). Lightly filtered so a
+   * single frame's jump — a dev-mode storm snapping in with no lead, say —
+   * doesn't read as a gust front arriving.
+   */
+  private windRamp = 0;
 
   constructor(scene: THREE.Scene, opts: WeatherFxOptions = {}) {
     this.rand = opts.rand ?? Math.random;
@@ -133,6 +143,14 @@ export class WeatherFX {
     // The sim's compass convention is atan2(x, z) — the drift vector is
     // (sin, cos) of the bearing, same mapping the old field used.
     const drift = w.windSpeed * 0.45;
+    // How fast the wind is rising, per sim second. Devils spin up off the
+    // ramp itself — the gust front arrives before the storm is declared.
+    const inst =
+      this.prevWind && input.time > this.prevWind.t
+        ? (w.windSpeed - this.prevWind.speed) / (input.time - this.prevWind.t)
+        : 0;
+    this.prevWind = { speed: w.windSpeed, t: input.time };
+    this.windRamp += (inst - this.windRamp) * Math.min(1, dtc / 1.2);
     const focus = viewFocus(camera);
     this.focusX = focus.x;
     this.focusZ = focus.z;
@@ -144,6 +162,7 @@ export class WeatherFX {
       windX: Math.sin(w.windDirRad) * drift,
       windZ: Math.cos(w.windDirRad) * drift,
       windSpeed: w.windSpeed,
+      windRamp: this.windRamp,
       dust: w.dust,
       storm: w.storm,
       stormIntensity: w.stormIntensity,
@@ -190,5 +209,7 @@ export class WeatherFX {
     this.points.dispose();
     this.pool.clear();
     this.prev.clear();
+    this.prevWind = null;
+    this.windRamp = 0;
   }
 }

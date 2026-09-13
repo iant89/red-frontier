@@ -13,6 +13,21 @@ Persistent notes for future coding sessions.
 - **Next-pillar fork is still open:** GDD wants P5 refining next; the project already shipped a P6 slice and TDD never gave refining its own tier. Pick Engineering (P5) vs finishing Exploration (T6) explicitly — the docs will not decide it for you.
 - Deliberate locks encoded in sim + docs: bulk solids on rovers, fluids never; per-resource storage; dev *modifiers* never save, *fabrications* do; no field-fluid recovery in supply drops.
 
+## Weather FX (dust devils)
+
+- Devil behaviour lives in `src/render/particles/effects.ts` (`DustDevil`, `DevilManager`, `devilBand`, `MAX_DEVILS`).
+  `FxContext` is the only interface between it and the world, and it now carries **`windRamp`** (m/s per sim second) —
+  `WeatherFX.sync` derives it from the previous frame's reading, because the sim reports wind speed but never its
+  derivative. Anything building an `FxContext` by hand (tests, tooling) must supply it.
+- Devil counts are **rolled per intensity band and held**, not rolled per frame (`wantedFor` + `BAND_HOLD`). Rolling
+  every frame would spawn and kill a devil on alternate frames as a storm hovers on a band boundary.
+- `RAMP_MIN = 0.35 m/s²` was calibrated against the real sim, not guessed: 20 minutes of ambient weather across six
+  seeds never trips it, a scheduled storm trips it as its front arrives. Re-check both directions before touching it.
+- Budget: `MAX_DEVILS = 5`. Worst case measured at ~6155 of 9000 particles (5 devils fed to their growth cap plus a
+  severe storm). `tests/render/particles.test.ts` pins that ceiling.
+- **Adding a `rand()` draw to `DustDevil`'s constructor moves every seeded FX test** — the devil RNG is the FX RNG, and
+  the size/spin/wander draws all come out of one stream. Expect to re-tune seeds when it changes.
+
 ## Learned the hard way
 
 - **The two sim transports have different failure modes, and only the browser gates see both.** `LocalSimHost`'s view *is* the live sim, so anything that delays a view

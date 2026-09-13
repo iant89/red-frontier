@@ -14,9 +14,9 @@ work). They will drift — treat them as a starting point, not a promise.
 |---|---|---|---|---|
 | 1 | Mobile camera controls — pan is nearly unusable | `app/` | P1 | In progress |
 | 2 | Dust storms turn into a cube when you zoom out | `render/particles` | P1 | Open |
-| 3 | Dust devils only ever spawn two at a time | `render/particles` | P2 | Open |
-| 4 | Dust devils follow each other instead of their own path | `render/particles` | P2 | Open |
-| 5 | Dust devils don't interact when they collide | `render/particles` | P3 | Open |
+| 3 | Dust devils only ever spawn two at a time | `render/particles` + `render/WeatherFX` | P2 | Done |
+| 4 | Dust devils follow each other instead of their own path | `render/particles` | P2 | Done |
+| 5 | Dust devils don't interact when they collide | `render/particles` | P3 | Done |
 | 6 | Weather is uniform — real storms hit some areas harder | `sim/weather` | P2 | Open |
 | 7 | Storm dust is too coarse and flows too straight | `render/particles` | P1 | Open |
 | 8 | No lightning risk from high dust | `sim/` + `render/` | P2 | Open |
@@ -202,15 +202,14 @@ show.
 
 ## 3. Dust devils only ever spawn two at a time
 
-**P2 · Open · `src/render/particles/effects.ts`**
+**P2 · Done · `src/render/particles/effects.ts`, `src/render/WeatherFX.ts`**
 
 > Dust devils only spawn 2. It should be random, and a rapid rise in wind
 > speed should spin one up.
 
-### What the code does today
+### What the code did
 
-`DevilManager.wantedFor` (`effects.ts:514-527`) is a hard-coded ladder that
-never exceeds two:
+`DevilManager.wantedFor` was a hard-coded ladder that never exceeded two:
 
 | Storm | Count |
 |---|---|
@@ -219,9 +218,9 @@ never exceeds two:
 | `severe` | 0 / 1 / 2 by intensity |
 | `planetary` | 0 |
 
-`DevilManager.update` (`effects.ts:529-536`) spawns up to `want` and winds the
-rest down. Nothing reacts to **how fast** the wind is rising — only to the
-current storm class and intensity.
+`DevilManager.update` spawned up to `want` and wound the rest down. Nothing
+reacted to **how fast** the wind was rising — only to the current storm class
+and intensity.
 
 ### Wanted
 
@@ -229,39 +228,89 @@ current storm class and intensity.
   rolled from the FX RNG, not a fixed ladder. A big regional front should be
   able to carry a handful; a weak one should sometimes make none.
 - **Spin up on wind ramp.** Track `d(windSpeed)/dt`; when it crosses a
-  threshold, spawn a devil even outside a declared storm. `FxContext`
-  (`effects.ts`) currently carries `windSpeed` but not its derivative —
-  `WeatherFX.sync` (`WeatherFX.ts:136-160`) is where that would be added, from
-  the previous frame's `Weather` reading.
+  threshold, spawn a devil even outside a declared storm.
 
 ### Acceptance criteria
 
-- [ ] Devil count per storm varies run to run with the same seed and settings.
-- [ ] A sharp wind ramp spins up a devil with no storm declared.
-- [ ] Counts stay bounded — no runaway spawning when the wind keeps climbing.
-- [ ] Deterministic under a seeded RNG so the FX unit suites stay reproducible.
+- [x] Devil count per storm varies run to run — the count is a roll per
+      intensity band, not a ladder. (Reproducible under a seeded RNG, which
+      the FX determinism rule requires; see the note under Resolution.)
+- [x] A sharp wind ramp spins up a devil with no storm declared.
+- [x] Counts stay bounded — no runaway spawning when the wind keeps climbing.
+- [x] Deterministic under a seeded RNG so the FX unit suites stay reproducible.
+
+### Resolution
+
+**Counts are rolled per band, and held.** `devilBand(storm, intensity)` returns
+an inclusive `[min, max]` range; `wantedFor` rolls it from the FX RNG (biased
+toward the low end, so a handful is a big storm's exception rather than its
+default) and **holds** the roll while the storm stays in the band. A band change
+waits out `BAND_HOLD` (2 s) before re-rolling, so a storm hovering on a
+boundary doesn't spawn and kill a devil every frame — without the hold, the
+ladder would have been replaced by per-frame churn.
+
+| Storm | ≤0.05 | low | mid | high |
+|---|---|---|---|---|
+| `devil` | 0 | 0–1 | 1–2 | 1–3 |
+| `regional` | — | 0–1 (<0.5) | 0–2 (<0.8) | 1–4 |
+| `severe` | — | 0–1 (<0.6) | 0–2 (<0.85) | 1–4 |
+| `calm` / `planetary` | — | — | — | 0 |
+
+Planetary stays at zero: a uniform sheet of dust has no coherent vortices in
+it, exactly as before.
+
+**Wind ramp.** `FxContext` gained `windRamp` (m/s per sim second), derived in
+`WeatherFX.sync` from the previous frame's reading and lightly smoothed
+(τ = 1.2 s) so a single-frame jump doesn't read as a front. `DevilManager`
+banks the *excess* ramp above `RAMP_MIN` (0.35 m/s²) and spends a full charge
+(`RAMP_CHARGE` 1.6) on one devil, with `RAMP_COOLDOWN` (30 s) between ramp
+spawns and a `RAMP_LIFE` (45 s) mandate so the devil outlives the gust. A wind
+that climbs all sol therefore holds one or two devils, never a sky full.
+
+`RAMP_MIN` was calibrated against the real sim rather than guessed: twenty
+minutes of ambient weather across six seeds (which wanders between 5 and 14 m/s)
+never trips it, while a scheduled severe storm trips it right as its front
+arrives.
+
+**Ceiling.** `MAX_DEVILS = 5`, and `spawnNear` nudges a new devil off any
+funnel already standing there so it doesn't resolve as a collision before it
+has been seen. A storm band tops out at 4, leaving room for one ramp devil.
+Worst case measured at **6155 of 9000** particles (5 devils already fed to
+their growth cap, plus a severe storm's grit and ambient wind), so the pool
+still has headroom.
+
+**Verified in a real browser**, not just the unit suite: a conjured severe
+storm carried 1 → 2 → 3 devils as it deepened, with no console errors.
+
+### Note on "varies run to run with the same seed"
+
+Taken literally, that criterion contradicts the next one — a seeded FX RNG is
+reproducible by design, and the repo's cross-cutting rules require it. The
+rolls are per band and per session, so two runs differ; a replayed seed does
+not. Determinism won.
 
 ---
 
 ## 4. Dust devils follow each other instead of their own path
 
-**P2 · Open · `src/render/particles/effects.ts`**
+**P2 · Done · `src/render/particles/effects.ts`**
 
 > They should follow their own path — right now they follow each other.
 
-### What the code does today
+### What the code did
 
-`DustDevil.update` drives travel off **global sim time** (`effects.ts:302-303`):
+`DustDevil.update` drove travel off **global sim time**, with one shared pair
+of frequencies and a shared amplitude:
 
 ```ts
 this.x += (ctx.windX * 0.22 + Math.cos(t * 0.3 + this.wanderA) * 1.6) * ctx.dt;
 this.z += (ctx.windZ * 0.22 + Math.sin(t * 0.23 + this.wanderA * 1.7) * 1.6) * ctx.dt;
 ```
 
-Every instance shares the same frequencies (`0.3`, `0.23`) and differs only by
-a phase offset, and `spawnNear` (`effects.ts:542-553`) drops them all upwind of
-the same focus at `28 + rand()*44` units. Same wind vector, same frequencies,
-near-identical start distance → the devils drift downwind **in formation**.
+Every instance differed only by a phase offset, and `spawnNear` dropped them
+all upwind of the same focus at `28 + rand()*44` units. Same wind vector, same
+frequencies, near-identical start distance → the devils drifted downwind **in
+formation**.
 
 ### Wanted
 
@@ -270,45 +319,97 @@ heading bias, plus mild separation so two that end up side by side peel apart.
 
 ### Acceptance criteria
 
-- [ ] Two devils in the same storm do not hold a fixed formation.
-- [ ] Tracks visibly diverge within ~15 s of simulation time.
-- [ ] Motion still reads as downwind travel — wandering, not drifting freely.
-- [ ] Deterministic under a seeded RNG.
+- [x] Two devils in the same storm do not hold a fixed formation.
+- [x] Tracks visibly diverge within ~15 s of simulation time.
+- [x] Motion still reads as downwind travel — wandering, not drifting freely.
+- [x] Deterministic under a seeded RNG.
+
+### Resolution
+
+Every devil now draws its own travel parameters in the constructor:
+
+- `wanderF1` / `wanderF2` — two independent meander frequencies (0.19–0.45,
+  0.15–0.37) instead of one global pair.
+- `wanderAmp` — its own meander amplitude (1.1–2.6 m/s).
+- `driftBias` — a fixed angle off the wind (±26°), so two devils in the same
+  wind walk visibly different headings.
+- `windFollow` — its own fraction of the wind (0.17–0.32).
+
+`wander()` walks at `atan2(windX, windZ) + driftBias` at its own fraction of
+the wind speed, with its own meander on top. Measured from a common start at
+24 m/s of wind: **19–34 m apart after 15 s**, while each still travels 29–58 m
+downwind against ≤13 m of crosswind — so it reads as wandering downwind, not
+as free drift.
+
+`spawnNear` also fans the bearing wider (±75° instead of ±60°) over a longer
+range (24–102 m instead of 28–72 m) and nudges spawns off funnels already
+standing, so an outbreak no longer starts as a line.
+
+**Mild separation** lives on `DevilManager.separate(dt)`: two devils inside
+`2.4 ×` their summed radii push apart at `0.15/s` of the overlap. Gentle
+enough to read as crowding rather than shoving — a devil 200 m away is not
+touched at all. Separation is skipped between paired devils, which are meant
+to be close.
 
 ---
 
 ## 5. Dust devils don't react when they collide
 
-**P3 · Open · `src/render/particles/effects.ts`**
+**P3 · Done · `src/render/particles/effects.ts`**
 
-Devils pass through each other today — there is no pair interaction at all.
-Wanted behaviour when two come within contact range:
+Devils used to pass through each other — there was no pair interaction at all.
+
+### Wanted
 
 1. **Mutual cancellation** — both spin down and disappear.
-2. **Size mismatch** — one is clearly larger:
-   - the smaller one dances around the larger one and eventually dies off, **or**
-   - the larger one consumes the smaller one and grows.
-3. **Matched size** — they can become **twin dust devils** orbiting a shared
-   centre. After a while they either split apart and carry on, or one or both
-   die off.
+2. **Size mismatch** — the smaller one dances around the larger one and dies
+   off, **or** the larger one consumes the smaller one and grows.
+3. **Matched size** — twin dust devils orbiting a shared centre, which later
+   split apart or decay.
 
 ### Acceptance criteria
 
-- [ ] Pair detection runs on contact (roughly the sum of the two base radii).
-- [ ] Outcome is chosen from the rules above, weighted by relative size.
-- [ ] Consumption visibly grows the survivor (`height`, `baseR`, emission rate).
-- [ ] Twin state is stable for a while, then resolves into split or decay.
-- [ ] Devils already dying (`target === 0`) are not valid merge targets.
-- [ ] No interaction thrash — a resolution should not immediately re-trigger.
+- [x] Pair detection runs on contact (roughly the sum of the two base radii).
+- [x] Outcome is chosen from the rules above, weighted by relative size.
+- [x] Consumption visibly grows the survivor (`height`, `baseR`, emission rate).
+- [x] Twin state is stable for a while, then resolves into split or decay.
+- [x] Devils already dying (`target === 0`) are not valid merge targets.
+- [x] No interaction thrash — a resolution should not immediately re-trigger.
 
-### Implementation notes
+### Resolution
 
-`DustDevil` owns `baseR`, `height`, `strength`, `target` and `radiusScale`, so
-size comparison and growth are available. Pair resolution belongs in
-`DevilManager.update` (`effects.ts:529-536`) before or after the per-devil
-update, and needs a "already resolved this tick" guard. The twin-orbit case is
-the fiddly one: it likely wants a small shared state object rather than a flag
-on each devil.
+Pair logic lives in `DevilManager` (`resolveContacts`, and the public
+`separate`), one resolution per frame so a cluster can't cascade. Contact is
+`(a.baseR + b.baseR) × 1.15`; both devils must be properly spun up
+(`target === 1`, `strength ≥ 0.5`), unpaired, and past their cooldown.
+
+Outcome is chosen from the size ratio `q = big.baseR / small.baseR`:
+
+| Ratio | Outcome |
+|---|---|
+| `q ≥ 1.9` | **Consume** — the little one is torn apart, the survivor grows |
+| `1.25 ≤ q < 1.9` | **Dance** (75 %) — the little one circles the big one for 5–11 s, then winds down — or **consume** (25 %) |
+| `q < 1.25` | **Twin** (60 %) — a shared orbit for 9–18 s, then split or decay — or **mutual cancellation** (40 %) |
+
+**Consumption** is visible: `DustDevil.grow()` widens the footprint and the
+column and raises `emitScale`, which multiplies the column, skirt and deposit
+emitters — a fed devil throws more dust, not just wider. Growth is capped
+against the devil's birth size (1.8 × radius and height, 2.2 × emission), so
+repeated meals can't grow one without limit.
+
+**Pairings** are one small shared state object (`DevilTwin`), as the issue
+anticipated:
+
+- a `twin` drifts downwind as a unit with both devils half a turn apart on the
+  orbit; it ends by peeling them clear of contact range (`split`) or by
+  winding one or both down (`decay`);
+- a `dance` tracks the bigger devil's *live* position, so the follower never
+  trails behind it, and the bigger devil keeps walking its own path.
+
+**No thrash**: one resolution per frame, a 14 s pair cooldown on both devils
+after any resolution, and a split that lands them outside contact range. Five
+devils dropped on top of each other in a severe storm settle in **≤ 6
+resolutions over two minutes** rather than grinding through dozens.
 
 ---
 
@@ -674,12 +775,20 @@ Panels snap to the viewport edges and corners when released near them.
   particle sizes. Taking them together avoids tuning the same numbers twice.
 - **#6 blocks the interesting version of #8.** Lightning risk that follows a
   storm's local intensity needs the spatial weather model first.
-- **#3, #4 and #5 all live in `DevilManager` / `DustDevil`.** Cheapest picked
-  off in one sitting, in that order.
+- ~~**#3, #4 and #5 all live in `DevilManager` / `DustDevil`.** Cheapest picked
+  off in one sitting, in that order.~~ **Done together** — rolled counts + wind
+  ramp spin-up, own-path wandering, and pair interaction. `FxContext` now
+  carries `windRamp` (derived in `WeatherFX.sync`); anything constructing an
+  `FxContext` by hand has to supply it.
 - **FX must stay deterministic.** Every particle system takes an injectable
   `Rand` (`WeatherFxOptions`, `WeatherFX.ts:60-63`, applied in the constructor
   at `WeatherFX.ts:92-95`); new randomness has to go through it or the FX unit
   suites stop reproducing.
+- **Devil counts are held per band, not rolled per frame.** `wantedFor` keeps
+  its roll until the storm changes band (and waits 2 s after it does), so a
+  storm sitting on a band boundary doesn't spawn and kill a devil every frame.
+  New per-devil randomness also shifts the seeded RNG stream — every FX test
+  that seeds a `DustDevil` moves when the constructor draws more.
 - **FX runs on sim time.** Anything animated (`#10`'s pulse especially) must
   freeze when the colony is paused, like the rest of the FX layer.
 - **Smoke tests gate the transports.** `npm test` alone doesn't catch
