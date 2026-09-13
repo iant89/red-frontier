@@ -21,7 +21,7 @@ work). They will drift — treat them as a starting point, not a promise.
 | 7 | Storm dust is too coarse and flows too straight | `render/particles` | P1 | Open |
 | 8 | No lightning risk from high dust | `sim/` + `render/` | P2 | Open |
 | 9 | Rover selection ring isn't a circle | `render/Renderer` | P1 | Done |
-| 10 | Rover selection ring needs a pulsing white glow | `render/Renderer` | P3 | Open |
+| 10 | Rover selection ring needs a pulsing white glow | `render/Renderer` | P3 | Done |
 | 11 | Rovers have no collision or proximity awareness | `sim/` | P1 | Open |
 | 12 | Draggable panels scroll their own title bar | `ui/HUD` + `style.css` | P2 | Open |
 | 13 | Draggable panels don't snap to the viewport edges | `ui/HUD` | P3 | Open |
@@ -437,7 +437,7 @@ constants (`SELECTION_RING_RADIUS`, `SELECTION_RING_THICKNESS`).
 
 ## 10. Rover selection ring needs a pulsing white glow
 
-**P3 · Open · `src/render/Renderer.ts`**
+**P3 · Done · `src/render/Renderer.ts`**
 
 > I'd like it to be a circle with a pulsing white glow.
 
@@ -451,10 +451,24 @@ without strobing.
 
 ### Acceptance criteria
 
-- [ ] Ring pulses smoothly; the cycle is slow enough to read as a breath.
-- [ ] Glow reads on both pale dust and dark rock, day and night.
-- [ ] Pulse is driven by **sim time**, so it freezes when the colony is paused.
-- [ ] Selection remains obvious at maximum zoom-out.
+- [x] Ring pulses smoothly; the cycle is slow enough to read as a breath —
+      a 0..1 cosine over a 1.9 s period, so there is no seam at the wrap.
+- [x] Glow reads on both pale dust and dark rock, day and night — the halo is
+      additively blended, so it lifts off dark terrain rather than washing out.
+- [x] Pulse is driven by **sim time** (`clockT`, set from `sim.simTime` in
+      `sync`), so it freezes when the colony is paused.
+- [x] Selection remains obvious at maximum zoom-out — the halo scales with the
+      ring, and the core ring never dips below 0.72 opacity.
+
+### Resolution
+
+A second, wider ring (`selectionGlow`, 1.18× radius and 3.2× thickness) is
+drawn under the core ring with `AdditiveBlending` and `renderOrder = -1`.
+`syncSelectionPulse` — called from both `sync` and `setSelection` — breathes
+the pair: ring opacity `0.72 → 1.0`, halo `0.16 → 0.42`, plus a 6 % swell on
+the halo's radius. The swell is derived from the *ring's* scale each frame, so
+it cannot accumulate. The curve is exported as `selectionPulse` /
+`selectionPulseOpacity` and covered by `tests/render/selection.test.ts`.
 
 ### Implementation notes
 

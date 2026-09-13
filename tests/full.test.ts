@@ -36,6 +36,7 @@ import './sim/devtools.test';
 import './sim/host.test';
 import './sim/worker.test';
 import './render/particles.test';
+import './render/selection.test';
 import './ui/build-status.test';
 import './hud/chrome.test';
 import './hud/panels.test';

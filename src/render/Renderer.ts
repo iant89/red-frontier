@@ -44,6 +44,28 @@ const TERRAIN_SEGS = 280;
 /** Base radius the selection ring geometry is built at; scaled per entity. */
 const SELECTION_RING_RADIUS = 1.4;
 const SELECTION_RING_THICKNESS = 0.35;
+/**
+ * The halo behind the selection ring: a wider, softer band that breathes.
+ * Sized as multiples of the core ring so both scale from one setScalar.
+ */
+const SELECTION_GLOW_RADIUS = SELECTION_RING_RADIUS * 1.18;
+const SELECTION_GLOW_THICKNESS = SELECTION_RING_THICKNESS * 3.2;
+/** Seconds per breath. Slow enough to read as a pulse, not a strobe. */
+const SELECTION_PULSE_PERIOD = 1.9;
+
+/**
+ * The selection breath as a pure function of **sim** time: a 0..1 cosine, so
+ * there are no hard edges at either end of the cycle. Exported so the render
+ * suite can check the curve without standing up a GPU context.
+ */
+export function selectionPulse(simTime: number): number {
+  return 0.5 - 0.5 * Math.cos((simTime / SELECTION_PULSE_PERIOD) * Math.PI * 2);
+}
+
+/** Opacity of the core ring and the halo at a given point in the breath. */
+export function selectionPulseOpacity(pulse: number): { ring: number; glow: number } {
+  return { ring: 0.72 + 0.28 * pulse, glow: 0.16 + 0.26 * pulse };
+}
 
 /**
  * Site colours (GDD §06/§10). Deliberately off the rust palette the terrain is
@@ -100,6 +122,8 @@ export class GameRenderer {
   private poiMeshes = new Map<number, THREE.Group>();
 
   selectionRing: THREE.Mesh;
+  /** Soft additive halo drawn under the selection ring; pulses on sim time. */
+  private selectionGlow: THREE.Mesh;
   ghostGroup: THREE.Group;
   private ghostBody: THREE.Mesh;
 
@@ -148,6 +172,16 @@ export class GameRenderer {
     this.selectionRing = this.makeRing(0xffffff, SELECTION_RING_RADIUS, SELECTION_RING_THICKNESS);
     this.selectionRing.visible = false;
     this.scene.add(this.selectionRing);
+
+    // The halo renders additively so it lifts off dark rock, and sits a hair
+    // lower than the core ring so the two never z-fight with each other.
+    this.selectionGlow = this.makeRing(0xffffff, SELECTION_GLOW_RADIUS, SELECTION_GLOW_THICKNESS);
+    const glowMat = this.selectionGlow.material as THREE.MeshBasicMaterial;
+    glowMat.blending = THREE.AdditiveBlending;
+    glowMat.opacity = 0.3;
+    this.selectionGlow.renderOrder = -1;
+    this.selectionGlow.visible = false;
+    this.scene.add(this.selectionGlow);
 
     this.ghostGroup = new THREE.Group();
     this.ghostGroup.visible = false;
@@ -483,6 +517,7 @@ export class GameRenderer {
     this.syncDeposits(sim.world.deposits);
     this.syncPois(sim.world.pois);
     this.syncColonist(sim.colonist);
+    this.syncSelectionPulse();
     this.syncOverlay(sim);
   }
 
@@ -1411,6 +1446,7 @@ export class GameRenderer {
   setSelection(entity: { x: number; z: number; radius: number } | null): void {
     if (!entity) {
       this.selectionRing.visible = false;
+      this.selectionGlow.visible = false;
       return;
     }
     const y = this.world.heightAt(entity.x, entity.z);
@@ -1421,6 +1457,28 @@ export class GameRenderer {
     // rotation — scaling X but not Y produced an ellipse (issue #9).
     this.selectionRing.scale.setScalar(entity.radius / SELECTION_RING_RADIUS);
     this.selectionRing.visible = true;
+
+    // The halo tracks the ring exactly, one notch closer to the ground.
+    this.selectionGlow.position.set(entity.x, y + 0.18, entity.z);
+    this.selectionGlow.scale.setScalar(entity.radius / SELECTION_RING_RADIUS);
+    this.selectionGlow.visible = true;
+    this.syncSelectionPulse();
+  }
+
+  /**
+   * Breathe the selection halo (issue #10). Driven by `clockT` — the same sim
+   * clock the damaged-building ring uses — so the pulse freezes with the
+   * colony instead of running on wall time.
+   */
+  private syncSelectionPulse(): void {
+    if (!this.selectionRing.visible) return;
+    const pulse = selectionPulse(this.clockT);
+    const op = selectionPulseOpacity(pulse);
+    (this.selectionRing.material as THREE.MeshBasicMaterial).opacity = op.ring;
+    (this.selectionGlow.material as THREE.MeshBasicMaterial).opacity = op.glow;
+    // Derived from the ring's scale, never from the glow's own, so the slight
+    // breathing swell can't accumulate frame over frame.
+    this.selectionGlow.scale.setScalar(this.selectionRing.scale.x * (1 + 0.06 * pulse));
   }
 
   /**
