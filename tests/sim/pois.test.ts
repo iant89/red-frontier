@@ -343,7 +343,7 @@ test('sites, discovery and the drop schedule survive a save round-trip', () => {
   run(sim, 0.4);
 
   const snap = JSON.parse(JSON.stringify(sim.snapshot())) as any;
-  assert.equal(snap.version, 7, 'the snapshot should be on the current schema');
+  assert.equal(snap.version, 8, 'the snapshot should be on the current schema');
   assert.ok(Array.isArray(snap.pois) && snap.pois.length > 0, 'sites are saved');
   assert.ok(snap.exploration?.nextDropSol > 0, 'the drop schedule is saved');
 
@@ -379,7 +379,7 @@ test('a v6 save migrates: an older colony simply has not found anything yet', ()
   );
   assert.ok(next.nextDropSol > 0, 'a migrated colony gets a drop schedule');
   const snap2 = JSON.parse(JSON.stringify(next.snapshot())) as any;
-  assert.equal(snap2.version, 7, 're-saving lands on the current schema');
+  assert.equal(snap2.version, 8, 're-saving lands on the current schema');
 });
 
 await finish('sim/pois');

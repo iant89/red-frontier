@@ -39,6 +39,11 @@ import {
   STORM_WARN_LEAD_S,
   STORM_CELL_GEOM,
   SOL_SECONDS,
+  LIGHTNING_DUST_MIN,
+  LIGHTNING_INTENSITY_MIN,
+  LIGHTNING_BASE_RATE,
+  LIGHTNING_DUST_EXP,
+  LIGHTNING_STORM_FACTOR,
 } from './config';
 import { clamp, lerp, smoothstep } from '../lib/rng';
 import { Noise2D } from '../lib/noise';
@@ -189,17 +194,23 @@ function stormIntensityAt(s: StormCell, t: number): number {
 }
 
 /**
- * How much of a cell the colony is standing in: 1 under the footprint,
- * tapering across the rim, with a windy fringe ahead of the leading edge
- * (the gust front arrives before the dust wall does).
+ * How much of a cell the point `(xKm, zKm)` is standing in: 1 under the
+ * footprint, tapering across the rim, with a windy fringe ahead of the leading
+ * edge (the gust front arrives before the dust wall does). Positions are
+ * kilometres relative to the colony site, so the colony itself is `(0, 0)`.
  */
-function spatialFactor(cell: StormCell): number {
-  const d = Math.hypot(cell.x, cell.z);
+function spatialFactorAt(cell: StormCell, xKm: number, zKm: number): number {
+  const d = Math.hypot(cell.x - xKm, cell.z - zKm);
   const R = cell.radiusKm;
   if (d <= R * 0.85) return 1;
   if (d <= R) return 0.55 + 0.45 * smoothstep((R - d) / (R * 0.15));
   if (d <= R * 1.35) return 0.28 * (1 - (d - R) / (R * 0.35));
   return 0;
+}
+
+/** {@link spatialFactorAt} at the colony site — the reading the HUD shows. */
+function spatialFactor(cell: StormCell): number {
+  return spatialFactorAt(cell, 0, 0);
 }
 
 export class Weather {
@@ -210,6 +221,11 @@ export class Weather {
   frequencyMul = 1;
   /** Multiplier on storm structural damage (difficulty). */
   damageMul = 1;
+  /** Multiplier on lightning strike frequency (difficulty). */
+  lightningMul = 1;
+
+  /** The most recent lightning strike the sim resolved (renderer flash). */
+  lastStrike: { x: number; z: number; t: number } | null = null;
 
   // ---- current readings ----------------------------------------------------
   windSpeed = 8;
@@ -224,7 +240,15 @@ export class Weather {
   // ---- scheduler state -----------------------------------------------------
   private noise: Noise2D;
   private gust: Noise2D;
+  /**
+   * The fine-grained gust field. Where `gust` shapes a storm's wind in time,
+   * this one shapes it in *space*: sampled at a world position it makes the
+   * local intensity at a rover twenty metres away differ from the colony's.
+   */
+  private localGust: Noise2D;
   private rngState: number;
+  /** A separate RNG stream for lightning, so strikes never perturb the rolls. */
+  private lightningRngState: number;
   private nextRollAt: number;
   private lastStormEndAt = -Infinity;
   /**
@@ -239,7 +263,9 @@ export class Weather {
     this.seed = seed >>> 0;
     this.noise = new Noise2D(this.seed ^ 0x51ab7e);
     this.gust = new Noise2D(this.seed ^ 0x1c0ffee);
+    this.localGust = new Noise2D(this.seed ^ 0x5eed11a);
     this.rngState = (this.seed ^ 0x9e3779b9) >>> 0;
+    this.lightningRngState = (this.seed ^ 0x11a71b3) >>> 0;
     this.nextRollAt = WEATHER_CALM_SOLS * SOL_SECONDS;
     this.windDirRad = this.rand() * Math.PI * 2;
   }
@@ -253,6 +279,21 @@ export class Weather {
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     this.rngState = (t ^ (t >>> 14)) >>> 0;
     return t / 4294967296;
+  }
+
+  /**
+   * The lightning stream, stepped by the sim's strike resolver. Kept as a
+   * separate mulberry32 so a storm that strikes a hundred times still leaves
+   * the storm scheduler and cell generator on exactly their old sequence —
+   * determinism survives the new feature untouched.
+   */
+  lightningRoll(): number {
+    let a = (this.lightningRngState | 0) >>> 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    this.lightningRngState = a >>> 0;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   }
 
   // ------------------------------------------------------------- tick ----
@@ -355,7 +396,7 @@ export class Weather {
     // ---- dust --------------------------------------------------------------
     // Dust follows the storm envelope, but with inertia: it takes time to
     // fill the sky, and long after the winds quit the sky stays milky.
-    const ambient = 0.04 + 0.1 * (0.5 + 0.5 * this.noise.fbm(t * 0.006 - 2.1, 17.3, 2, 2, 0.5));
+    const ambient = this.ambientDust(t);
     const goal = Math.max(ambient, dustGoal);
     const tau = goal > this.dust ? 14 : 50; // kicks up fast, settles slowly
     this.dust += (goal - this.dust) * Math.min(1, dt / tau);
@@ -533,6 +574,113 @@ export class Weather {
     return Math.pow(this.stormIntensity, 1.5) * 0.38 * this.damageMul;
   }
 
+  // --------------------------------------------------- local weather ----
+  // The colony reading above is the sky over the landing site. These methods
+  // sample the *same* model at an arbitrary world position (metres), so a
+  // rover out in the field reads its own weather rather than the base's.
+  // They are pure in `time` + position — no RNG — so per-entity calls cost a
+  // couple of noise lookups and never perturb the seeded streams.
+
+  /**
+   * The fine-grained gust multiplier at a world position, relative to the
+   * colony. Anchored at the origin: the base always reads 1.0, and the field
+   * varies ±~45% across the footprint on a ~20 m feature scale — so a rover
+   * twenty metres away genuinely feels different weather, while the colony
+   * reading stays exactly what the HUD has always shown.
+   */
+  private fineAt(x: number, z: number): number {
+    const t = this.time;
+    const field = (px: number, pz: number): number =>
+      0.5 +
+      0.5 *
+        this.localGust.fbm(px * 0.05 + t * 0.014, pz * 0.05 - t * 0.009, 3, 2, 0.5);
+    const here = field(x, z);
+    const home = field(0, 0);
+    return clamp(1 + 0.9 * (here - home), 0.35, 1.65);
+  }
+
+  /** Ambient (storm-free) airborne dust at time `t` — the clear-sky haze. */
+  private ambientDust(t: number): number {
+    return 0.04 + 0.1 * (0.5 + 0.5 * this.noise.fbm(t * 0.006 - 2.1, 17.3, 2, 2, 0.5));
+  }
+
+  /** Storm intensity at a world position (metres), 0..1. */
+  localIntensity(x: number, z: number): number {
+    const xKm = x / 1000;
+    const zKm = z / 1000;
+    let dom = 0;
+    for (const cell of this.active) {
+      const env = stormIntensityAt(cell, this.time);
+      if (env <= 0) continue;
+      dom = Math.max(dom, env * spatialFactorAt(cell, xKm, zKm));
+    }
+    return dom <= 0 ? 0 : dom * this.fineAt(x, z);
+  }
+
+  /**
+   * Airborne dust at a world position (metres), 0..1. The ambient background
+   * is the sky's; the storm's contribution varies by position exactly like
+   * {@link localIntensity}. This is the *goal* dust, not the inertia-smoothed
+   * colony reading — panels accrete whatever is in the air where they stand.
+   */
+  localDust(x: number, z: number): number {
+    const xKm = x / 1000;
+    const zKm = z / 1000;
+    let storm = 0;
+    for (const cell of this.active) {
+      const env = stormIntensityAt(cell, this.time);
+      if (env <= 0) continue;
+      storm = Math.max(storm, cell.dustPeak * env * spatialFactorAt(cell, xKm, zKm));
+    }
+    const ambient = this.ambientDust(this.time);
+    return clamp(ambient + storm * this.fineAt(x, z), 0, 1);
+  }
+
+  /** Rovers at this position must shelter (per-rover recall decision). */
+  shelterRoversAt(x: number, z: number): boolean {
+    return this.localIntensity(x, z) >= 0.55 && this.storm !== 'devil';
+  }
+
+  /** EVAs from this position are refused while the local wind is past this. */
+  blocksEVAAt(x: number, z: number): boolean {
+    return this.localIntensity(x, z) >= 0.4 && this.storm !== 'devil';
+  }
+
+  /** Outdoor work at this position runs at the storm-reduced rate. */
+  workMultiplierAt(x: number, z: number): number {
+    return this.localIntensity(x, z) >= 0.4 ? 0.6 : 1;
+  }
+
+  /** Wind damage rate on a structure standing at this position. */
+  damageRateAt(x: number, z: number): number {
+    const i = this.localIntensity(x, z);
+    if (i <= 0.25) return 0;
+    return Math.pow(i, 1.5) * 0.38 * this.damageMul;
+  }
+
+  // ------------------------------------------------------- lightning ----
+
+  /**
+   * Lightning strike hazard, in strikes per game second, at the colony. Zero
+   * outside a dust-carrying storm, and rising with both the dust reading and
+   * the storm class — friction between dust grains builds the charge. Calm,
+   * clear weather can therefore never strike.
+   */
+  lightningHazard(): number {
+    if (this.storm === 'calm') return 0;
+    if (this.dust < LIGHTNING_DUST_MIN || this.stormIntensity < LIGHTNING_INTENSITY_MIN) {
+      return 0;
+    }
+    const factor = LIGHTNING_STORM_FACTOR[this.storm] ?? 0;
+    return (
+      LIGHTNING_BASE_RATE *
+      this.lightningMul *
+      factor *
+      Math.pow(this.dust, LIGHTNING_DUST_EXP) *
+      this.stormIntensity
+    );
+  }
+
   /** Test/cheat hook (TDD §22): force a storm on the board right now. */
   debugScheduleStorm(kind: Exclude<StormKind, 'calm'>, now: number, lead = 0): void {
     const p = STORM_PROFILE[kind];
@@ -579,6 +727,11 @@ export class Weather {
     return !Number.isFinite(this.nextRollAt);
   }
 
+  /** The most recent strike, for the view/renderer (mirrors `lastStrike`). */
+  get lightning(): { x: number; z: number; t: number } | null {
+    return this.lastStrike;
+  }
+
   /**
    * Developer-mode hook: clear every storm, on the map or merely forecast,
    * right now. The airborne dust then settles on its own natural timescale.
@@ -594,6 +747,7 @@ export class Weather {
   snapshot(): object {
     return {
       rngState: this.rngState,
+      lightningRngState: this.lightningRngState,
       nextRollAt: this.nextRollAt,
       lastStormEndAt: this.lastStormEndAt,
       active: this.active,
@@ -603,6 +757,7 @@ export class Weather {
       windDirRad: this.windDirRad,
       frequencyMul: this.frequencyMul,
       damageMul: this.damageMul,
+      lightningMul: this.lightningMul,
     };
   }
 
@@ -614,7 +769,10 @@ export class Weather {
   restore(data: any): void {
     this.frequencyMul = Number.isFinite(data?.frequencyMul) ? data.frequencyMul : 1;
     this.damageMul = Number.isFinite(data?.damageMul) ? data.damageMul : 1;
+    this.lightningMul = Number.isFinite(data?.lightningMul) ? data.lightningMul : 1;
     this.rngState = (data?.rngState ?? (this.seed ^ 0x9e3779b9)) >>> 0;
+    this.lightningRngState = (data?.lightningRngState ?? (this.seed ^ 0x11a71b3)) >>> 0;
+    this.lastStrike = null;
     this.nextRollAt = data?.nextRollAt ?? WEATHER_CALM_SOLS * SOL_SECONDS;
     this.lastStormEndAt = data?.lastStormEndAt ?? -Infinity;
     this.active = this.restoreCells(data?.active, true);

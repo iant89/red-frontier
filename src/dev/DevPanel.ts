@@ -176,6 +176,7 @@ export class DevPanel {
               (s) =>
                 `<button class="btn" data-storm="${s.kind}" title="Conjure a ${s.label.toLowerCase()} — winds arrive in seconds">${s.label}</button>`,
             ).join('')}
+            <button class="btn" id="dv-wx-strike" title="Drop a bolt on the most exposed target right now">⚡ Strike</button>
           </div>
           <label class="slider-row">Airborne dust <b id="dv-dustv">—</b>
             <input type="range" id="dv-dust" min="0" max="100" step="1" /></label>
@@ -278,6 +279,12 @@ export class DevPanel {
       if (!sim) return;
       this.dev.clearStorms();
       this.setStatus('Skies cleared');
+    });
+    this.el('dv-wx-strike').addEventListener('click', () => {
+      const sim = this.cb.getSim();
+      if (!sim) return;
+      this.dev.forceLightningStrike();
+      this.setStatus('Lightning strike conjured');
     });
     this.el('dv-storms-on').addEventListener('change', () => {
       const sim = this.cb.getSim();

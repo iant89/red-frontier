@@ -22,6 +22,8 @@ export interface DifficultyDef {
   stormMul: number;
   /** Multiplier on storm structural damage. */
   damageMul: number;
+  /** Multiplier on lightning strike frequency (and, via `damageMul`, its bite). */
+  lightningMul: number;
   /** Multiplier on the landing pod's starting life-support stores. */
   suppliesMul: number;
 }
@@ -36,6 +38,7 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyDef> = {
     consumptionMul: 0.85,
     stormMul: 0.55,
     damageMul: 0.6,
+    lightningMul: 0.6,
     suppliesMul: 1.35,
   },
   pioneer: {
@@ -47,6 +50,7 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyDef> = {
     consumptionMul: 1,
     stormMul: 1,
     damageMul: 1,
+    lightningMul: 1,
     suppliesMul: 1,
   },
   survivor: {
@@ -58,6 +62,7 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyDef> = {
     consumptionMul: 1.2,
     stormMul: 1.5,
     damageMul: 1.4,
+    lightningMul: 1.5,
     suppliesMul: 0.75,
   },
 };

@@ -152,6 +152,9 @@ export class ColonyMirror implements SimView {
       get solarTransmission() {
         return self.payload.weather.solarTransmission;
       },
+      get lightning() {
+        return self.payload.weather.lightning;
+      },
       get rollsSuppressed() {
         return self.payload.weather.rollsSuppressed;
       },

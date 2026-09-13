@@ -68,6 +68,17 @@ export function selectionPulseOpacity(pulse: number): { ring: number; glow: numb
 }
 
 /**
+ * Lightning flash intensity as a function of sim-seconds since the strike.
+ * A sharp attack and a quadratic decay over ~0.35 s, exported so the render
+ * suite can check the curve without a GPU context.
+ */
+export function lightningFlashEnvelope(age: number): number {
+  if (!Number.isFinite(age) || age <= 0) return 0;
+  const s = 1 - age / 0.35;
+  return s <= 0 ? 0 : s * s;
+}
+
+/**
  * Site colours (GDD §06/§10). Deliberately off the rust palette the terrain is
  * built from, and distinct from the resource colours a deposit uses, so a find
  * reads as *something was here* rather than as another seam.
@@ -113,6 +124,11 @@ export class GameRenderer {
   private fillLight!: THREE.DirectionalLight;
   private skyMat!: THREE.MeshBasicMaterial;
   private padLight!: THREE.PointLight;
+  /** A bolt's bright flash, parked above the strike point and decaying. */
+  private lightningLight!: THREE.PointLight;
+  private lightningFlashAt = -Infinity;
+  private lightningX = 0;
+  private lightningZ = 0;
   private buildingMeshes = new Map<
     number,
     { group: THREE.Group; body: THREE.Object3D; pad: THREE.Mesh; construction: THREE.Object3D; damageRing: THREE.Mesh }
@@ -236,6 +252,12 @@ export class GameRenderer {
     this.padLight.position.set(SPAWN_X, 14, SPAWN_Z);
     this.scene.add(this.padLight);
 
+    // Lightning flash. Off until a strike lands, then a bright bluish bolt
+    // over the strike point that decays on sim time (frozen while paused).
+    this.lightningLight = new THREE.PointLight(0xdfe6ff, 0, 900, 1.6);
+    this.lightningLight.position.set(0, -200, 0);
+    this.scene.add(this.lightningLight);
+
     const skyGeo = new THREE.SphereGeometry(3600, 32, 16);
     this.skyMat = new THREE.MeshBasicMaterial({
       color: SKY_DAY.clone(),
@@ -287,6 +309,23 @@ export class GameRenderer {
     this.padLight.intensity = 1.5 * (1 - day) + 0.6 * stormy * day;
 
     this.renderer.toneMappingExposure = 0.82 + 0.3 * day - 0.12 * stormy;
+  }
+
+  /**
+   * Drive the lightning flash from the sim's strike record. The bolt is a
+   * point light over the strike plus a brief exposure lift — keyed to sim time
+   * so it freezes with a paused colony and replays identically.
+   */
+  private syncLightning(t: number): void {
+    const env = lightningFlashEnvelope(t - this.lightningFlashAt);
+    if (env <= 1e-6) {
+      this.lightningLight.intensity = 0;
+      return;
+    }
+    const y = this.world.heightAt(this.lightningX, this.lightningZ);
+    this.lightningLight.position.set(this.lightningX, y + 90, this.lightningZ);
+    this.lightningLight.intensity = 900 * env;
+    this.renderer.toneMappingExposure += 0.5 * env;
   }
 
   // ---------------- weather atmosphere ----------------
@@ -511,6 +550,13 @@ export class GameRenderer {
       z: -(Math.PI / 2 - el) * 0.55,
     };
     this.applySun(sim.sun, sim.weather.dust, sim.weather.visibility);
+    const strike = sim.weather.lightning;
+    if (strike) {
+      this.lightningFlashAt = strike.t;
+      this.lightningX = strike.x;
+      this.lightningZ = strike.z;
+    }
+    this.syncLightning(sim.simTime);
     this.syncWeatherFx(sim);
     this.syncRovers(sim.rovers);
     this.syncBuildings(sim.buildings);

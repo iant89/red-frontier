@@ -186,6 +186,12 @@ export class DevMode {
     this.send({ type: 'dev/dust', frac });
   }
 
+  /** Drop a lightning bolt on the most exposed target right now. */
+  forceLightningStrike(): void {
+    this.send({ type: 'dev/lightning/strike' });
+    this.log('warn', '⚡ Lightning strike conjured (developer).');
+  }
+
   /** Switch the storm scheduler off entirely, or let it roll again. */
   setStormScheduler(on: boolean): void {
     this.send({ type: 'dev/storm/scheduler', on });

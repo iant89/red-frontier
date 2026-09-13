@@ -142,6 +142,7 @@ const COMMAND_CUES: Record<SimCommandType, AudioCue> = {
   'dev/storm/clear': 'stormClear',
   'dev/storm/scheduler': 'developer',
   'dev/dust': 'developer',
+  'dev/lightning/strike': 'lightning',
   'dev/spawn/rover': 'developer',
   'dev/spawn/building': 'developer',
   'dev/spawn/deposit': 'developer',
