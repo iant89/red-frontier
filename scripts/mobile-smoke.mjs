@@ -531,6 +531,11 @@ try {
       Math.abs(after.theta - before.theta) < 1e-9 && Math.abs(after.phi - before.phi) < 1e-9,
       `dTheta=${after.theta - before.theta} dPhi=${after.phi - before.phi}`,
     );
+    check(
+      'single-finger drag does not zoom the camera',
+      Math.abs(after.radius - before.radius) < 1e-9,
+      `radius ${before.radius} → ${after.radius}`,
+    );
   }
 
   // --------------------------------------- long-press orders the rover ----
@@ -658,6 +663,15 @@ try {
       'two-finger look does not pan the camera',
       drift < 1,
       `drift=${drift.toFixed(2)}m`,
+    );
+    // A look drifts the finger span purely by geometry (tangential travel is
+    // second-order in span) — that must never breathe the zoom. This is the
+    // assertion that was missing when the always-live dolly shipped (#1).
+    const zoomDrift = Math.abs(after.radius - before.radius) / before.radius;
+    check(
+      'two-finger look does not zoom the camera',
+      zoomDrift < 0.03,
+      `radius ${before.radius} → ${after.radius}`,
     );
   }
 

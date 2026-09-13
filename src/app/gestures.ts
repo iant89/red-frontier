@@ -12,9 +12,13 @@
  * |---|---|
  * | One finger (touch) | **Pan** — content tracks the finger 1:1 |
  * | Two fingers, one resting | **Orbit** — the travelling finger looks around |
- * | Two fingers, apart/together | **Dolly** (pinch zoom), always live |
+ * | Two fingers, apart/together | **Dolly** (pinch zoom) |
  * | Mouse drag | Orbit (unchanged) |
  * | Shift-drag / middle-drag | Pan (unchanged) |
+ *
+ * A two-finger frame is either a zoom or a look, never both: classifying on
+ * accumulated travel keeps a look's incidental span drift from zooming the
+ * camera, and a pinch's finger travel from swinging it around.
  *
  * Touch flips to pan-first because that is the primary way to move around on a
  * phone; the desktop map is deliberately left alone.
@@ -38,11 +42,26 @@ export const REST_TRAVEL_PX = 8;
 export const REST_RATIO = 0.35;
 
 /**
- * When the pinch distance is changing this fast relative to the moving
- * finger's travel, the gesture is a zoom, not a look. Keeps a straight
- * pinch from also swinging the camera around.
+ * When the span has drifted this far relative to the moving finger's
+ * ACCUMULATED travel, the gesture is a zoom, not a look. Accumulated totals
+ * keep their ratio at any event rate (a slow pinch is a quarter-pixel per
+ * event at 120 Hz, so per-frame deltas cannot classify it), and the geometry
+ * separates the two: a look drifts the span second-order (travel² / span)
+ * while a pinch moves it first-order (≈ the finger travel, twice that for a
+ * symmetric pinch). Keeps a straight pinch from swinging the camera — and a
+ * look from zooming it.
  */
 export const ZOOM_DOMINANCE = 0.8;
+
+/**
+ * Span drift (px) under which a two-finger gesture is never a pinch, whatever
+ * the ratio. A resting thumb breathes a pixel or two against the glass, and
+ * that wobble is radially shaped — without a floor it reads as a slow
+ * one-sided pinch and the camera gains a random zoom walk over a long look.
+ * Two pixels of span is ~1% of zoom, so a genuine pinch crosses it in its
+ * first instants and loses nothing noticeable.
+ */
+export const PINCH_MIN_PX = 2;
 
 export type CameraGesture =
   | { kind: 'none' }
@@ -89,8 +108,14 @@ export interface TwoPointerGesture {
 }
 
 /**
- * Two pointers down. Pinch always drives the dolly; an orbit is layered on top
- * only when one finger is resting and the other is genuinely travelling.
+ * Two pointers down. Each frame is either a zoom or a look, never both.
+ *
+ * `startDist` is the finger span when the two-finger gesture began; the pinch
+ * test compares the span's drift from it against the mover's accumulated
+ * travel (see ZOOM_DOMINANCE). Once a frame classifies as a pinch its dolly
+ * applies with no per-event floor, so slow pinches survive high event rates;
+ * once it classifies as a look the dolly stays shut at exactly 1, so a look
+ * never breathes the zoom no matter how the span wobbles.
  *
  * Note there is deliberately **no** midpoint pan here. Welding pan to zoom was
  * the second half of issue #1: the two fought each other, so the net
@@ -101,22 +126,24 @@ export function twoPointerGesture(
   b: PointerDelta,
   prevDist: number,
   dist: number,
+  startDist: number,
 ): TwoPointerGesture {
-  const dolly = prevDist > 0 ? prevDist / Math.max(1, dist) : 1;
-  const out: TwoPointerGesture = { dolly, orbit: null };
+  const out: TwoPointerGesture = { dolly: 1, orbit: null };
 
   // The finger that has travelled further is the one doing the looking.
   const mover = a.travel >= b.travel ? a : b;
   const rest = mover === a ? b : a;
+
+  const spanDrift = Math.abs(dist - startDist);
+  if (spanDrift > PINCH_MIN_PX && spanDrift > mover.travel * ZOOM_DOMINANCE) {
+    out.dolly = prevDist > 0 ? prevDist / Math.max(1, dist) : 1;
+    return out;
+  }
+
   if (!isResting(rest, mover)) return out;
 
   const moverMag = Math.hypot(mover.dx, mover.dy);
   if (moverMag < STILL_EPS) return out;
-
-  // A straight pinch moves one finger a lot while changing the span just as
-  // much — that is a zoom, and layering an orbit on it feels like a slip.
-  const pinchMag = Math.abs(dist - prevDist);
-  if (prevDist > 0 && pinchMag > moverMag * ZOOM_DOMINANCE) return out;
 
   out.orbit = { dx: mover.dx, dy: mover.dy };
   return out;

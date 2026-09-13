@@ -99,9 +99,12 @@ function resolveLocal(fromRel, spec) {
 
 // Static imports with bindings, side-effect-only imports (the full suite's
 // link list), and dynamic imports. Missing the side-effect form makes the full
-// bundle cache blind to edits in every linked test file.
+// bundle cache blind to edits in every linked test file — and the binding
+// form must span lines, because a multi-line import block is the norm for
+// named imports. A single-line-only gap here once kept a src file out of a
+// suite's closure and showed a stale green after src-only edits.
 const IMPORT_RE =
-  /(?:^|\n)\s*(?:(?:import|export)[^'"\n]*?\bfrom\s*['"]([^'"]+)['"]|import\s*['"]([^'"]+)['"])|import\(\s*['"]([^'"]+)['"]\s*\)/g;
+  /(?:^|\n)\s*(?:(?:import|export)[^'"]*?\bfrom\s*['"]([^'"]+)['"]|import\s*['"]([^'"]+)['"])|import\(\s*['"]([^'"]+)['"]\s*\)/g;
 
 function importsOf(rel) {
   const text = fs.readFileSync(path.join(root, rel), 'utf8');
