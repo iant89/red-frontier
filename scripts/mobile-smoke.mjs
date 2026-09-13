@@ -7,12 +7,12 @@
  *   - narrow-viewport panel defaults (matchMedia + localStorage defaults)
  *   - tap to arm a blueprint, long-press to cancel it (contextTap branch)
  *   - tap-to-select a rover (3D picking through the real renderer)
- *   - tap-vs-drag disambiguation (a tap never rotates the camera)
+ *   - tap-vs-drag disambiguation (a tap never moves the camera)
  *   - folding the inspector by tap, then long-press on bare-canvas terrain
  *     issues a move order to the selected rover (the click-through guard
  *     ignores gestures landing on UI, so the press point is verified with
  *     elementFromPoint first — as a real finger would require)
- *   - pinch spread zooms the camera, two-finger drag pans it
+ *   - one-finger drag pans, pinch spread zooms, two-finger drag looks around
  *   - no uncaught page errors along the way
  *
  * Runs against a served build (BASE_URL, default http://127.0.0.1:5199):
@@ -516,16 +516,20 @@ try {
     );
   }
 
-  // ------------------------------------------------- drag rotates ----
+  // ---------------------------------------------------- drag pans ----
+  // Issue #1 inverted the touch map: one finger pans, two fingers look. This
+  // used to assert a rotation, which is now the desktop-mouse behaviour.
   {
     const before = await rigState(page);
     await dragCanvas(page, cx - 50, cy + 60, cx + 50, cy + 60);
     await settle(page);
     const after = await rigState(page);
+    const drift = Math.hypot(after.tx - before.tx, after.tz - before.tz);
+    check('single-finger drag pans the camera', drift > 1, `drift=${drift.toFixed(2)}m`);
     check(
-      'single-finger drag rotates the camera',
-      Math.abs(after.theta - before.theta) > 0.01,
-      `dTheta=${after.theta - before.theta}`,
+      'single-finger drag does not rotate the camera',
+      Math.abs(after.theta - before.theta) < 1e-9 && Math.abs(after.phi - before.phi) < 1e-9,
+      `dTheta=${after.theta - before.theta} dPhi=${after.phi - before.phi}`,
     );
   }
 
@@ -629,18 +633,32 @@ try {
     );
   }
   {
+    // One finger plants, the other drags: the "look around" gesture. The
+    // anchor stays put so the span barely changes, which keeps the dolly out
+    // of it and leaves a clean rotation to assert.
     const before = await rigState(page);
     await twoFinger(
       page,
       { x: cx - 45, y: cy + 60 },
       { x: cx + 45, y: cy + 60 },
-      { x: cx + 15, y: cy + 60 },
-      { x: cx + 105, y: cy + 60 },
+      { x: cx - 45, y: cy + 60 },
+      { x: cx + 45, y: cy - 30 },
     );
     await settle(page);
     const after = await rigState(page);
+    const rotated =
+      Math.abs(after.theta - before.theta) > 0.01 || Math.abs(after.phi - before.phi) > 0.01;
+    check(
+      'two-finger drag with a resting finger looks around',
+      rotated,
+      `dTheta=${(after.theta - before.theta).toFixed(4)} dPhi=${(after.phi - before.phi).toFixed(4)}`,
+    );
     const drift = Math.hypot(after.tx - before.tx, after.tz - before.tz);
-    check('two-finger drag pans the camera', drift > 1, `drift=${drift.toFixed(2)}m`);
+    check(
+      'two-finger look does not pan the camera',
+      drift < 1,
+      `drift=${drift.toFixed(2)}m`,
+    );
   }
 
   // ------------------------------------------------------- error sweep ----

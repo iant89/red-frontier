@@ -12,7 +12,7 @@ work). They will drift — treat them as a starting point, not a promise.
 
 | # | Issue | Area | Priority | Status |
 |---|---|---|---|---|
-| 1 | Mobile camera controls — pan is nearly unusable | `app/` | P1 | Open |
+| 1 | Mobile camera controls — pan is nearly unusable | `app/` | P1 | In progress |
 | 2 | Dust storms turn into a cube when you zoom out | `render/particles` | P1 | Open |
 | 3 | Dust devils only ever spawn two at a time | `render/particles` | P2 | Open |
 | 4 | Dust devils follow each other instead of their own path | `render/particles` | P2 | Open |
@@ -20,8 +20,8 @@ work). They will drift — treat them as a starting point, not a promise.
 | 6 | Weather is uniform — real storms hit some areas harder | `sim/weather` | P2 | Open |
 | 7 | Storm dust is too coarse and flows too straight | `render/particles` | P1 | Open |
 | 8 | No lightning risk from high dust | `sim/` + `render/` | P2 | Open |
-| 9 | Rover selection ring isn't a circle | `render/Renderer` | P1 | Open |
-| 10 | Rover selection ring needs a pulsing white glow | `render/Renderer` | P3 | Open |
+| 9 | Rover selection ring isn't a circle | `render/Renderer` | P1 | Done |
+| 10 | Rover selection ring needs a pulsing white glow | `render/Renderer` | P3 | Done |
 | 11 | Rovers have no collision or proximity awareness | `sim/` | P1 | Open |
 | 12 | Draggable panels scroll their own title bar | `ui/HUD` + `style.css` | P2 | Open |
 | 13 | Draggable panels don't snap to the viewport edges | `ui/HUD` | P3 | Open |
@@ -30,7 +30,7 @@ work). They will drift — treat them as a starting point, not a promise.
 
 ## 1. Mobile camera controls — pan is nearly unusable
 
-**P1 · Open · `src/app/Game.ts`, `src/app/CameraRig.ts`**
+**P1 · In progress · `src/app/Game.ts`, `src/app/CameraRig.ts`, `src/app/gestures.ts`**
 
 > Panning barely moves the camera — dragging a finger across the whole screen
 > only shifts the view a little. **One finger should pan. Looking around should
@@ -72,22 +72,56 @@ gesture map, not the sensitivity.
 
 ### Acceptance criteria
 
-- [ ] One-finger drag on touch pans the camera, and content tracks the finger
+- [x] One-finger drag on touch pans the camera, and content tracks the finger
       1:1 instead of orbiting.
-- [ ] Two-finger gesture orbits when one finger is roughly stationary and the
+- [x] Two-finger gesture orbits when one finger is roughly stationary and the
       other drags; it still zooms when the fingers move apart or together.
-- [ ] A stationary finger resting on the screen does not jitter the camera.
-- [ ] Long-press context order (`Game.ts:418-428`, 480 ms) still fires on a
-      still finger and still cancels once the finger starts to travel.
-- [ ] Single tap to select, and tap-to-place, are unaffected.
-- [ ] Desktop shortcuts (Shift-drag / middle-drag pan, wheel zoom, LMB orbit)
+- [x] A stationary finger resting on the screen does not jitter the camera.
+- [x] Long-press context order (480 ms) still fires on a still finger and still
+      cancels once the finger starts to travel — untouched, and it keys off
+      `travel`, which is still accumulated exactly as before.
+- [x] Single tap to select, and tap-to-place, are unaffected — the tap test in
+      `pointerUp` is unchanged.
+- [x] Desktop shortcuts (Shift-drag / middle-drag pan, wheel zoom, LMB orbit)
       still behave as they do now.
-- [ ] Verified by hand on a real phone, not just a desktop devtools emulator.
+- [ ] **Verified by hand on a real phone, not just a desktop devtools
+      emulator.** ← the one thing that cannot be done from here.
+
+### Resolution (pending device check)
+
+The gesture map moved out of `pointerMove` into `src/app/gestures.ts` as pure
+functions, so it is unit testable (`tests/ui/gestures.test.ts`, 15 checks) —
+real touch events cannot be driven in the node harness, and the map was the
+whole bug.
+
+Both of the causes this issue guessed at turned out to be real, and both are
+fixed:
+
+1. **One finger was orbiting, not panning.** `singlePointerGesture` now routes
+   touch to `panByPixels`. The old Shift/middle-button pan path was
+   unreachable on a phone; desktop keeps its existing map (plain drag orbits,
+   Shift/middle pans).
+2. **Two-finger pan fought the dolly.** The simultaneous midpoint
+   `panByPixels` is **gone**. Two fingers now mean *look*: when one finger is
+   resting (`isResting` — under 8 px of travel, or under 35 % of the other
+   finger's), the travelling finger drives `rotateByPixels`. Pinch still
+   drives the dolly every frame, and a span change that dominates the finger
+   movement suppresses the orbit so a straight pinch doesn't also swing the
+   camera.
+
+`ActivePointer` gained `touch`, `dx`/`dy` and `gestureTravel`; the last is
+reset in `resetPinch` so the finger that happened to go down first isn't
+credited as "the mover" for free.
+
+`panByPixels` itself was left alone — as the issue predicted, the 1:1
+screen-space maths was already correct, so no sensitivity tuning was needed.
 
 ### Open questions
 
-- Does the new one-finger-pan map apply to touch only, or does the desktop
-  mouse flip to drag-to-pan as well?
+- ~~Does the new one-finger-pan map apply to touch only, or does the desktop
+  mouse flip to drag-to-pan as well?~~ **Touch only** — desktop already has a
+  working pan (Shift/middle-drag) and flipping LMB would break orbit muscle
+  memory for existing players. Revisit if desktop users ask.
 - Do we want an on-screen hint the first time a touch session starts?
 - Is there a camera settings toggle worth having, or is one good default
   enough?
@@ -384,7 +418,7 @@ electrical-hazard code anywhere in `src/`. This is a new feature, not a fix.
 
 ## 9. Rover selection ring isn't a circle
 
-**P1 · Open · `src/render/Renderer.ts`**
+**P1 · Done · `src/render/Renderer.ts`**
 
 > When a rover is selected, the circle that appears under it is not a circle.
 
@@ -419,16 +453,25 @@ non-uniformly scales, which is why it looks right.
 
 ### Acceptance criteria
 
-- [ ] Selection ring is a true circle under every rover type.
-- [ ] Ring radius scales with the rover's own radius.
-- [ ] Even thickness all the way around, at every zoom level.
-- [ ] Still sits flat on the terrain and doesn't z-fight on slopes.
+- [x] Selection ring is a true circle under every rover type.
+- [x] Ring radius scales with the rover's own radius.
+- [x] Even thickness all the way around, at every zoom level.
+- [x] Still sits flat on the terrain and doesn't z-fight on slopes — position
+      and the `+0.2` ground offset are unchanged.
+
+### Resolution
+
+`setSelection` now scales uniformly with
+`scale.setScalar(entity.radius / SELECTION_RING_RADIUS)`, dividing out the
+1.4-unit radius the geometry is built at so the ring's world radius matches
+`entity.radius` exactly. The build radius and thickness are now named
+constants (`SELECTION_RING_RADIUS`, `SELECTION_RING_THICKNESS`).
 
 ---
 
 ## 10. Rover selection ring needs a pulsing white glow
 
-**P3 · Open · `src/render/Renderer.ts`**
+**P3 · Done · `src/render/Renderer.ts`**
 
 > I'd like it to be a circle with a pulsing white glow.
 
@@ -442,10 +485,24 @@ without strobing.
 
 ### Acceptance criteria
 
-- [ ] Ring pulses smoothly; the cycle is slow enough to read as a breath.
-- [ ] Glow reads on both pale dust and dark rock, day and night.
-- [ ] Pulse is driven by **sim time**, so it freezes when the colony is paused.
-- [ ] Selection remains obvious at maximum zoom-out.
+- [x] Ring pulses smoothly; the cycle is slow enough to read as a breath —
+      a 0..1 cosine over a 1.9 s period, so there is no seam at the wrap.
+- [x] Glow reads on both pale dust and dark rock, day and night — the halo is
+      additively blended, so it lifts off dark terrain rather than washing out.
+- [x] Pulse is driven by **sim time** (`clockT`, set from `sim.simTime` in
+      `sync`), so it freezes when the colony is paused.
+- [x] Selection remains obvious at maximum zoom-out — the halo scales with the
+      ring, and the core ring never dips below 0.72 opacity.
+
+### Resolution
+
+A second, wider ring (`selectionGlow`, 1.18× radius and 3.2× thickness) is
+drawn under the core ring with `AdditiveBlending` and `renderOrder = -1`.
+`syncSelectionPulse` — called from both `sync` and `setSelection` — breathes
+the pair: ring opacity `0.72 → 1.0`, halo `0.16 → 0.42`, plus a 6 % swell on
+the halo's radius. The swell is derived from the *ring's* scale each frame, so
+it cannot accumulate. The curve is exported as `selectionPulse` /
+`selectionPulseOpacity` and covered by `tests/render/selection.test.ts`.
 
 ### Implementation notes
 
