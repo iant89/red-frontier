@@ -16,6 +16,7 @@ import { createHost, planHost, restoreHost } from '../sim/host';
 import { GameRenderer } from '../render/Renderer';
 import type { OverlayMode } from '../render/Renderer';
 import { CameraRig } from './CameraRig';
+import { singlePointerGesture, twoPointerGesture } from './gestures';
 import { HUD } from '../ui/HUD';
 import type { BuildingKind, ResourceId, RoverKind } from '../sim/defs';
 import { BUILDINGS, BUILDING_ORDER, ROVERS } from '../sim/defs';
@@ -47,6 +48,13 @@ interface ActivePointer {
   t0: number;
   button: number;
   dragging: boolean;
+  /** Touch (or pen) rather than a mouse — decides pan-first vs orbit-first. */
+  touch: boolean;
+  /** This frame's movement, consumed and cleared by the gesture map. */
+  dx: number;
+  dy: number;
+  /** Travel accumulated since the current two-finger gesture began. */
+  gestureTravel: number;
 }
 
 type Selection =
@@ -410,6 +418,10 @@ export class Game {
       t0: performance.now(),
       button: e.button,
       dragging: false,
+      touch: e.pointerType !== 'mouse',
+      dx: 0,
+      dy: 0,
+      gestureTravel: 0,
     };
     this.pointers.set(e.pointerId, p);
     this.pointerCount = this.pointers.size;
@@ -434,6 +446,13 @@ export class Game {
     this.pinchLast = Math.hypot(arr[0].x - arr[1].x, arr[0].y - arr[1].y);
     this.midLastX = (arr[0].x + arr[1].x) / 2;
     this.midLastY = (arr[0].y + arr[1].y) / 2;
+    // Travel is measured from the start of the two-finger gesture, so whichever
+    // finger went down first doesn't get counted as "the mover" for free.
+    for (const q of arr) {
+      q.gestureTravel = 0;
+      q.dx = 0;
+      q.dy = 0;
+    }
   }
 
   private pointerMove(e: PointerEvent): void {
@@ -452,11 +471,24 @@ export class Game {
 
     if (!this.rig) return;
 
+    p.dx = dx;
+    p.dy = dy;
+    p.gestureTravel += Math.hypot(dx, dy);
+
     if (this.pointerCount === 1) {
       if (p.travel < DRAG_START) return; // still possibly a tap
+      const g = singlePointerGesture({
+        touch: p.touch,
+        panModifier: this.shiftHeld,
+        dx,
+        dy,
+      });
+      if (g.kind === 'none') return; // a resting finger must not nudge the camera
       p.dragging = true;
-      if (this.shiftHeld) this.rig.panByPixels(dx, dy, window.innerHeight);
-      else this.rig.rotateByPixels(dx, dy, window.innerWidth, window.innerHeight);
+      if (g.kind === 'pan') this.rig.panByPixels(g.dx, g.dy, window.innerHeight);
+      else this.rig.rotateByPixels(g.dx, g.dy, window.innerWidth, window.innerHeight);
+      p.dx = 0;
+      p.dy = 0;
     } else if (this.pointerCount === 2) {
       const arr = [...this.pointers.values()];
       const a = arr[0];
@@ -464,13 +496,25 @@ export class Game {
       a.dragging = true;
       b.dragging = true;
       const dist = Math.hypot(a.x - b.x, a.y - b.y);
-      const midX = (a.x + b.x) / 2;
-      const midY = (a.y + b.y) / 2;
-      if (this.pinchLast > 0) this.rig.dolly(this.pinchLast / Math.max(1, dist));
-      this.rig.panByPixels(midX - this.midLastX, midY - this.midLastY, window.innerHeight);
+      const g = twoPointerGesture(a, b, this.pinchLast, dist);
+      if (g.dolly !== 1) this.rig.dolly(g.dolly);
+      // Two fingers look around; pan is the one-finger gesture now. Driving
+      // both off the same gesture is what made panning feel broken (#1).
+      if (g.orbit) {
+        this.rig.rotateByPixels(
+          g.orbit.dx,
+          g.orbit.dy,
+          window.innerWidth,
+          window.innerHeight,
+        );
+      }
       this.pinchLast = dist;
-      this.midLastX = midX;
-      this.midLastY = midY;
+      this.midLastX = (a.x + b.x) / 2;
+      this.midLastY = (a.y + b.y) / 2;
+      a.dx = 0;
+      a.dy = 0;
+      b.dx = 0;
+      b.dy = 0;
     }
   }
 
