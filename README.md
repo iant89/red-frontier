@@ -112,6 +112,16 @@ route** that loops the seam and pauses at the depot only while the silo is
 full. A stranded rover (battery flat) goes dark and flashes a **yellow strobe**
 — select another rover and tap it to jump-start.
 
+### Sound
+
+Sound starts on the first click, tap, or game hotkey (a browser autoplay-policy
+requirement). The main menu has a quiet command-deck ambience; the colony mixes
+wind, dust storms, severe-storm electrostatic discharges, machinery and power
+warnings from the live read model. Pausing fades time-bound machinery but keeps
+the current ambient wind/storm and brownout reminder audible, so inspecting a
+frozen colony never turns the world silent. All menu controls and player/dev
+commands have a short confirmation cue.
+
 Each rover carries its own automation levers in the inspector: **auto-haul**
 (fetch what the build queue is short of), **auto maintenance** (repair and
 panel-cleaning dispatches), **storm sheltering**, **auto-rescue**, and a
