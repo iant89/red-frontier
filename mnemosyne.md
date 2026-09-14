@@ -76,6 +76,21 @@ Persistent notes for future coding sessions.
 - Retuning traps: turbulence amplitude means *acceleration*; visible swing ≈ tb/ω² with
   ω ≈ wind·CURL_K + pattern drift. And `drag` silently eats wander over a particle's life.
 
+## Rover proximity (issue #11)
+
+- Hull clearance, not centre-to-centre: `nearestObstacleClearance` returns
+  `centreDist − selfR − otherR`. A literal "5 ft from centre" would sit inside
+  a 2.4–3.4 m rover. Constants live in `config.ts`
+  (`ROVER_PROXIMITY_*`, `ROVER_COLONY_YARD_M`).
+- Speed multiplies inside `moveRover` only — no re-path, no alert, no full stop.
+  Crawl multipliers are never zero so nose-to-nose pairs keep inching.
+- **Destination skip is load-bearing.** Without it, a builder crawling up to a
+  site (or a rescuer closing on a stranded rover) never reaches arrival reach
+  and the job hangs. Skip the current goal's target once inside that task's
+  arrival ring. Covered by `tests/sim/proximity.test.ts`.
+- Move power scales with `speedMul` so a crawl is a brake, not a battery tax.
+  Condition wear is still per-tick of driving (the drivetrain is still turning).
+
 ## Learned the hard way
 
 - **The two sim transports have different failure modes, and only the browser gates see both.** `LocalSimHost`'s view *is* the live sim, so anything that delays a view

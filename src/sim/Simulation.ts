@@ -59,6 +59,11 @@ import {
   ROVER_WEAR_WORK_S,
   ROVER_WEAR_MOVE_S,
   ROVER_WEAR_STORM_S,
+  ROVER_PROXIMITY_CLEARANCE_M,
+  ROVER_PROXIMITY_COLONY_CLEARANCE_M,
+  ROVER_PROXIMITY_SPEED_MUL,
+  ROVER_PROXIMITY_COLONY_SPEED_MUL,
+  ROVER_COLONY_YARD_M,
   GARAGE_SERVICE_RATE,
   RECOVER_TRANSFER_KW,
   RECOVER_MIN_GIVE_KWH,
@@ -3070,6 +3075,110 @@ export class Simulation {
     r.statusText = roverStatusText(r);
   }
 
+  /**
+   * True when this rover is inside the colony yard — the pad and its approach
+   * lanes. Proximity is stricter here because the yard is a crowded return path.
+   */
+  private inColonyYard(x: number, z: number): boolean {
+    return Math.hypot(x - SPAWN_X, z - SPAWN_Z) <= ROVER_COLONY_YARD_M;
+  }
+
+  /**
+   * Hull clearance (metres) to the nearest obstacle the rover must watch for
+   * while moving: other rovers, buildings, the landing pod, and discovered
+   * sites still on the ground. Measured from hull to hull
+   * (`centreDist − selfR − otherR`), so the issue's "5 feet" sits *outside*
+   * the chassis rather than inside it.
+   *
+   * The destination of the current goal is skipped when the rover is already
+   * within arrival reach of it — otherwise a builder crawling up to a site,
+   * or a rescuer closing on a stranded rover, would slow forever and never
+   * finish the job. Open terrain (no obstacle inside a very long radius)
+   * returns Infinity.
+   */
+  private nearestObstacleClearance(r: Rover): number {
+    const selfR = ROVERS[r.kind].radius;
+    let best = Infinity;
+
+    // ---- other rovers ------------------------------------------------------
+    for (const o of this.rovers) {
+      if (o.id === r.id) continue;
+      // A recover target is the job, not an obstacle, once the rescuer is
+      // inside the hook-up radius — doRecover arrives at 6 m centre-to-centre.
+      if (
+        r.goal === 'toRecover' &&
+        r.command.type === 'recover' &&
+        r.command.roverId === o.id
+      ) {
+        continue;
+      }
+      const d = Math.hypot(o.x - r.x, o.z - r.z) - selfR - ROVERS[o.kind].radius;
+      if (d < best) best = d;
+    }
+
+    // ---- landing pod -------------------------------------------------------
+    // The pad is a real body the fleet parks against. Skip it only when the
+    // rover is heading in to charge or unload *and* already inside the pad's
+    // arrival ring — those goals intentionally terminate on the pad.
+    {
+      const padClear = Math.hypot(SPAWN_X - r.x, SPAWN_Z - r.z) - selfR - POD_RADIUS;
+      const arrivingHome =
+        (r.goal === 'toCharge' || r.goal === 'toDepot') &&
+        Math.hypot(SPAWN_X - r.x, SPAWN_Z - r.z) <= POD_RADIUS + 6;
+      if (!arrivingHome && padClear < best) best = padClear;
+    }
+
+    // ---- buildings ---------------------------------------------------------
+    for (const b of this.buildings) {
+      const bR = BUILDINGS[b.kind].radius;
+      const centre = Math.hypot(b.x - r.x, b.z - r.z);
+      // Skip the structure this rover is actively driving to, once it is
+      // inside the task's arrival reach — otherwise the crawl never ends and
+      // the builder / cleaner / unloader never starts work.
+      const targeting =
+        ((r.goal === 'toSite' || r.goal === 'toService') && r.gid === b.id) ||
+        (r.goal === 'toDepot' &&
+          BUILDINGS[b.kind].storagePerResourceKg > 0 &&
+          this.runnable(b));
+      const arriveReach = bR + 5;
+      if (targeting && centre <= arriveReach) continue;
+      const d = centre - selfR - bR;
+      if (d < best) best = d;
+    }
+
+    // ---- discovered sites still on the ground ------------------------------
+    // Settlement markers and buried drops are not physical obstacles; a live
+    // wreck or a landed container is.
+    for (const p of this.world.pois) {
+      if (!p.discovered || p.buried) continue;
+      if (p.kind === 'settlementSite') continue;
+      const pR = 4; // rough footprint of a wreck / drop container
+      const centre = Math.hypot(p.x - r.x, p.z - r.z);
+      if (r.goal === 'toSalvage' && r.gid === p.id && centre <= pR + 5) continue;
+      const d = centre - selfR - pR;
+      if (d < best) best = d;
+    }
+
+    return best;
+  }
+
+  /**
+   * Speed multiplier from proximity awareness (issue #11). Returns 1 when the
+   * road is clear; drops immediately to a crawl once anything sits inside the
+   * hull-clearance bubble. The colony yard uses a wider bubble and a slower
+   * crawl. Never zero — a stuck pair must still inch so they cannot lock
+   * nose-to-nose forever.
+   */
+  private proximitySpeedMul(r: Rover): number {
+    const yard = this.inColonyYard(r.x, r.z);
+    const clearance = yard
+      ? ROVER_PROXIMITY_COLONY_CLEARANCE_M
+      : ROVER_PROXIMITY_CLEARANCE_M;
+    const gap = this.nearestObstacleClearance(r);
+    if (gap >= clearance) return 1;
+    return yard ? ROVER_PROXIMITY_COLONY_SPEED_MUL : ROVER_PROXIMITY_SPEED_MUL;
+  }
+
   private moveRover(r: Rover): void {
     if (r.phase !== 'moving' || r.goal === 'idle') return;
     const def = ROVERS[r.kind];
@@ -3078,7 +3187,10 @@ export class Simulation {
     const dx = dest.x - r.x;
     const dz = dest.z - r.z;
     const dist = Math.hypot(dx, dz);
-    const step = def.cruiseSpeed * SIM_TICK;
+    // Proximity multiplies cruise speed this tick. Detection is instant (no
+    // ramp): either the bubble is clear and we cruise, or it isn't and we crawl.
+    const speedMul = this.proximitySpeedMul(r);
+    const step = def.cruiseSpeed * speedMul * SIM_TICK;
     if (dist <= step + ARRIVE_EPS) {
       r.x = dest.x;
       r.z = dest.z;
@@ -3099,7 +3211,9 @@ export class Simulation {
     r.z += uz * step;
     r.heading = lerpAngle(r.heading, Math.atan2(ux, uz), 0.18);
     r.y = this.world.heightAt(r.x, r.z);
-    r.battery = Math.max(0, r.battery - def.movePowerKw * hours);
+    // Move power scales with the actual speed so a crawl burns less of the pack
+    // than a full-speed dash — the proximity slowdown is a brake, not a tax.
+    r.battery = Math.max(0, r.battery - def.movePowerKw * speedMul * hours);
     r.condition = Math.max(0, r.condition - ROVER_WEAR_MOVE_S * SIM_TICK);
     if (r.battery <= 0) this.disable(r);
   }

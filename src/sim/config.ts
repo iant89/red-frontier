@@ -83,6 +83,43 @@ export const POD_RADIUS = 8;
 export const ROVER_CHARGE_THRESHOLD = 0.2;
 export const ROVER_DISABLED_THRESHOLD = 0.01;
 
+// ---------------------------------------------------- rover proximity ----
+// Issue #11: rovers watch for obstacles while moving and crawl when anything
+// sits inside a personal-space bubble. Thresholds are measured from the
+// *hull* (centre distance minus both radii), not centre-to-centre — "5 feet"
+// of clearance outside a 2.4–3.4 m rover would otherwise land inside the
+// chassis. The colony yard is stricter because the pad is a crowded yard.
+
+/**
+ * Clearance beyond the hull that trips a slowdown in open country (metres).
+ * ≈ 5 ft — the issue's "detect anything within 5 feet".
+ */
+export const ROVER_PROXIMITY_CLEARANCE_M = 1.5;
+
+/**
+ * Clearance beyond the hull inside the colony yard (metres). Wider than the
+ * open-country bubble so returning rovers crawl earlier among the pad clutter.
+ */
+export const ROVER_PROXIMITY_COLONY_CLEARANCE_M = 3.0;
+
+/**
+ * Speed multiplier applied the instant an obstacle is inside the bubble.
+ * Immediate drop, not a ramp — the issue is explicit about that. Still a
+ * crawl (never zero) so two rovers nose-to-nose keep inching and cannot
+ * lock forever.
+ */
+export const ROVER_PROXIMITY_SPEED_MUL = 0.28;
+
+/** Even slower crawl inside the colony yard. */
+export const ROVER_PROXIMITY_COLONY_SPEED_MUL = 0.15;
+
+/**
+ * Radius of the "colony yard" around the landing pad. Inside this ring the
+ * wider clearance and the slower crawl both apply. Sized past the flat spawn
+ * clear zone so the approach lanes into the pad count as yard too.
+ */
+export const ROVER_COLONY_YARD_M = SPAWN_RADIUS + 22;
+
 /**
  * Charger output per rover (kW). Draws from the colony power grid.
  *
