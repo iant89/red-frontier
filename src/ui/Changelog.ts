@@ -18,6 +18,34 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    sha: '4693fa5',
+    date: '2026-09-14',
+    title: 'Rover proximity — crawl near obstacles, stricter in the yard',
+    kind: 'feature',
+    summary:
+      'Rovers finally watch where they are going. Anything inside a hull-clearance bubble drops them to a crawl on contact — especially when rolling back into the crowded colony yard.',
+    bullets: [
+      'Hull clearance, not centre-to-centre: centreDist − selfR − otherR against 1.5 m (≈5 ft) in open country and 3.0 m inside the pad yard.',
+      'Immediate speed drop — no ramp. Open country crawls at 28 %; the yard at 15 %. Never zero, so nose-to-nose pairs keep inching and cannot lock.',
+      'Obstacles watched: other rovers, buildings, the landing pod, and discovered (non-buried) sites. Destination of the current goal is skipped inside arrival reach so builders and rescuers still finish the job.',
+      'Move power scales with speed so a crawl is a brake, not a battery tax. Covered by tests/sim/proximity.test.ts (7 checks).',
+    ],
+  },
+  {
+    sha: 'eeae7d2',
+    date: '2026-09-14',
+    title: 'Main-menu button alignment + build changelog timeline',
+    kind: 'improvement',
+    summary:
+      'The mission-control shell tightened up: menu buttons finally share a clean optical grid, and the build badge opens a curated flight-recorder of every deploy since Prototype 1.',
+    bullets: [
+      'Primary and secondary menu buttons use a flex column label with a fixed 28 px icon slot — glyphs stay centred while the two-line title + subtitle stack aligns cleanly.',
+      'Build-status badge is a real button (focus ring, hover lift) that opens the changelog overlay.',
+      'ChangelogDialog: newest-first vertical timeline with kind badges, YOU ARE HERE / LATEST flags, glass cards, backdrop/×/Esc close, and body scroll lock.',
+      'History is hand-curated in src/ui/Changelog.ts from the real Git log — not generated, so the prose stays readable.',
+    ],
+  },
+  {
     sha: 'dd90474',
     date: '2026-09-14',
     version: '0.3.0',

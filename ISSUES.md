@@ -22,7 +22,7 @@ work). They will drift — treat them as a starting point, not a promise.
 | 8 | No lightning risk from high dust | `sim/` + `render/` | P2 | Open |
 | 9 | Rover selection ring isn't a circle | `render/Renderer` | P1 | Done |
 | 10 | Rover selection ring needs a pulsing white glow | `render/Renderer` | P3 | Done |
-| 11 | Rovers have no collision or proximity awareness | `sim/` | P1 | Open |
+| 11 | Rovers have no collision or proximity awareness | `sim/` | P1 | Done |
 | 12 | Draggable panels scroll their own title bar | `ui/HUD` + `style.css` | P2 | Open |
 | 13 | Draggable panels don't snap to the viewport edges | `ui/HUD` | P3 | Open |
 
@@ -641,52 +641,72 @@ time source rather than inventing a second one.
 
 ## 11. Rovers have no collision or proximity awareness
 
-**P1 · Open · `src/sim/`**
+**P1 · Done · `src/sim/Simulation.ts`, `src/sim/config.ts`**
 
 > Rovers need collision detection and should actively watch for objects. If
 > they detect anything within 5 feet while moving they should instantly slow
 > down, especially when coming back into the colony area.
 
-**No collision, avoidance, or proximity code exists** in `src/sim/` or
-`src/render/` today. Rovers path over the navgrid and drive through anything
-in the way. This is new work.
+### What the code did
 
-### Wanted
+Rovers path over the navgrid and drive at full `cruiseSpeed` straight through
+anything in the way. There was no obstacle query, no slowdown, and no notion
+of a crowded colony yard.
 
-- Rovers watch for obstacles while moving: other rovers, buildings, POIs,
-  terrain hazards.
-- On detection within the threshold, slow down immediately — not a gradual
-  ease.
-- Strictest around the colony, where rovers are returning into a crowded
-  yard.
+### Unit decision
 
-### ⚠️ Unit question — resolve before building this
+**Hull clearance, option 1.** 1 world unit = 1 m and rover radii are 2.4–3.4 m,
+so a centre-to-centre "5 ft" would sit *inside* the chassis. The bubble is
+measured as `centreDist − selfR − otherR` against a clearance of **1.5 m**
+(≈ 5 ft) in open country and **3.0 m** inside the colony yard.
 
-**1 world unit = 1 m** (`src/sim/config.ts:27`), and rover radii are **2.4 –
-3.4 m** (`src/sim/defs.ts`). So 5 ft ≈ **1.52 m** is *inside the rover's own
-footprint*. Options:
+### Resolution
 
-1. Threshold measured from the **hull**, not the centre: `rover.radius + 1.52`.
-2. "5 feet" is shorthand for a slightly larger personal-space bubble — say
-   5 m — measured centre-to-centre.
-3. Something else entirely.
+Proximity lives in `moveRover` via `proximitySpeedMul` /
+`nearestObstacleClearance`:
 
-Pick one before implementing; it changes every test bound.
+| Constant | Value | Role |
+|---|---|---|
+| `ROVER_PROXIMITY_CLEARANCE_M` | 1.5 m | Open-country hull bubble |
+| `ROVER_PROXIMITY_COLONY_CLEARANCE_M` | 3.0 m | Yard hull bubble |
+| `ROVER_PROXIMITY_SPEED_MUL` | 0.28 | Open-country crawl |
+| `ROVER_PROXIMITY_COLONY_SPEED_MUL` | 0.15 | Yard crawl |
+| `ROVER_COLONY_YARD_M` | `SPAWN_RADIUS + 22` | Pad + approach lanes |
+
+Obstacles watched: other rovers, buildings, the landing pod, and discovered
+(non-buried, non-marker) POIs. The **destination of the current goal is
+skipped** once the rover is inside that task's arrival reach — otherwise a
+builder crawling up to a site, or a rescuer closing on a stranded rover,
+would slow forever and never finish the job.
+
+Speed drops **immediately** (no ramp): clear → 1.0, inside bubble → crawl.
+Crawl is never zero, so two rovers nose-to-nose keep inching and cannot lock.
+Move power scales with the actual speed so a crawl is a brake, not a battery
+tax.
+
+**Slow down only** — no full stop, no re-path, no alert. The existing task
+queue and arrival logic are untouched; proximity only multiplies the step
+length inside `moveRover`.
 
 ### Acceptance criteria
 
-- [ ] Obstacle query while moving, at a documented threshold.
-- [ ] Detection causes an immediate speed drop, not a slow ramp.
-- [ ] Stricter behaviour inside the colony area.
-- [ ] Rovers never end up permanently stuck nose-to-nose with an obstacle.
-- [ ] Behaviour is deterministic and covered by sim tests.
-- [ ] No measurable frame-time cost with the full fleet moving.
+- [x] Obstacle query while moving, at a documented threshold (hull clearance).
+- [x] Detection causes an immediate speed drop, not a slow ramp.
+- [x] Stricter behaviour inside the colony area (wider bubble, slower crawl).
+- [x] Rovers never end up permanently stuck nose-to-nose with an obstacle.
+- [x] Behaviour is deterministic and covered by `tests/sim/proximity.test.ts`.
+- [x] Cost is a linear scan of the live fleet / buildings / POIs per moving
+      rover — fine at current fleet sizes; no spatial index added.
 
-### Open questions
+### Open questions resolved
 
-- Slow down only, or full stop and re-path?
-- Should a blocked rover raise an alert, or silently wait?
-- How does this interact with the existing task queue and arrival logic?
+- **Slow down only, or full stop and re-path?** Slow down only. A crawl keeps
+  jobs finishing; re-path would fight the existing A* and arrival skips.
+- **Alert on block?** No — silent. A log line every time two rovers pass would
+  spam the board; the inspector already shows "Moving".
+- **Task queue / arrival?** Destination skip inside arrival reach, so
+  construct / clean / repair / recover / salvage / charge / unload still
+  complete.
 
 ---
 
