@@ -126,7 +126,7 @@ export class LoadGameScreen {
     }
     this.closePop();
     const pop = document.createElement('div');
-    pop.className = 'rf-menu-pop';
+    pop.className = 'rf-menu-pop rf-menu-pop-portal';
     pop.dataset.for = meta.id;
     pop.innerHTML = `
       <button data-act="rename"><span>✎</span><span>Rename colony</span></button>
@@ -147,12 +147,61 @@ export class LoadGameScreen {
       this.opts.store.remove(meta.id);
       this.refresh();
     });
-    row.appendChild(pop);
+    document.body.appendChild(pop);
     this.openPop = pop;
+    this.positionPop(row, pop);
+    // Re-position on scroll/resize while open
+    const reposition = () => {
+      if (this.openPop === pop) this.positionPop(row, pop);
+    };
+    const onDocPointer = (e: Event) => {
+      const t = e.target as HTMLElement | null;
+      if (!t) return;
+      if (t.closest('.rf-menu-pop-portal') || t.closest('.rf-dots')) return;
+      this.closePop();
+    };
+    // Store cleanup on the element so closePop can remove listeners
+    (pop as any)._rfCleanup = () => {
+      window.removeEventListener('resize', reposition);
+      window.removeEventListener('scroll', reposition, true);
+      document.removeEventListener('pointerdown', onDocPointer, true);
+    };
+    window.addEventListener('resize', reposition);
+    window.addEventListener('scroll', reposition, true);
+    // Delay doc listener so the click that opened it doesn't close it
+    setTimeout(() => document.addEventListener('pointerdown', onDocPointer, true), 0);
+  }
+
+  private positionPop(row: HTMLElement, pop: HTMLElement): void {
+    const r = row.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    // Default below row, right-aligned
+    pop.style.position = 'fixed';
+    pop.style.right = 'auto';
+    pop.style.top = '0';
+    pop.style.left = '0';
+    // Need size after layout
+    const pr = pop.getBoundingClientRect();
+    const margin = 8;
+    let top = r.bottom + 6;
+    let left = r.right - pr.width - 10;
+    // Flip above if not enough space below
+    if (top + pr.height + margin > vh && r.top - pr.height - 6 > margin) {
+      top = r.top - pr.height - 6;
+    }
+    // Keep inside viewport
+    left = Math.max(margin, Math.min(vw - pr.width - margin, left));
+    top = Math.max(margin, Math.min(vh - pr.height - margin, top));
+    pop.style.left = `${Math.round(left)}px`;
+    pop.style.top = `${Math.round(top)}px`;
   }
 
   private closePop(): void {
-    this.openPop?.remove();
+    if (this.openPop) {
+      (this.openPop as any)._rfCleanup?.();
+      this.openPop.remove();
+    }
     this.openPop = null;
   }
 

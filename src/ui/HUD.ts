@@ -363,11 +363,12 @@ export class HUD {
       </div>
 
       <div class="panel" id="vitals">
-        <div class="vitals-head">
+        <div class="vitals-head hud-drag">
           <span class="vh-title">Colony vitals</span>
           <span class="vh-sub" id="vitals-sub"></span>
           <button class="mini-btn" id="vitals-toggle" title="Collapse panel" aria-expanded="true">▾</button>
         </div>
+        <div class="vitals-body" id="vitals-body">
         <div id="power-block">
           <div class="pw-top">
             <div class="pw-num"><span class="pw-k">Generation</span><span class="pw-v" id="pw-gen">0 kW</span></div>
@@ -411,6 +412,7 @@ export class HUD {
           <div class="stat"><span class="k">Suit O₂</span><span class="v" id="crew-suit">100%</span></div>
           <div class="bar-wrap"><div class="bar-fill cyan" id="crew-suit-bar" style="width:100%"></div></div>
         </div>
+        </div>
       </div>
 
       <div class="panel" id="alerts"></div>
@@ -425,7 +427,7 @@ export class HUD {
         <div class="bi-process" id="bi-process"></div>
       </div>
       <div class="panel" id="hintbar" style="display:none"></div>
-      <div class="panel" id="log"><span class="lg-title">Colony log</span></div>
+      <div class="panel" id="log"><span class="lg-title hud-drag">Colony log</span><div class="log-body" id="log-body"></div></div>
 
       <div class="hist-overlay" id="history-overlay" style="display:none">
         <div class="hist-card">
@@ -666,10 +668,14 @@ export class HUD {
         ? Math.hypot(p.clientX - st.startX, p.clientY - st.startY)
         : 0;
       if (st.mode === 'move' && travel < 6) {
-        // A press that never moved is a *tap* — it feeds the double-tap
-        // reset, and it must not be persisted as a new position.
         this.lastTapOnHandle = { at: performance.now(), id: panel.id };
         return;
+      }
+      if (st.mode === 'move') {
+        const r = panel.getBoundingClientRect();
+        const s = this.snapPanel(panel, r.left, r.top, r.width, r.height);
+        panel.style.left = `${s.x}px`;
+        panel.style.top = `${s.y}px`;
       }
       this.storePanelGeometry(panel);
     };
@@ -693,13 +699,78 @@ export class HUD {
     return false;
   }
 
+  private isCoarsePointer(): boolean {
+    try {
+      return typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+    } catch { return false; }
+  }
+
+  private snapPanel(panel: HTMLElement, x: number, y: number, w: number, h: number): { x: number; y: number } {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const thr = this.isCoarsePointer() ? 20 : 12;
+    const M = 8;
+    let nx = x;
+    let ny = y;
+
+    // Horizontal: snap to viewport edges (with 8px dock margin)
+    if (Math.abs(x - M) < thr) nx = M;
+    if (Math.abs(vw - (x + w) - M) < thr) nx = vw - w - M;
+    // Also snap to 0 if really at edge, but keep 8px dock as final
+    if (Math.abs(x) < thr) nx = M;
+    if (Math.abs(vw - (x + w)) < thr) nx = vw - w - M;
+
+    // Vertical: snap to viewport + topbar / buildbar / hintbar
+    try {
+      const topbar = this.el('topbar');
+      const tb = topbar.getBoundingClientRect();
+      const belowTop = tb.bottom + M;
+      if (Math.abs(y - belowTop) < thr) ny = belowTop;
+    } catch {}
+    try {
+      const hint = this.el('hintbar');
+      if (hint.style.display !== 'none') {
+        const hb = hint.getBoundingClientRect();
+        const aboveHint = hb.top - h - M;
+        if (Math.abs(y - aboveHint) < thr) ny = aboveHint;
+      }
+    } catch {}
+    try {
+      const build = this.el('buildbar');
+      const bb = build.getBoundingClientRect();
+      const aboveBuild = bb.top - h - M;
+      if (Math.abs(y - aboveBuild) < thr) ny = aboveBuild;
+    } catch {}
+
+    if (Math.abs(y - M) < thr) ny = M;
+    if (Math.abs(vh - (y + h) - M) < thr) ny = vh - h - M;
+    if (Math.abs(y) < thr) ny = M;
+    if (Math.abs(vh - (y + h)) < thr) ny = vh - h - M;
+
+    // Clamp so snap never pushes partially off-screen
+    nx = Math.max(-w + 48, Math.min(vw - 48, nx));
+    ny = Math.max(0, Math.min(vh - 34, ny));
+    return { x: Math.round(nx), y: Math.round(ny) };
+  }
+
   private storePanelGeometry(panel: HTMLElement): void {
+    // Snap on move, not on resize
     const rect = panel.getBoundingClientRect();
+    let x = rect.left;
+    let y = rect.top;
+    if (this.dragState?.mode !== 'resize' && this.dragState?.id === panel.id) {
+      // called from drag end – already snapped there, keep
+    } else if (panel.dataset.snap !== 'no') {
+      const s = this.snapPanel(panel, rect.left, rect.top, rect.width, rect.height);
+      x = s.x; y = s.y;
+      panel.style.left = `${x}px`;
+      panel.style.top = `${y}px`;
+    }
     this.storeSet(
       `rf-panel-${panel.id}`,
       JSON.stringify({
-        x: Math.round(rect.left),
-        y: Math.round(rect.top),
+        x: Math.round(x),
+        y: Math.round(y),
         w: Math.round(rect.width),
         h: Math.round(rect.height),
       }),
@@ -907,7 +978,7 @@ export class HUD {
       wrap.appendChild(b);
       this.overlayBtns.set(mode, b);
     }
-    this.el('vitals').appendChild(wrap);
+    (this.el('vitals').querySelector('#vitals-body') ?? this.el('vitals')).appendChild(wrap);
     this.setOverlay('none');
   }
 
@@ -2075,13 +2146,13 @@ export class HUD {
 
   // -------------------------------------------------------------- misc ----
   addLog(severity: string, text: string, stamp = '', max = 60): void {
-    const log = this.el('log');
+    const body = this.hudRoot.querySelector<HTMLElement>('#log-body') ?? this.el('log');
     const item = document.createElement('div');
     item.className = `log-item ${severity}`;
     item.innerHTML = `${stamp ? `<span class="ts">${stamp}</span>` : ''}<span>${text}</span>`;
-    log.appendChild(item);
-    while (log.children.length > max + 1) log.children[1]?.remove();
-    log.scrollTop = log.scrollHeight;
+    body.appendChild(item);
+    while (body.children.length > max) body.children[0]?.remove();
+    body.scrollTop = body.scrollHeight;
   }
 
   hint(text: string | null): void {

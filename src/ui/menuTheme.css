@@ -1523,6 +1523,14 @@
   flex-direction: column;
 }
 
+.rf-menu-pop-portal {
+  position: fixed;
+  z-index: 200;
+  right: auto;
+  top: 0;
+  left: 0;
+}
+
 .rf-menu-pop button {
   background: transparent;
   border: none;
