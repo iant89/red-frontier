@@ -77,6 +77,9 @@ Persistent notes for future coding sessions.
   master switch, and on a minified build the UI path is painful to debug), then run at 4× and
   `waitForFunction(stormIntensity > 0.75)` — a few real minutes. On a worker host, dev command
   acks are Promises: a synchronous `JSON.stringify(ack)` reads as `undefined`, which is not a failure.
+  The same master switch gates `overlayState()`: anything publishing pins (including
+  `scripts/worker-smoke.mjs`'s battery-pin check, which #29 left red on main until it called
+  `g.dev.enable()`) must turn the mode on first.
 - `src/audio/AudioSystem.ts` is presentation-only procedural Web Audio: it never writes sim state, starts on the first real input gesture to satisfy autoplay policy,
   and is deliberately updated at simulation speed 0 so paused colonies retain environmental ambience and brownout/storm reminders. Keep new `SimCommand` values
   represented in its exhaustive `COMMAND_CUES` map; `tests/audio/system.test.ts` pins that contract.
