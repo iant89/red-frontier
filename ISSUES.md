@@ -25,6 +25,12 @@ work). They will drift — treat them as a starting point, not a promise.
 | 11 | Rovers have no collision or proximity awareness | `sim/` | P1 | Done |
 | 12 | Draggable panels scroll their own title bar | `ui/HUD` + `style.css` | P2 | Open |
 | 13 | Draggable panels don't snap to the viewport edges | `ui/HUD` | P3 | Open |
+| 14 | Saved-expedition overflow menu is hidden | `ui/` | P2 | Open |
+| 15 | Generate changelog UI data from a JSON file before merges | `build/` + `ui/` | P3 | Open |
+| 16 | Add a skybox | `render/` | P2 | Open |
+| 17 | Player can drive beyond the generated terrain on the largest map | `sim/` + `render/` | P1 | Open |
+| 18 | Add a minimap and zoomable, pannable world map | `ui/` + `render/` | P2 | Open |
+| 19 | Give POIs dedicated overhead and pulsing ground markers | `render/` + `ui/` | P2 | Open |
 
 ---
 
@@ -786,6 +792,217 @@ Panels snap to the viewport edges and corners when released near them.
 - Should panels also snap to *each other*, or only to the viewport?
 - Show a snap preview while dragging, or just land there on release?
 - Keep snapping off on small screens where panels are docked anyway?
+
+---
+
+## 14. Saved-expedition overflow menu is hidden
+
+**P2 · Open · `ui/`**
+
+> In the **Saved expeditions** menu, the `…` context menu is hidden and cannot
+> be used reliably.
+
+### Wanted
+
+The overflow control and its menu should be visible, reachable, and layered
+above the saved-expedition list rather than being clipped or covered by the
+menu panel.
+
+### Acceptance criteria
+
+- [ ] The `…` control is visible for every saved expedition.
+- [ ] Activating it opens the expected actions without the menu being clipped,
+      hidden behind another panel, or rendered off-screen.
+- [ ] The menu repositions when there is not enough room below the row.
+- [ ] Mouse, touch, keyboard focus, and Escape-to-dismiss behaviour remain
+      usable.
+- [ ] Existing saved-expedition actions and row selection are unaffected.
+
+### Open questions
+
+- Is the current failure caused by clipping, stacking order, or the menu being
+  positioned outside the viewport? Confirm the cause before choosing between a
+  local overflow change and a portal/popover implementation.
+
+---
+
+## 15. Generate changelog UI data instead of hand-writing it
+
+**P3 · Open · `build/` + `ui/`**
+
+> Changelog data used by the UI is hand-written. A script should generate a
+> JSON file before a change is merged so the UI and release history cannot drift
+> apart.
+
+### Wanted
+
+Establish a single, machine-readable changelog source and generate the JSON
+consumed by the UI as part of the pre-merge/build workflow.
+
+### Acceptance criteria
+
+- [ ] The changelog JSON has a documented schema for dates, versions,
+      headings, entries, links, and any release metadata the UI displays.
+- [ ] A repeatable script generates the file deterministically and validates
+      malformed or incomplete entries.
+- [ ] The UI reads the generated data rather than maintaining a second,
+      hand-written copy.
+- [ ] CI or the merge workflow runs the generator and fails when the checked-in
+      output is stale or invalid.
+- [ ] Existing changelog ordering, formatting, and links are preserved during
+      the migration.
+
+### Open questions
+
+- What is the source of truth: curated release-note files, conventional
+  commits, pull-request metadata, or a hybrid?
+- Should the generated JSON be committed, or generated only during the build?
+- Does “before each merge” mean a CI check, a pre-merge hook, or both?
+
+---
+
+## 16. Add a skybox
+
+**P2 · Open · `render/`**
+
+> The scene needs a skybox so the background reads as a complete environment
+> instead of exposing an empty or flat background around the terrain.
+
+### Wanted
+
+Add a skybox that provides a convincing Mars sky and remains stable as the
+camera moves, zooms, and orbits around the generated terrain.
+
+### Acceptance criteria
+
+- [ ] No untextured void or visible skybox edge appears at normal camera
+      positions or at the maximum zoom-out distance.
+- [ ] The skybox works with the existing day/night, fog, and weather treatment
+      without creating a visible seam at the horizon.
+- [ ] It follows the camera without affecting world-space lighting or terrain
+      coordinates.
+- [ ] It does not noticeably reduce frame rate on the largest map or during a
+      severe dust storm.
+- [ ] The result is deterministic and does not interfere with selection,
+      overlays, or map boundaries.
+
+### Open questions
+
+- Should the skybox be a static Mars panorama, a procedural sky, or a hybrid
+  that changes with time of day and storm intensity?
+- Does the existing fog/sky-haze treatment need to be unified with it first?
+
+---
+
+## 17. Largest map allows travel beyond generated terrain
+
+**P1 · Open · `sim/` + `render/`**
+
+> On the largest map size, the camera or entities can reach space beyond the
+> generated terrain. This has only been verified on the largest map so far.
+
+### Wanted
+
+Keep the playable and viewable world inside the generated terrain bounds, with
+clear, stable behaviour at the edge instead of exposing the void beyond the
+heightfield.
+
+### Acceptance criteria
+
+- [ ] Reproduced and fixed on the largest map size, including camera movement
+      and rover movement where each can currently leave the terrain.
+- [ ] Camera and entity positions are constrained to valid generated terrain
+      bounds, or the edge is intentionally covered by a designed boundary.
+- [ ] Terrain sampling, navigation, POI placement, and destination checks do
+      not address cells outside the generated map.
+- [ ] Edge behaviour does not cause falling, NaNs, jitter, or a sudden change
+      in terrain height.
+- [ ] Smaller map sizes retain their existing playable bounds and behaviour.
+- [ ] A regression test or browser smoke check covers the largest map size.
+
+### Open questions
+
+- Is this a bounds mismatch between map generation and camera/navgrid limits,
+  or is the terrain intentionally smaller than the declared world size?
+- Should the boundary be a hard clamp, an invisible margin, or a visible world
+  edge once the intended design is decided?
+
+---
+
+## 18. Add a minimap and an interactive world map
+
+**P2 · Open · `ui/` + `render/`**
+
+> Add a minimap. Clicking it should open a zoomable, pannable map of the game
+> world.
+
+### Wanted
+
+Provide a small always-available overview for navigation and a larger map view
+that can be explored without moving the simulation camera.
+
+### Acceptance criteria
+
+- [ ] A minimap is visible in the HUD and updates as the colony, rovers, POIs,
+      and relevant world state change.
+- [ ] Clicking or tapping the minimap opens a full world-map view.
+- [ ] The world map supports zooming and panning with mouse and touch, with
+      fit-to-world and reset controls.
+- [ ] Map markers use the same world coordinates as the simulation and remain
+      correct at every supported map size.
+- [ ] The map can be closed without changing the simulation camera or pausing
+      state unless that is an explicit design choice.
+- [ ] Keyboard focus, pointer capture, and mobile gestures do not leak into
+      normal camera controls.
+- [ ] Rendering the map does not materially reduce simulation or HUD
+      performance.
+
+### Open questions
+
+- Which layers belong on the minimap by default: terrain, colony, rovers,
+  POIs, weather, destination routes, or all of them?
+- Should the expanded map be an overlay, a panel, or a separate mode on small
+  screens?
+- Should clicking a marker select/focus its entity, or only show details?
+
+---
+
+## 19. Give POIs dedicated overhead and pulsing ground markers
+
+**P2 · Open · `render/` + `ui/`**
+
+> Points of interest need clearer markings than the current supply-drop model:
+> each should have an overhead marker and a pulsing marker on the ground.
+
+### Wanted
+
+Replace the generic supply-drop presentation with a POI-specific visual
+language that is readable from above and at a distance while retaining the
+existing POI interaction and state.
+
+### Acceptance criteria
+
+- [ ] POIs no longer rely on the supply-drop model as their primary marker.
+- [ ] Each active/discovered POI has a readable overhead marker that stays
+      oriented and legible as the camera moves.
+- [ ] Each POI has a pulsing ground marker that remains visible on the terrain
+      without z-fighting.
+- [ ] Marker appearance communicates the POI type and state, including found,
+      depleted, resolved, or otherwise unavailable POIs where applicable.
+- [ ] Markers scale or fade sensibly across the camera zoom range and do not
+      overwhelm terrain, rover, or selection visuals.
+- [ ] Pulse animation uses simulation time so it pauses with the colony and is
+      covered by a deterministic rendering test.
+- [ ] Existing POI selection, inspection, discovery, and save/load behaviour is
+      unchanged.
+
+### Open questions
+
+- Which POI states should hide the marker, change its colour, or replace the
+  overhead icon?
+- Should the overhead marker show a label at all times, only on hover, or only
+  after discovery?
+- Should the minimap/world map use the same marker assets?
 
 ---
 
