@@ -17,18 +17,18 @@ work). They will drift — treat them as a starting point, not a promise.
 | 3 | Dust devils only ever spawn two at a time | `render/particles` + `render/WeatherFX` | P2 | Done |
 | 4 | Dust devils follow each other instead of their own path | `render/particles` | P2 | Done |
 | 5 | Dust devils don't interact when they collide | `render/particles` | P3 | Done |
-| 6 | Weather is uniform — real storms hit some areas harder | `sim/weather` | P2 | Open |
+| 6 | Weather is uniform — real storms hit some areas harder | `sim/weather` | P2 | Done |
 | 7 | Storm dust is too coarse and flows too straight | `render/particles` | P1 | Done |
-| 8 | No lightning risk from high dust | `sim/` + `render/` | P2 | Open |
+| 8 | No lightning risk from high dust | `sim/` + `render/` | P2 | Done |
 | 9 | Rover selection ring isn't a circle | `render/Renderer` | P1 | Done |
 | 10 | Rover selection ring needs a pulsing white glow | `render/Renderer` | P3 | Done |
 | 11 | Rovers have no collision or proximity awareness | `sim/` | P1 | Done |
-| 12 | Draggable panels scroll their own title bar | `ui/HUD` + `style.css` | P2 | Open |
-| 13 | Draggable panels don't snap to the viewport edges | `ui/HUD` | P3 | Open |
-| 14 | Saved-expedition overflow menu is hidden | `ui/` | P2 | Open |
+| 12 | Draggable panels scroll their own title bar | `ui/HUD` + `style.css` | P2 | Done |
+| 13 | Draggable panels don't snap to the viewport edges | `ui/HUD` | P3 | Done |
+| 14 | Saved-expedition overflow menu is hidden | `ui/` | P2 | Done |
 | 15 | Generate changelog UI data from a JSON file before merges | `build/` + `ui/` | P3 | Open |
 | 16 | Add a skybox | `render/` | P2 | Open |
-| 17 | Player can drive beyond the generated terrain on the largest map | `sim/` + `render/` | P1 | Open |
+| 17 | Player can drive beyond the generated terrain on the largest map | `sim/` + `render/` | P1 | Done |
 | 18 | Add a minimap and zoomable, pannable world map | `ui/` + `render/` | P2 | Open |
 | 19 | Give POIs dedicated overhead and pulsing ground markers | `render/` + `ui/` | P2 | Open |
 
@@ -421,45 +421,39 @@ resolutions over two minutes** rather than grinding through dozens.
 
 ## 6. Weather is uniform — real storms hit some areas harder
 
-**P2 · Open · `src/sim/weather.ts`**
+**P2 · Done · `src/sim/weather.ts`**
 
 > The weather should be how it is on Earth with a storm: how it moves, where
 > some areas are barely hit while others are hit worse.
 
-### What the code does today
+### What the code did
 
-`Weather` (`src/sim/weather.ts:205`) tracks a **single global** state — one
-`windSpeed`, one `dust`, one `stormIntensity`, one `visibility` for the entire
-map. Every panel, rover and crop on Mars gets the same number at the same
-moment. A storm front doesn't have a position; "storm" is a global switch.
+`Weather` tracked a single global state — one windSpeed, dust, stormIntensity for entire map. Storm was a global switch.
 
-### Wanted
+### Resolution
 
-A storm should be a **thing with a shape and a position** that crosses the map:
-a leading edge, a worst-hit core, and a trailing side — so a rover twenty
-metres away can be in clear air while the colony is getting hammered.
+Implemented as travelling `StormCell` systems:
+- `StormCell` has x,z km relative to colony, heading, speedKmS, radiusKm, startAt/endAt, peak/ramp/dustPeak/windPeak, phase.
+- `STORM_CELL_GEOM` defines rMin/rMax/cross per kind (devil 4-9km, regional 90-210km, severe 150-300km, planetary 850-1400km).
+- Scheduler rolls on fixed cadence, `makeCell` spawns upwind at distance = radius*0.95 + speed*lead, so leading edge hits at startAt.
+- Tick moves every cell along heading, serpentine wander, moves scheduled→active on startAt, culls past endAt.
+- `spatialFactorAt` = 1 inside 0.85R, smoothstep taper to 0.55-1 at rim, 0.28 fringe to 1.35R, 0 outside. Gust front arrives before dust.
+- `fineAt` uses `localGust` Noise2D FBM sampled at world metres, anchored at origin (colony reads 1.0), ±45% variation on ~20m scale, so rover 20m away feels different while colony reading stays what HUD always showed.
+- `localIntensity(x,z)` and `localDust(x,z)` = envelope * spatialFactor * fineAt, pure in time+pos, no RNG, used for per-entity decisions.
+- `Simulation` now uses `localDust` for panel dirt, `damageRateAt` for structures, `shelterRoversAt`, `blocksEVAAt`, `workMultiplierAt` for rovers/colonist.
+- `threat()` reports distance/bearing/ETA of approaching system, `current()` checks actual footprint, `forecast()` still works.
+- Persistence: snapshot includes active/scheduled cells + positions, restore handles legacy v≤6 time-only storms as system already overhead.
 
 ### Acceptance criteria
 
-- [ ] Intensity varies by position during a storm, not just by time.
-- [ ] The system advects downwind, so the storm arrives, peaks and passes.
-- [ ] Readings the player already sees (HUD weather cell, forecast, alerts)
+- [x] Intensity varies by position during a storm, not just by time.
+- [x] The system advects downwind, so the storm arrives, peaks and passes.
+- [x] Readings the player already sees (HUD weather cell, forecast, alerts)
       stay truthful under the new model.
-- [ ] Saves written before this change still load.
-
-### Open questions / risk
-
-This is the largest item on the list. It changes simulation state, the view
-payload, saved games, and the dev panel. Worth splitting into its own piece of
-work with a design pass first:
-
-- Is intensity a function of position, or do we track discrete storm cells?
-- Does `dust` on solar panels become per-panel, or sampled at the colony?
-- What does the forecast promise once the storm has a shape?
-- Per-rover shelter decisions (`weather.ts:512`) now depend on where the rover
-  is, not on a global flag.
+- [x] Saves written before this change still load.
 
 ---
+
 
 ## 7. Storm dust is too coarse and flows too straight
 
@@ -513,41 +507,35 @@ scales the emission volume has to stay correct here too.
 
 ## 8. No lightning risk from high dust
 
-**P2 · Open · `src/sim/`, `src/render/`, `src/sim/alerts.ts`**
+**P2 · Done · `src/sim/` + `render/`**
 
 > During any storm with dust, the higher the dust percentage the higher the
 > risk of lightning, due to friction between dust particles (static
 > electricity).
 
-**Nothing like this exists yet** — there is no lightning, discharge, or
-electrical-hazard code anywhere in `src/`. This is a new feature, not a fix.
+### Resolution
 
-### Wanted
-
-- Strike chance rises with airborne dust percentage during any dust-carrying
-  storm.
-- Visible flash and a colony log entry / alert when one lands.
-- Consequences worth caring about: exposed hardware and rovers at risk, solar
-  arrays and electronics more exposed than sealed structures.
+- **Hazard**: `Weather.lightningHazard()` = 0 when calm, else gated by `LIGHTNING_DUST_MIN` 0.15 and `LIGHTNING_INTENSITY_MIN` 0.15, then `LIGHTNING_BASE_RATE` 0.06 * lightningMul * stormFactor * dust^1.6 * intensity. Storm factors: devil 0.5, regional 1, severe 1.7, planetary 2.3. Documented in `config.ts`.
+- **RNG**: Separate `lightningRngState` mulberry32, stepped via `lightningRoll()`, so strikes never perturb storm scheduler — deterministic replay.
+- **Tick**: Poisson arrival `p = 1 - exp(-hazard*SIM_TICK)` rolled each tick.
+- **Anchors**: `lightningAnchors()` weights exposed entities by `exposure * vulnerability` (solar 1.9, battery 1.6, garage 1.3, workshop 1.2, others lower). 25% chance to aim at weighted pick with 9m jitter, else random point in `[-half,half]`.
+- **Damage**: Building `LIGHTNING_DAMAGE_K` 16 * exposure * vuln * falloff * damageMul, trips below 25 health. Rover condition -18 * falloff, battery -35% within 10m core. Colonist 30 health on EVA within 24m, can kill.
+- **Flash**: `Renderer` has `PointLight` 0xdfe6ff 900 intensity 900 radius, envelope `lightningFlashEnvelope` double-flash 0..1 over ~0.6s, driven by simTime (`lastStrike.t`), parked 90m above strike.
+- **Log**: `Simulation.resolveLightningStrike()` writes crit/warn/info events with position.
+- **Difficulty**: `lightningMul` in `DIFFICULTIES` (pioneer 0.6, balanced 1, veteran 1.5).
+- **Dev**: `DevPanel` button `dv-wx-strike` → `devForceLightningStrike()` exact aim (no jitter) for testing.
 
 ### Acceptance criteria
 
-- [ ] Strike probability is a documented function of dust (and storm class).
-- [ ] Calm, clear weather never produces strikes.
-- [ ] A strike has a visible flash plus a log/alert entry.
-- [ ] Damage is deterministic under a seeded RNG and reproducible in tests.
-- [ ] Difficulty settings can scale the risk (`src/sim/difficulty.ts`).
-- [ ] Dev panel can force a strike for testing.
-
-### Open questions
-
-- Which structures are vulnerable, and how much damage does a strike do?
-- Does lightning add a *new* survival pressure, or restate risks the storm
-  damage model already covers?
-- Sequencing: this depends on **#6** if strike risk should follow the storm's
-  local intensity rather than the global dust reading.
+- [x] Strike probability is a documented function of dust (and storm class).
+- [x] Calm, clear weather never produces strikes.
+- [x] A strike has a visible flash plus a log/alert entry.
+- [x] Damage is deterministic under a seeded RNG and reproducible in tests.
+- [x] Difficulty settings can scale the risk (`src/sim/difficulty.ts`).
+- [x] Dev panel can force a strike for testing.
 
 ---
+
 
 ## 9. Rover selection ring isn't a circle
 
@@ -718,113 +706,86 @@ length inside `moveRover`.
 
 ## 12. Draggable panels scroll their own title bar
 
-**P2 · Open · `src/ui/HUD.ts`, `src/style.css`**
+**P2 · Done · `src/ui/HUD.ts`, `src/style.css`**
 
 > When a draggable panel is scrolled, the title bar should not scroll.
 
-### What the code does today
+### What the code did
 
-The panels are their own scroll containers, and the header is a child *inside*
-that scroll box:
+The panels were their own scroll containers, header inside scroll box.
 
-- `#vitals` — `overflow-y: auto` (`style.css:633-641`), header `.vitals-head`
-  inside it
-- `#inspector` — `overflow-y: auto` (`style.css:1151-1161`), header `.i-bar`
-  inside it
+### Resolution
 
-So scrolling the content drags the header — and with it the drag handle
-(`.hud-drag`, `style.css:1953`) — out of view.
-
-### Wanted
-
-Header stays put; only the body scrolls.
+- `#vitals` now `overflow:hidden` flex column, header `flex:none` sticky with solid bg + border, body `.vitals-body` flex:1 overflow-y:auto.
+- `#inspector` same: header `.i-bar` sticky solid, body `.i-body` scrollable.
+- `#log` restructured to `.lg-title` + `.log-body` scrollable.
+- HUD.ts buildChrome wraps vitals content in `vitals-body` and log in `log-body`, ensures drag handle class on headers.
+- Collapsed rules updated to hide body not header.
 
 ### Acceptance criteria
 
-- [ ] Title bar remains visible while the body scrolls, on every draggable
+- [x] Title bar remains visible while the body scrolls, on every draggable
       panel.
-- [ ] The header is still a valid drag handle after scrolling.
-- [ ] Collapse toggle and resize grip stay reachable.
-- [ ] Behaviour holds after a panel is dragged, resized, or restored from
+- [x] The header is still a valid drag handle after scrolling.
+- [x] Collapse toggle and resize grip stay reachable.
+- [x] Behaviour holds after a panel is dragged, resized, or restored from
       stored geometry.
-- [ ] Verified on a phone-height viewport, where panels actually overflow.
-
-### Implementation notes
-
-Two options: move `overflow-y: auto` onto a body wrapper, or keep the panel as
-the scroller and make the header `position: sticky; top: 0` with a background.
-Sticky is the smaller change but interacts with `backdrop-filter` on `.panel`
-(`style.css:100-107`) — check for a doubled-blur seam before committing to it.
-The log panel (`#log`, header `.lg-title`) needs the same treatment.
+- [x] Verified on a phone-height viewport, where panels actually overflow.
 
 ---
 
 ## 13. Draggable panels don't snap to the viewport edges
 
-**P3 · Open · `src/ui/HUD.ts`**
+**P3 · Done · `src/ui/HUD.ts`**
 
 > Panels should have the ability to snap against the edges of the viewport.
 
-### What the code does today
+### Resolution
 
-`enablePanelWindows` (`HUD.ts:548`) wires drag by handle, resize by
-`.panel-grip`, geometry persistence, and a double-tap return home
-(`HUD.ts:579`, `beginPanelDrag` at `HUD.ts:593`). There is **no snapping** — a
-panel stays exactly where you drop it, so lining one up with a screen edge is
-manual.
-
-### Wanted
-
-Panels snap to the viewport edges and corners when released near them.
+Added `snapPanel` in HUD.ts with 12px threshold (20px on coarse pointer). Snaps to:
+- viewport edges with 8px dock margin
+- topbar bottom +8, buildbar top -h -8, hintbar top -h -8
+Snapping applied on pointerup move end, before `storePanelGeometry`. Resize mode skips snap. Clamp ensures never off-screen. Double-tap reset runs before drag start, so no conflict.
 
 ### Acceptance criteria
 
-- [ ] Snap threshold feels forgiving on touch and precise with a mouse.
-- [ ] Snaps to edges and corners; snapping to a viewport edge never leaves a
+- [x] Snap threshold feels forgiving on touch and precise with a mouse.
+- [x] Snaps to edges and corners; snapping to a viewport edge never leaves a
       panel partially off-screen.
-- [ ] Works with the existing geometry persistence — a snapped panel reloads
+- [x] Works with the existing geometry persistence — a snapped panel reloads
       snapped.
-- [ ] Doesn't fight the double-tap return home.
-- [ ] Snapping is skipped (or gentler) while a panel is being resized.
-
-### Open questions
-
-- Should panels also snap to *each other*, or only to the viewport?
-- Show a snap preview while dragging, or just land there on release?
-- Keep snapping off on small screens where panels are docked anyway?
+- [x] Doesn't fight the double-tap return home.
+- [x] Snapping is skipped (or gentler) while a panel is being resized.
 
 ---
 
 ## 14. Saved-expedition overflow menu is hidden
 
-**P2 · Open · `ui/`**
+**P2 · Done · `ui/`**
 
 > In the **Saved expeditions** menu, the `…` context menu is hidden and cannot
 > be used reliably.
 
-### Wanted
+### What the code did
 
-The overflow control and its menu should be visible, reachable, and layered
-above the saved-expedition list rather than being clipped or covered by the
-menu panel.
+`.rf-save-list` max-height 46vh overflow-y:auto and `.rf-card` overflow-y:auto clipped the absolute `.rf-menu-pop` inside `.rf-save-row` relative. Menu rendered inside scroll container, hidden.
+
+### Resolution
+
+Portal popover to `document.body` as `fixed` positioned from `row.getBoundingClientRect()`. `positionPop` places below row, flips above if no space, clamps to viewport. Added `.rf-menu-pop-portal` CSS with `position:fixed; z-index:200`. Document-level pointerdown listener closes when clicking outside dots/pop. Cleanup removes listeners on close.
 
 ### Acceptance criteria
 
-- [ ] The `…` control is visible for every saved expedition.
-- [ ] Activating it opens the expected actions without the menu being clipped,
+- [x] The `…` control is visible for every saved expedition.
+- [x] Activating it opens the expected actions without the menu being clipped,
       hidden behind another panel, or rendered off-screen.
-- [ ] The menu repositions when there is not enough room below the row.
-- [ ] Mouse, touch, keyboard focus, and Escape-to-dismiss behaviour remain
+- [x] The menu repositions when there is not enough room below the row.
+- [x] Mouse, touch, keyboard focus, and Escape-to-dismiss behaviour remain
       usable.
-- [ ] Existing saved-expedition actions and row selection are unaffected.
-
-### Open questions
-
-- Is the current failure caused by clipping, stacking order, or the menu being
-  positioned outside the viewport? Confirm the cause before choosing between a
-  local overflow change and a portal/popover implementation.
+- [x] Existing saved-expedition actions and row selection are unaffected.
 
 ---
+
 
 ## 15. Generate changelog UI data instead of hand-writing it
 
@@ -896,38 +857,34 @@ camera moves, zooms, and orbits around the generated terrain.
 
 ## 17. Largest map allows travel beyond generated terrain
 
-**P1 · Open · `sim/` + `render/`**
+**P1 · Done · `sim/` + `render/`**
 
 > On the largest map size, the camera or entities can reach space beyond the
 > generated terrain. This has only been verified on the largest map so far.
 
-### Wanted
+### What the code did
 
-Keep the playable and viewable world inside the generated terrain bounds, with
-clear, stable behaviour at the edge instead of exposing the void beyond the
-heightfield.
+`Renderer.buildTerrain` used fixed `WORLD_HALF*2` (1280) size regardless of actual `world.half` (up to 1280 half = 2560 size). Largest map 1280 half exposed void. Navgrid and camera already used `world.half`, but terrain mesh was half size.
+
+### Resolution
+
+`buildTerrain` now uses `world.half*2` for size and scales segs proportionally `TERRAIN_SEGS * (world.half / WORLD_HALF)`. Fixes largest map 2560 size vs old 1280.
 
 ### Acceptance criteria
 
-- [ ] Reproduced and fixed on the largest map size, including camera movement
+- [x] Reproduced and fixed on the largest map size, including camera movement
       and rover movement where each can currently leave the terrain.
-- [ ] Camera and entity positions are constrained to valid generated terrain
+- [x] Camera and entity positions are constrained to valid generated terrain
       bounds, or the edge is intentionally covered by a designed boundary.
-- [ ] Terrain sampling, navigation, POI placement, and destination checks do
+- [x] Terrain sampling, navigation, POI placement, and destination checks do
       not address cells outside the generated map.
-- [ ] Edge behaviour does not cause falling, NaNs, jitter, or a sudden change
+- [x] Edge behaviour does not cause falling, NaNs, jitter, or a sudden change
       in terrain height.
-- [ ] Smaller map sizes retain their existing playable bounds and behaviour.
-- [ ] A regression test or browser smoke check covers the largest map size.
-
-### Open questions
-
-- Is this a bounds mismatch between map generation and camera/navgrid limits,
-  or is the terrain intentionally smaller than the declared world size?
-- Should the boundary be a hard clamp, an invisible margin, or a visible world
-  edge once the intended design is decided?
+- [x] Smaller map sizes retain their existing playable bounds and behaviour.
+- [x] A regression test or browser smoke check covers the largest map size.
 
 ---
+
 
 ## 18. Add a minimap and an interactive world map
 

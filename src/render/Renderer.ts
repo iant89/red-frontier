@@ -364,8 +364,12 @@ export class GameRenderer {
   }
 
   private buildTerrain(): THREE.Mesh {
-    const size = WORLD_HALF * 2;
-    const geo = new THREE.PlaneGeometry(size, size, TERRAIN_SEGS, TERRAIN_SEGS);
+    const size = this.world.half * 2;
+    const segs = Math.max(
+      TERRAIN_SEGS,
+      Math.round(TERRAIN_SEGS * (this.world.half / WORLD_HALF)),
+    );
+    const geo = new THREE.PlaneGeometry(size, size, segs, segs);
     geo.rotateX(-Math.PI / 2);
     const pos = geo.attributes.position;
     const colors = new Float32Array(pos.count * 3);

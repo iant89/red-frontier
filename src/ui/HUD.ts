@@ -37,6 +37,7 @@ import type { PowerTier } from '../sim/config';
 import type { Alert, Severity } from '../sim/alerts';
 import { isPickedClean, POI_KINDS, salvageTotalKg } from '../sim/pois';
 import type { Poi } from '../sim/pois';
+import { MapRenderer, WorldMapOverlay, fitTransform, type MapTransform } from './WorldMap';
 
 export type OverlayMode = 'none' | 'power' | 'life' | 'weather';
 
@@ -50,6 +51,10 @@ export interface HUDCallbacks {
   onMenu?: () => void;
   /** Toggle the developer-mode panel. */
   onDev?: () => void;
+  /** World map selection. */
+  onMapSelect?: (type: 'rover' | 'building' | 'colonist' | 'poi', id: number) => void;
+  /** World map empty click — optional camera focus. */
+  onMapFocus?: (x: number, z: number) => void;
 }
 
 const fmtKg = (n: number) =>
@@ -186,6 +191,17 @@ export class HUD {
    * would let a stranded rover and a supply drop fight over one node.
    */
   private markerNodes = new Map<string, HTMLElement>();
+
+  // --- minimap + world map (issue #18) ---
+  private minimapCanvas: HTMLCanvasElement | null = null;
+  private minimapCtx: CanvasRenderingContext2D | null = null;
+  private minimapTr: MapTransform | null = null;
+  private worldMap: WorldMapOverlay | null = null;
+  private minimapCamera: { x: number; z: number } | null = null;
+  private minimapSelected: { type: string; id: number } | null = null;
+  private minimapView: SimView | null = null;
+  private minimapCollapsed = false;
+  private lastMinimapKey = '';
 
   private vitalsCollapsed = false;
   private inspectorCollapsed = false;
@@ -348,6 +364,7 @@ export class HUD {
         </div>
         <div class="resources" id="resources"></div>
         <button class="btn idle-btn" id="idle-btn" title="Select the next idle rover (.)">😴 <span class="btn-t">Idle</span> <span class="idle-n" id="idle-n">0</span></button>
+        <button class="btn" id="map-btn" class="btn" title="World map (M)">🗺</button>
         <button class="btn" id="dev-btn" title="Developer mode — world editor (~ backtick)">🛠</button>
         <button class="btn" id="history-btn" title="Alert history (H)">📜</button>
         <button class="btn" id="menu-btn" title="Save and return to the main menu">☰</button>
@@ -363,11 +380,12 @@ export class HUD {
       </div>
 
       <div class="panel" id="vitals">
-        <div class="vitals-head">
+        <div class="vitals-head hud-drag">
           <span class="vh-title">Colony vitals</span>
           <span class="vh-sub" id="vitals-sub"></span>
           <button class="mini-btn" id="vitals-toggle" title="Collapse panel" aria-expanded="true">▾</button>
         </div>
+        <div class="vitals-body" id="vitals-body">
         <div id="power-block">
           <div class="pw-top">
             <div class="pw-num"><span class="pw-k">Generation</span><span class="pw-v" id="pw-gen">0 kW</span></div>
@@ -411,10 +429,20 @@ export class HUD {
           <div class="stat"><span class="k">Suit O₂</span><span class="v" id="crew-suit">100%</span></div>
           <div class="bar-wrap"><div class="bar-fill cyan" id="crew-suit-bar" style="width:100%"></div></div>
         </div>
+        </div>
       </div>
 
       <div class="panel" id="alerts"></div>
       <div id="markers"></div>
+      <div class="panel" id="minimap">
+        <div class="minimap-head hud-drag">
+          <span class="vh-title">Map</span>
+          <span class="vh-sub" id="minimap-sub"></span>
+          <span class="i-spacer"></span>
+          <button class="mini-btn" id="minimap-toggle" title="Collapse minimap">⛶</button>
+        </div>
+        <canvas id="minimap-canvas" width="160" height="160" title="Click to open world map"></canvas>
+      </div>
       <div class="panel" id="inspector"><div class="empty">Select a rover, a building, or your colonist.</div></div>
       <div class="panel" id="buildbar"></div>
       <div class="build-info" id="build-info" style="display:none">
@@ -425,7 +453,7 @@ export class HUD {
         <div class="bi-process" id="bi-process"></div>
       </div>
       <div class="panel" id="hintbar" style="display:none"></div>
-      <div class="panel" id="log"><span class="lg-title">Colony log</span></div>
+      <div class="panel" id="log"><span class="lg-title hud-drag">Colony log</span><div class="log-body" id="log-body"></div></div>
 
       <div class="hist-overlay" id="history-overlay" style="display:none">
         <div class="hist-card">
@@ -530,6 +558,135 @@ export class HUD {
     // geometry persisted — plus the one-tap "clear the screen" peek button.
     this.enablePanelWindows();
     this.buildPeekButton();
+    this.buildMinimap();
+    this.buildWorldMap();
+  }
+
+  // ------------------------------------------------ minimap / world map ----
+  private buildMinimap(): void {
+    const canvas = this.el('minimap')?.querySelector('#minimap-canvas') as HTMLCanvasElement | null;
+    if (!canvas) return;
+    this.minimapCanvas = canvas;
+    const ctx = canvas.getContext('2d');
+    if (ctx) this.minimapCtx = ctx;
+
+    // click / tap opens world map
+    const open = (e: Event) => {
+      e.stopPropagation();
+      e.preventDefault();
+      this.openWorldMap();
+    };
+    canvas.addEventListener('pointerdown', open);
+    canvas.addEventListener('click', open);
+
+    // header button collapses minimap
+    try {
+      this.el('minimap-toggle').addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        this.setMinimapCollapsed(!this.minimapCollapsed);
+      });
+    } catch {}
+
+    // map button in topbar
+    try {
+      this.el('map-btn').addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        if (this.worldMap?.isVisible()) this.closeWorldMap();
+        else this.openWorldMap();
+      });
+    } catch {}
+
+    // drag handle for minimap
+    this.el('minimap').querySelector('.minimap-head')?.classList.add('hud-drag');
+    this.ensureGrip(this.el('minimap'));
+
+    const collapsed = this.storeGet('rf-collapse-minimap') === '1';
+    this.setMinimapCollapsed(collapsed);
+  }
+
+  private buildWorldMap(): void {
+    this.worldMap = new WorldMapOverlay({
+      onSelect: (type, id) => {
+        // select in HUD + Game
+        this.cb.onMapSelect?.(type, id);
+        // also trigger normal focus/selection path for compatibility
+        if (type !== 'poi') this.cb.onAction('focus', id);
+        this.minimapSelected = { type, id };
+      },
+      onFocus: (x, z) => {
+        this.cb.onMapFocus?.(x, z);
+      },
+      onClose: () => {
+        // no sim change
+      },
+    });
+  }
+
+  setMinimapCollapsed(on: boolean): void {
+    this.minimapCollapsed = on;
+    try {
+      this.el('minimap').classList.toggle('collapsed', on);
+      const btn = this.el('minimap').querySelector('#minimap-toggle') as HTMLElement | null;
+      if (btn) {
+        btn.textContent = on ? '▸' : '▾';
+        btn.title = on ? 'Expand minimap' : 'Collapse minimap';
+      }
+    } catch {}
+    this.storeSet('rf-collapse-minimap', on ? '1' : '0');
+  }
+
+  openWorldMap(): boolean {
+    if (!this.worldMap) return false;
+    this.worldMap.open();
+    return true;
+  }
+
+  closeWorldMap(): boolean {
+    if (!this.worldMap) return false;
+    if (!this.worldMap.isVisible()) return false;
+    this.worldMap.close();
+    return true;
+  }
+
+  isWorldMapOpen(): boolean {
+    return !!this.worldMap?.isVisible();
+  }
+
+  /** Called every HUD tick from Game.syncUI — updates both canvases. */
+  updateMinimap(sim: SimView, camera: { x: number; z: number } | null, selected: { type: string; id: number } | null): void {
+    this.minimapView = sim;
+    this.minimapCamera = camera;
+    this.minimapSelected = selected;
+
+    // push to world map overlay if open
+    if (this.worldMap?.isVisible()) {
+      this.worldMap.setView(sim, camera, selected);
+    }
+
+    // minimap render throttled by simple key
+    const canvas = this.minimapCanvas;
+    const ctx = this.minimapCtx;
+    if (!canvas || !ctx) return;
+    const w = canvas.width;
+    const h = canvas.height;
+    // cheap change detection: rovers/buildings/pois counts + camera rounded
+    const key = `${sim.world.half}|${sim.rovers.length}|${sim.buildings.length}|${sim.world.pois.length}|${Math.round((camera?.x ?? 0)/5)}|${Math.round((camera?.z ?? 0)/5)}|${selected?.type ?? ''}${selected?.id ?? ''}|${Math.round(sim.colonist.x/3)}|${Math.round(sim.colonist.z/3)}`;
+    if (key === this.lastMinimapKey) return;
+    this.lastMinimapKey = key;
+
+    const tr = fitTransform(w, h, sim.world.half, 0.12);
+    this.minimapTr = tr;
+    try {
+      this.el('minimap-sub').textContent = `${sim.world.half * 2} m`;
+    } catch {}
+
+    MapRenderer.render(ctx, w, h, sim, tr, {
+      showGrid: true,
+      showDeposits: false,
+      showCamera: camera,
+      highlightId: selected as any,
+      time: performance.now(),
+    });
   }
 
   // ------------------------------------------- panel window management ----
@@ -538,6 +695,7 @@ export class HUD {
     vitals: { w: 190, h: 110 },
     inspector: { w: 190, h: 120 },
     log: { w: 180, h: 70 },
+    minimap: { w: 140, h: 140 },
   };
 
   private ensureGrip(panel: HTMLElement): void {
@@ -557,7 +715,10 @@ export class HUD {
   private enablePanelWindows(): void {
     this.el('vitals').querySelector('.vitals-head')?.classList.add('hud-drag');
     this.el('log').querySelector('.lg-title')?.classList.add('hud-drag');
-    for (const id of ['vitals', 'inspector', 'log']) this.ensureGrip(this.el(id));
+    try { this.el('minimap').querySelector('.minimap-head')?.classList.add('hud-drag'); } catch {}
+    for (const id of ['vitals', 'inspector', 'log', 'minimap']) {
+      try { this.ensureGrip(this.el(id)); } catch {}
+    }
     this.applyStoredGeometry();
 
     this.hudRoot.addEventListener('pointerdown', (e) => {
@@ -593,7 +754,7 @@ export class HUD {
   private panelWindowOf(el: HTMLElement): HTMLElement | null {
     let node: HTMLElement | null = el;
     while (node && node !== this.hudRoot) {
-      if (node.id === 'vitals' || node.id === 'inspector' || node.id === 'log') return node;
+      if (node.id === 'vitals' || node.id === 'inspector' || node.id === 'log' || node.id === 'minimap') return node;
       node = node.parentElement;
     }
     return null;
@@ -666,10 +827,14 @@ export class HUD {
         ? Math.hypot(p.clientX - st.startX, p.clientY - st.startY)
         : 0;
       if (st.mode === 'move' && travel < 6) {
-        // A press that never moved is a *tap* — it feeds the double-tap
-        // reset, and it must not be persisted as a new position.
         this.lastTapOnHandle = { at: performance.now(), id: panel.id };
         return;
+      }
+      if (st.mode === 'move') {
+        const r = panel.getBoundingClientRect();
+        const s = this.snapPanel(panel, r.left, r.top, r.width, r.height);
+        panel.style.left = `${s.x}px`;
+        panel.style.top = `${s.y}px`;
       }
       this.storePanelGeometry(panel);
     };
@@ -693,13 +858,78 @@ export class HUD {
     return false;
   }
 
+  private isCoarsePointer(): boolean {
+    try {
+      return typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+    } catch { return false; }
+  }
+
+  private snapPanel(panel: HTMLElement, x: number, y: number, w: number, h: number): { x: number; y: number } {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const thr = this.isCoarsePointer() ? 20 : 12;
+    const M = 8;
+    let nx = x;
+    let ny = y;
+
+    // Horizontal: snap to viewport edges (with 8px dock margin)
+    if (Math.abs(x - M) < thr) nx = M;
+    if (Math.abs(vw - (x + w) - M) < thr) nx = vw - w - M;
+    // Also snap to 0 if really at edge, but keep 8px dock as final
+    if (Math.abs(x) < thr) nx = M;
+    if (Math.abs(vw - (x + w)) < thr) nx = vw - w - M;
+
+    // Vertical: snap to viewport + topbar / buildbar / hintbar
+    try {
+      const topbar = this.el('topbar');
+      const tb = topbar.getBoundingClientRect();
+      const belowTop = tb.bottom + M;
+      if (Math.abs(y - belowTop) < thr) ny = belowTop;
+    } catch {}
+    try {
+      const hint = this.el('hintbar');
+      if (hint.style.display !== 'none') {
+        const hb = hint.getBoundingClientRect();
+        const aboveHint = hb.top - h - M;
+        if (Math.abs(y - aboveHint) < thr) ny = aboveHint;
+      }
+    } catch {}
+    try {
+      const build = this.el('buildbar');
+      const bb = build.getBoundingClientRect();
+      const aboveBuild = bb.top - h - M;
+      if (Math.abs(y - aboveBuild) < thr) ny = aboveBuild;
+    } catch {}
+
+    if (Math.abs(y - M) < thr) ny = M;
+    if (Math.abs(vh - (y + h) - M) < thr) ny = vh - h - M;
+    if (Math.abs(y) < thr) ny = M;
+    if (Math.abs(vh - (y + h)) < thr) ny = vh - h - M;
+
+    // Clamp so snap never pushes partially off-screen
+    nx = Math.max(-w + 48, Math.min(vw - 48, nx));
+    ny = Math.max(0, Math.min(vh - 34, ny));
+    return { x: Math.round(nx), y: Math.round(ny) };
+  }
+
   private storePanelGeometry(panel: HTMLElement): void {
+    // Snap on move, not on resize
     const rect = panel.getBoundingClientRect();
+    let x = rect.left;
+    let y = rect.top;
+    if (this.dragState?.mode !== 'resize' && this.dragState?.id === panel.id) {
+      // called from drag end – already snapped there, keep
+    } else if (panel.dataset.snap !== 'no') {
+      const s = this.snapPanel(panel, rect.left, rect.top, rect.width, rect.height);
+      x = s.x; y = s.y;
+      panel.style.left = `${x}px`;
+      panel.style.top = `${y}px`;
+    }
     this.storeSet(
       `rf-panel-${panel.id}`,
       JSON.stringify({
-        x: Math.round(rect.left),
-        y: Math.round(rect.top),
+        x: Math.round(x),
+        y: Math.round(y),
         w: Math.round(rect.width),
         h: Math.round(rect.height),
       }),
@@ -721,7 +951,7 @@ export class HUD {
   private applyStoredGeometry(): void {
     const vw = window.innerWidth || 1024;
     const vh = window.innerHeight || 768;
-    for (const id of ['vitals', 'inspector', 'log']) {
+    for (const id of ['vitals', 'inspector', 'log', 'minimap']) {
       const raw = this.storeGet(`rf-panel-${id}`);
       if (!raw) continue;
       try {
@@ -907,7 +1137,7 @@ export class HUD {
       wrap.appendChild(b);
       this.overlayBtns.set(mode, b);
     }
-    this.el('vitals').appendChild(wrap);
+    (this.el('vitals').querySelector('#vitals-body') ?? this.el('vitals')).appendChild(wrap);
     this.setOverlay('none');
   }
 
@@ -2075,13 +2305,13 @@ export class HUD {
 
   // -------------------------------------------------------------- misc ----
   addLog(severity: string, text: string, stamp = '', max = 60): void {
-    const log = this.el('log');
+    const body = this.hudRoot.querySelector<HTMLElement>('#log-body') ?? this.el('log');
     const item = document.createElement('div');
     item.className = `log-item ${severity}`;
     item.innerHTML = `${stamp ? `<span class="ts">${stamp}</span>` : ''}<span>${text}</span>`;
-    log.appendChild(item);
-    while (log.children.length > max + 1) log.children[1]?.remove();
-    log.scrollTop = log.scrollHeight;
+    body.appendChild(item);
+    while (body.children.length > max) body.children[0]?.remove();
+    body.scrollTop = body.scrollHeight;
   }
 
   hint(text: string | null): void {
