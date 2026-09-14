@@ -28,6 +28,32 @@ Persistent notes for future coding sessions.
 - **Adding a `rand()` draw to `DustDevil`'s constructor moves every seeded FX test** — the devil RNG is the FX RNG, and
   the size/spin/wander draws all come out of one stream. Expect to re-tune seeds when it changes.
 
+## Dust field (the #2 / #7 rework)
+
+- Ambient dust no longer blows into a fixed box: `WeatherFX.viewGeometry` derives `viewRadius`
+  (half-diagonal of the viewed ground footprint) from rig radius, FOV, aspect and view angle, and
+  `dustField(viewRadius)` in `particles/effects.ts` turns it into the emission envelope
+  (`half`, `height`, `size` LOD, `alpha` haze, `swirl`, feather `r0`). `FxContext.viewRadius` is
+  **required** — anything building an `FxContext` by hand (tests, tooling) must supply it.
+- `half` is the emission box, the `wrapAmbient` radius *and* the rim feather's outer radius at
+  once — that coincidence is what hides the box: `ParticlePool.setFalloff` fades ambient alpha to
+  zero exactly at the wrap rim on a p=4 superellipse (stored in distance⁴ space so `writeRender`
+  needs no roots). Never wrap at one radius and feather at another.
+- `FIELD_MIN = 45` (close-up floor: up close you are inside the dust), `FIELD_MAX = 1000`
+  (from-orbit ceiling: the world is 1280 m across, past that the field would hang over the void).
+  Emission *rates* are deliberately view-independent — the box matches the view, so screen-space
+  density is constant for free and the 9000-particle pool never grows.
+- Storm grit is grit: sizes `(0.35–0.9, 0.9–1.8)·size`, strictly under the wind emitter's
+  `(0.5–1.2, 1.2–2.1)·size`. The storm's wall-opacity comes from fog + sky haze, not from sprite
+  coverage — do not "fix" thin-looking storms by re-inflating sprite sizes.
+- Turbulence is now ONE coherent divergence-free roll (`CURL_K ≈ 157 m` cells, Taylor–Green via
+  the sin(a±b) identity: 2 sines/particle, cheaper than the old 3-sine per-mote jitter) plus
+  `CURL_SCAT` per-mote phase scatter. Coherence is the whole "fluid" read — neighbouring motes
+  must turn together. `tests/render/particles.test.ts` pins coherence (cos ≈ 1 at 8 m, ≈ −1 half
+  a roll away), path curvature and the downwind transport.
+- Retuning traps: turbulence amplitude means *acceleration*; visible swing ≈ tb/ω² with
+  ω ≈ wind·CURL_K + pattern drift. And `drag` silently eats wander over a particle's life.
+
 ## Learned the hard way
 
 - **The two sim transports have different failure modes, and only the browser gates see both.** `LocalSimHost`'s view *is* the live sim, so anything that delays a view
@@ -44,6 +70,16 @@ Persistent notes for future coding sessions.
   do not try to re-derive them from the seed client-side the way the terrain is.
 - Supply drops contain bulk resources and sometimes battery cells, never fluids. Exposed water or food would freeze, and the current rover logistics model has no
   field-fluid recovery path; do not bypass that boundary by teleporting fluid cargo into colony tanks.
+- **Storm screenshots need patience, not time travel.** `dev/time` jumps re-anchor the clock but
+  leave `weather.time` behind, so a conjured storm's envelope does not follow the jump — and the
+  severe ramp is ~1.5 sim-hours anyway. The working recipe: `game.dev.enable()` +
+  `game.dev.forceStorm('severe')` straight through the dev API (the panel's buttons need the PR #29
+  master switch, and on a minified build the UI path is painful to debug), then run at 4× and
+  `waitForFunction(stormIntensity > 0.75)` — a few real minutes. On a worker host, dev command
+  acks are Promises: a synchronous `JSON.stringify(ack)` reads as `undefined`, which is not a failure.
+  The same master switch gates `overlayState()`: anything publishing pins (including
+  `scripts/worker-smoke.mjs`'s battery-pin check, which #29 left red on main until it called
+  `g.dev.enable()`) must turn the mode on first.
 - `src/audio/AudioSystem.ts` is presentation-only procedural Web Audio: it never writes sim state, starts on the first real input gesture to satisfy autoplay policy,
   and is deliberately updated at simulation speed 0 so paused colonies retain environmental ambience and brownout/storm reminders. Keep new `SimCommand` values
   represented in its exhaustive `COMMAND_CUES` map; `tests/audio/system.test.ts` pins that contract.

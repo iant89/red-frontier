@@ -41,6 +41,14 @@ export interface FxContext {
   /** Live storm class + intensity envelope 0..1. */
   storm: StormKind;
   stormIntensity: number;
+  /**
+   * Half-diagonal (world units) of the ground footprint the camera actually
+   * sees, derived by the controller from the rig radius, FOV and view angle.
+   * The ambient emitters size their field from it, so a storm fills the
+   * viewed area at every zoom instead of hanging in a fixed box that reads
+   * as a cube from orbit.
+   */
+  viewRadius: number;
   /** Authoritative ground height (particles spawn above it, settle on it). */
   heightAt: (x: number, z: number) => number;
   /**
@@ -74,6 +82,62 @@ const STORM_TINT = { r: 0.85, g: 0.61, b: 0.4 };
 const DEVIL_TINT = { r: 0.88, g: 0.64, b: 0.43 };
 const TRAIL_TINT = { r: 0.76, g: 0.55, b: 0.38 };
 
+// ------------------------------------------------------- the dust field ----
+
+/**
+ * The ambient emitters do not blow dust into a fixed box: they blow it into a
+ * field sized from `FxContext.viewRadius`, so the storm fills whatever the
+ * camera sees. `dustField` turns that radius into the field's envelope.
+ *
+ * - `half` — the emission/wrap box half-extent: 1.45× the view radius, so the
+ *   feathered rim (which fades to nothing exactly at `half`) always sits
+ *   outside the frame.
+ * - `height` — the layer's depth above the ground. It grows with the view, but
+ *   far slower than the footprint: from orbit dust is a shallow veil.
+ * - `size` — a world-size multiplier that keeps the on-screen grain roughly
+ *   constant as the camera pulls back (a 1 m mote is sub-pixel from orbit).
+ * - `alpha` — aerial perspective: the far field thins into haze instead of
+ *   reading as geometry.
+ * - `swirl` — turbulence multiplier, so the flow still wanders on screen when
+ *   the world scale grows.
+ * - `r0` — inner radius of the rim feather (see `ParticlePool.setFalloff`).
+ */
+/** Close-up floor: up close the player is inside the dust, not looking at it. */
+export const FIELD_MIN = 45;
+/**
+ * From-orbit ceiling on the box half-extent. The playable world is 1280 m
+ * across (~905 m half-diagonal); past this the field would hang over the void
+ * beyond the terrain instead of over the planet.
+ */
+export const FIELD_MAX = 1000;
+/** The view radius the hand-tuned ground-level numbers were scaled from. */
+const FIELD_REF = 95;
+/** Emission/wrap box margin over the view radius — room for the feather. */
+const FIELD_MARGIN = 1.45;
+
+export interface DustField {
+  half: number;
+  height: number;
+  size: number;
+  alpha: number;
+  swirl: number;
+  r0: number;
+}
+
+export function dustField(viewRadius: number): DustField {
+  const v = Math.min(FIELD_MAX / FIELD_MARGIN, Math.max(FIELD_MIN, viewRadius));
+  const half = v * FIELD_MARGIN;
+  const size = Math.min(5, Math.max(1, Math.pow(v / FIELD_REF, 0.8)));
+  return {
+    half,
+    height: Math.min(240, Math.max(26, v * 0.3)),
+    size,
+    alpha: Math.min(1, Math.max(0.6, Math.pow(FIELD_REF / v, 0.35))),
+    swirl: Math.min(2.2, Math.max(1, Math.sqrt(size))),
+    r0: half * 0.6,
+  };
+}
+
 // ------------------------------------------------------------- wind ----
 
 /**
@@ -91,42 +155,43 @@ export class WindEmitter {
   }
 
   update(ctx: FxContext, pool: ParticlePool): void {
+    const field = dustField(ctx.viewRadius);
     this.acc += this.rateFor(ctx) * ctx.dt;
     while (this.acc >= 1) {
       this.acc -= 1;
-      this.emitOne(ctx, pool);
+      this.emitOne(ctx, pool, field);
     }
     // Never bank more than a frame's worth across a hitch.
     if (this.acc > 8) this.acc = 8;
   }
 
-  private emitOne(ctx: FxContext, pool: ParticlePool): void {
+  private emitOne(ctx: FxContext, pool: ParticlePool, field: DustField): void {
     const R = ctx.rand;
-    const W = 150;
-    const D = 150;
-    const H = 34;
-    const x = ctx.camX + (R() - 0.5) * W;
-    const z = ctx.camZ + (R() - 0.5) * D;
+    const half = field.half;
+    const x = ctx.camX + (R() - 0.5) * 2 * half;
+    const z = ctx.camZ + (R() - 0.5) * 2 * half;
     const g = ctx.heightAt(x, z);
+    // Density falls off with height: the layer is thickest at the surface.
+    const hFrac = Math.pow(R(), 1.25);
     const tint = dustTint(R, WIND_TINT, 0.09);
     const spread = 0.85 + R() * 0.3;
     pool.spawn({
       x,
-      y: g + 0.4 + R() * H,
+      y: g + 0.4 + hFrac * field.height,
       z,
       vx: ctx.windX * spread + (R() - 0.5) * 1.2,
       vy: (R() - 0.4) * 0.7,
       vz: ctx.windZ * spread + (R() - 0.5) * 1.2,
       life: 4 + R() * 3,
-      size0: 0.5 + R() * 0.7,
-      size1: 1.2 + R() * 0.9,
+      size0: (0.5 + R() * 0.7) * field.size,
+      size1: (1.2 + R() * 0.9) * field.size,
       ...tint,
-      alpha: 0.06 + ctx.dust * 0.2,
+      alpha: (0.06 + ctx.dust * 0.2) * field.alpha * (1 - 0.45 * hFrac),
       fadeIn: 0.2,
       fadeOut: 0.45,
       gravity: 0.12,
       drag: 0.05,
-      turbulence: 1.1,
+      turbulence: 1.1 * field.swirl,
       groundY: g + 0.15,
     });
   }
@@ -136,8 +201,12 @@ export class WindEmitter {
 
 /**
  * Storm grit: dense, fast, near-horizontal dust that only exists while a storm
- * is blowing. A third of the spawns hug the ground as rushing streaks; the
- * rest fill a tighter box around the camera so a severe storm reads as a wall.
+ * is blowing. A third of the spawns hug the ground as a sheared surface layer;
+ * the rest fill the field around the camera so a severe storm reads as a wall.
+ *
+ * The grit is *grit*: motes at or below the ambient wind-dust sizes, thrown in
+ * numbers, riding a coherent two-octave curl field — wavy, unpredictable paths
+ * that still transport downwind. (The old 4–6.5 m sprites read as small clouds.)
  */
 export class StormEmitter {
   private acc = 0;
@@ -148,49 +217,52 @@ export class StormEmitter {
     // Devils are local vortices under relatively clear skies (visibility
     // stays high) — they kick up a light haze, not a regional grit wall.
     const kindScale = ctx.storm === 'devil' ? 0.25 : ctx.storm === 'regional' ? 0.7 : 1;
-    return Math.min(560, (k * 520 + ctx.dust * 40) * kindScale);
+    return Math.min(800, (k * 750 + ctx.dust * 50) * kindScale);
   }
 
   update(ctx: FxContext, pool: ParticlePool): void {
+    const field = dustField(ctx.viewRadius);
     this.acc += this.rateFor(ctx) * ctx.dt;
     while (this.acc >= 1) {
       this.acc -= 1;
-      this.emitOne(ctx, pool);
+      this.emitOne(ctx, pool, field);
     }
     if (this.acc > 24) this.acc = 24;
   }
 
-  private emitOne(ctx: FxContext, pool: ParticlePool): void {
+  private emitOne(ctx: FxContext, pool: ParticlePool, field: DustField): void {
     const R = ctx.rand;
     const k = Math.max(0.05, ctx.stormIntensity);
-    const W = 110;
-    const D = 110;
-    const H = 26;
-    const x = ctx.camX + (R() - 0.5) * W;
-    const z = ctx.camZ + (R() - 0.5) * D;
+    const half = field.half;
+    const x = ctx.camX + (R() - 0.5) * 2 * half;
+    const z = ctx.camZ + (R() - 0.5) * 2 * half;
     const g = ctx.heightAt(x, z);
     const streak = R() < 0.4;
     const tint = dustTint(R, STORM_TINT, 0.08);
     const boost = 1.0 + k * 0.8;
+    // Boundary-layer shear: grit at the surface lags the air above it, so the
+    // field rolls instead of sliding along as one sheet.
+    const hFrac = streak ? R() * 0.09 : Math.pow(R(), 1.25);
+    const shear = 0.62 + 0.38 * Math.min(1, hFrac * 4);
     // Slow vertical heaving sells the gust fronts rolling through.
-    const heave = Math.sin(ctx.time * 2.4 + x * 0.05 + z * 0.03) * 2.6 * k;
+    const heave = Math.sin(ctx.time * 2.4 + x * 0.05 + z * 0.03) * 1.6 * k;
     pool.spawn({
       x,
-      y: streak ? g + 0.3 + R() * 2.2 : g + 0.5 + R() * H,
+      y: g + 0.3 + hFrac * field.height,
       z,
-      vx: ctx.windX * boost + (R() - 0.5) * (3 + 5 * k),
-      vy: heave * 0.4 + (R() - 0.5) * 1.6,
-      vz: ctx.windZ * boost + (R() - 0.5) * (3 + 5 * k),
-      life: 2 + R() * 2,
-      size0: 2.0 + R() * 1.6,
-      size1: 4.0 + R() * 2.5,
+      vx: ctx.windX * boost * shear + (R() - 0.5) * (1.6 + 2.4 * k),
+      vy: heave * 0.4 + (R() - 0.5) * 1.2,
+      vz: ctx.windZ * boost * shear + (R() - 0.5) * (1.6 + 2.4 * k),
+      life: 1.7 + R() * 1.4,
+      size0: (0.35 + R() * 0.55) * field.size,
+      size1: (0.9 + R() * 0.9) * field.size,
       ...tint,
-      alpha: 0.15 + 0.4 * k,
+      alpha: (0.3 + 0.5 * k) * field.alpha * (1 - 0.45 * hFrac),
       fadeIn: 0.12,
       fadeOut: 0.4,
       gravity: 0.25,
-      drag: 0.12,
-      turbulence: 2.2 + 2.5 * k,
+      drag: 0.08,
+      turbulence: (14 + 26 * k) * field.swirl,
       groundY: g + 0.12,
     });
   }
@@ -1061,10 +1133,13 @@ export class DevilManager {
     // Upwind bearing (where the wind comes from), fanned out wide.
     const upwind = windMag > 0.5 ? Math.atan2(-ctx.windX, -ctx.windZ) : R() * Math.PI * 2;
     let bearing = upwind + (R() - 0.5) * (Math.PI / 1.2);
+    // Devils arrive with the weather that fills the *viewed* area, so their
+    // approach spread scales with the dust field, not with a fixed ring.
+    const span = Math.max(1, dustField(ctx.viewRadius).half / 140);
     let x = ctx.camX;
     let z = ctx.camZ;
     for (let tries = 0; tries < 4; tries++) {
-      const dist = 24 + R() * 78;
+      const dist = (24 + R() * 78) * span;
       x = ctx.camX + Math.sin(bearing) * dist;
       z = ctx.camZ + Math.cos(bearing) * dist;
       const clear = this.devils.every(

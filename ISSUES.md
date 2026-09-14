@@ -13,12 +13,12 @@ work). They will drift — treat them as a starting point, not a promise.
 | # | Issue | Area | Priority | Status |
 |---|---|---|---|---|
 | 1 | Mobile camera controls — pan is nearly unusable | `app/` | P1 | In progress |
-| 2 | Dust storms turn into a cube when you zoom out | `render/particles` | P1 | Open |
+| 2 | Dust storms turn into a cube when you zoom out | `render/particles` | P1 | Done |
 | 3 | Dust devils only ever spawn two at a time | `render/particles` + `render/WeatherFX` | P2 | Done |
 | 4 | Dust devils follow each other instead of their own path | `render/particles` | P2 | Done |
 | 5 | Dust devils don't interact when they collide | `render/particles` | P3 | Done |
 | 6 | Weather is uniform — real storms hit some areas harder | `sim/weather` | P2 | Open |
-| 7 | Storm dust is too coarse and flows too straight | `render/particles` | P1 | Open |
+| 7 | Storm dust is too coarse and flows too straight | `render/particles` | P1 | Done |
 | 8 | No lightning risk from high dust | `sim/` + `render/` | P2 | Open |
 | 9 | Rover selection ring isn't a circle | `render/Renderer` | P1 | Done |
 | 10 | Rover selection ring needs a pulsing white glow | `render/Renderer` | P3 | Done |

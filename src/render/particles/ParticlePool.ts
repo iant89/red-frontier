@@ -74,6 +74,25 @@ const sstep = (t: number): number => {
   return c * c * (3 - 2 * c);
 };
 
+/**
+ * The turbulence field: a divergence-free cellular flow (Taylor–Green style —
+ * `u = sin(a)cos(b)`, `w = −cos(a)sin(b)`), evaluated through the `sin(a±b)`
+ * product identity so the whole 3-component field costs two sines per
+ * particle — cheaper than the per-mote random jitter it replaced.
+ *
+ * The field is *coherent*: its phase comes from world position, so
+ * neighbouring motes turn together and the air reads as flowing rather than
+ * shimmering. Each mote's seed nudges its phase a little (`CURL_SCAT`), so
+ * two motes inside the same roll still take visibly different paths, and the
+ * temporal phases (`CURL_F*`) make the rolls breathe and travel.
+ */
+const CURL_K = 0.04; // ≈157 m rolls
+const CURL_SCAT = 0.3; // per-mote phase scatter (turns of a radian)
+const CURL_F1 = 0.37; // pattern drift rates (rad/s)
+const CURL_F2 = 0.29;
+/** Vertical share of the roll — dust lifts on one face, settles on the other. */
+const CURL_LIFT = 0.35;
+
 export class ParticlePool {
   /** Fixed capacity — the pool never allocates after construction. */
   readonly capacity: number;
@@ -108,6 +127,14 @@ export class ParticlePool {
 
   private cursor = 0;
   private count = 0;
+  /**
+   * Rim feather for the camera-following ambient field (see `setFalloff`).
+   * `fallR1 <= 0` disables it; `fallK` is the inner radius as a fraction of it.
+   */
+  private fallCX = 0;
+  private fallCZ = 0;
+  private fallK = 0;
+  private fallR1 = -1;
 
   constructor(capacity = 6000, rand: Rand = Math.random) {
     this.capacity = Math.max(1, Math.floor(capacity));
@@ -187,6 +214,10 @@ export class ParticlePool {
   update(dt: number, time: number): void {
     if (!(dt > 0)) return;
     const n = this.capacity;
+    // The flow field's temporal phases depend only on sim time: hoist them out
+    // of the particle loop (and freeze with it, on pause).
+    const tp1 = time * CURL_F1;
+    const tp2 = time * CURL_F2;
     for (let i = 0; i < n; i++) {
       if (this.life[i] <= 0) continue;
       const age = this.age[i] + dt;
@@ -218,12 +249,15 @@ export class ParticlePool {
 
       const tb = this.turb[i];
       if (tb > 0) {
-        const s = this.seed[i];
-        const px = this.px[i];
-        const py = this.py[i];
-        vx += Math.sin(time * 1.7 + s * 6.2832 + py * 0.35) * tb * dt;
-        vy += Math.sin(time * 1.31 + s * 4.1888) * tb * 0.45 * dt;
-        vz += Math.cos(time * 1.53 + s * 5.236 + px * 0.35) * tb * dt;
+        const s = this.seed[i] * 6.2832;
+        const a = this.px[i] * CURL_K + tp1 + s * CURL_SCAT;
+        const b = this.pz[i] * CURL_K + tp2 - s * CURL_SCAT * 0.7;
+        // sin(a)cos(b) = ½(sin(a+b) + sin(a−b)); −cos(a)sin(b) = ½(sin(a−b) − sin(a+b)).
+        const p = Math.sin(a + b);
+        const q = Math.sin(a - b);
+        vx += (p + q) * 0.5 * tb * dt;
+        vz += (q - p) * 0.5 * tb * dt;
+        vy += (p - q) * (CURL_LIFT * tb) * dt;
       }
 
       const x = this.px[i] + vx * dt;
@@ -246,6 +280,37 @@ export class ParticlePool {
       this.vy[i] = vy;
       this.vz[i] = vz;
     }
+  }
+
+  /**
+   * Feather the ambient field's rim so the emission box has no visible edge:
+   * ambient particles fade from full alpha at `r0` out to nothing at `r1`
+   * (world units from (`cx`, `cz`)). The falloff is a p=4 superellipse, which
+   * hugs the square `wrapAmbient` box while rounding its corners off — a disc
+   * would leave the box's four corners populated but invisible.
+   *
+   * Devil and trail dust is never feathered: it belongs to its vortex or its
+   * wheels, not to the camera-following field. `r1 <= r0` disables it.
+   */
+  setFalloff(cx: number, cz: number, r0: number, r1: number): void {
+    if (!(r1 > r0)) {
+      this.fallR1 = -1;
+      return;
+    }
+    this.fallCX = cx;
+    this.fallCZ = cz;
+    // Stored in distance⁴ space (the superellipse's own power), so the render
+    // loop needs no roots at all — just two multiplies and a compare.
+    const k = clamp01(r0 / r1);
+    this.fallK = k * k * k * k;
+    this.fallR1 = r1;
+  }
+
+  /** Test/debug helper: the feather this pool currently applies. */
+  falloff(): { cx: number; cz: number; r0: number; r1: number } {
+    if (this.fallR1 < 0) return { cx: this.fallCX, cz: this.fallCZ, r0: -1, r1: -1 };
+    const k = Math.sqrt(Math.sqrt(this.fallK));
+    return { cx: this.fallCX, cz: this.fallCZ, r0: k * this.fallR1, r1: this.fallR1 };
   }
 
   /**
@@ -296,7 +361,17 @@ export class ParticlePool {
       col[w * 3 + 1] = this.cg[i];
       col[w * 3 + 2] = this.cb[i];
       size[w] = this.size0[i] + (this.size1[i] - this.size0[i]) * t;
-      alpha[w] = this.peakA[i] * aIn * aOut;
+      let a = this.peakA[i] * aIn * aOut;
+      if (this.fallR1 > 0 && this.kind[i] === PKind.Ambient) {
+        const dx = (this.px[i] - this.fallCX) / this.fallR1;
+        const dz = (this.pz[i] - this.fallCZ) / this.fallR1;
+        const ax = dx * dx;
+        const az = dz * dz;
+        const m = ax * ax + az * az; // (r/r1)⁴ on the p=4 superellipse
+        if (m >= 1) a = 0;
+        else if (m > this.fallK) a *= 1 - sstep((m - this.fallK) / (1 - this.fallK));
+      }
+      alpha[w] = a;
       w++;
     }
     return w;

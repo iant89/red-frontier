@@ -506,6 +506,10 @@ try {
     g.host.send({ type: 'dev/rover/battery', roverId: rover.id, frac: 1 });
     await new Promise((r) => setTimeout(r, 400));
     const charged = g.host.view.rovers.find((rv) => rv.id === rover.id).battery;
+    // The master switch (PR #29) gates what the mode publishes: without it
+    // overlayState() is empty and the pin never reaches the host, so the
+    // world below would quietly ignore it.
+    g.dev.enable();
     g.dev.setKeepBatteryFull(rover.id, true);
     g.host.send({ type: 'dev/rover/battery', roverId: rover.id, frac: 0.02 });
     g.hud.setSpeed(3); // 4×: the pin has to survive several ticks, not one
