@@ -18,7 +18,7 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    sha: 'a30de49',
+    sha: '4693fa5',
     date: '2026-09-14',
     title: 'Rover proximity — crawl near obstacles, stricter in the yard',
     kind: 'feature',
