@@ -2,6 +2,28 @@
 
 Persistent notes for future coding sessions.
 
+## In-play update check (TDD §23)
+
+- `vite.config.ts` writes `dist/version.json` (`{ name, commit, builtAt }`) at
+  build time — commit from `GITHUB_SHA` in CI, else local `git rev-parse HEAD`.
+  The Pages workflow uploads `dist/` as-is, so the manifest is *by
+  construction* the live build. Never remove it from the Pages upload path.
+- `src/app/UpdateCheck.ts` polls that manifest every 5 min **while a colony
+  runs** (started in `Game.launch`, production builds only, stopped on
+  `returnToMenu`/mission end). Same-origin on purpose: the GitHub API
+  (`BuildStatus.latestMainCommit`, main-menu badge) answers "where is main?",
+  which can sit ahead of the live deploy (a failed smoke gate blocks the
+  deploy while main moves), and rate-limits per IP.
+- Flow on a newer commit: one-shot — freeze sim, `NEW BUILD AVAILABLE` banner,
+  save via `Game.save(quiet, onDone)`, dispose host, `reload()` after 3 s.
+  Save failure → "Reload anyway" button instead of a forced reload. Hidden
+  tabs skip + re-arm on `visibilitychange`. QA knob: `?updateCheckMs=…` (≥1000).
+- `scripts/update-check-smoke.mjs` drives the whole flow in headless Chromium
+  (rewrites `dist/version.json` mid-run and restores it); run it after any
+  change to the manifest/poller/reload path. `tests/app/update-check.test.ts`
+  covers the poller unit-level (fake fetcher, no DOM).
+
+
 - `scripts/setup-playwright.mjs` installs the Playwright browser-test dependencies. Use it when Playwright is needed instead of searching for another setup script.
 - TypeScript is a local project dependency. Run `npm install` before expecting `tsc` or other package tools to be available.
 - Add architecture notes, recurring pitfalls, useful commands, and unfinished work here as they are discovered.
