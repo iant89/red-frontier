@@ -8,6 +8,7 @@ import type { SaveMeta } from './SaveStore';
 import { timeAgo } from './SaveStore';
 import { DIFFICULTIES } from '../sim/difficulty';
 import { assessBuild, BUILD_COMMIT, latestMainCommit, shortSha } from './BuildStatus';
+import { ChangelogDialog } from './Changelog';
 
 export interface MainMenuOptions {
   saves: SaveMeta[];
@@ -22,6 +23,9 @@ function bgUrl(file: string): string {
 
 export class MainMenu {
   readonly root: HTMLElement;
+  private changelog: ChangelogDialog | null = null;
+  private currentSha: string | null = BUILD_COMMIT;
+  private latestSha: string | null = null;
 
   constructor(opts: MainMenuOptions) {
     const recent = opts.saves[0] ?? null;
@@ -48,24 +52,24 @@ export class MainMenu {
         <div class="rf-menu-panel">
           ${recent ? `
             <button class="rf-btn rf-btn-primary" data-act="continue">
-              <span class="mi">▶</span>
-              <span>Continue<span class="btn-sub"></span><small></small></span>
+              <span class="mi" aria-hidden="true">▶</span>
+              <span class="rf-btn-label">Continue<small></small></span>
             </button>` : ''}
           <button class="rf-btn" data-act="new">
-            <span class="mi">✦</span>
-            <span>New Expedition<small>Found a colony on untouched ground</small></span>
+            <span class="mi" aria-hidden="true">✦</span>
+            <span class="rf-btn-label">New Expedition<small>Found a colony on untouched ground</small></span>
           </button>
           <button class="rf-btn" data-act="load">
-            <span class="mi">▤</span>
-            <span>Saved Expeditions<small>${opts.saves.length === 0 ? 'No colonies on file yet' : `${opts.saves.length} ${opts.saves.length === 1 ? 'colony' : 'colonies'} on file`}</small></span>
+            <span class="mi" aria-hidden="true">▤</span>
+            <span class="rf-btn-label">Saved Expeditions<small>${opts.saves.length === 0 ? 'No colonies on file yet' : `${opts.saves.length} ${opts.saves.length === 1 ? 'colony' : 'colonies'} on file`}</small></span>
           </button>
           <div class="rf-menu-foot">Prototype 5 · deterministic sim · autosaves locally</div>
         </div>
       </div>
-      <div class="rf-build-status" data-state="checking" role="status" aria-live="polite">
+      <button class="rf-build-status" data-state="checking" type="button" aria-label="View changelog — build history">
         <span class="rf-build-dot" aria-hidden="true"></span>
         <span data-build-label>Checking build…</span>
-      </div>`;
+      </button>`;
     this.root = root;
 
     if (recent) {
@@ -77,6 +81,11 @@ export class MainMenu {
     }
     (root.querySelector('[data-act="new"]') as HTMLButtonElement).addEventListener('click', opts.onNewGame);
     (root.querySelector('[data-act="load"]') as HTMLButtonElement).addEventListener('click', opts.onLoadGame);
+
+    // Build badge → changelog timeline.
+    const badge = root.querySelector('.rf-build-status') as HTMLButtonElement;
+    badge.addEventListener('click', () => this.openChangelog());
+    badge.title = 'View build history and changelog';
   }
 
   mount(parent: HTMLElement = document.body): void {
@@ -91,29 +100,50 @@ export class MainMenu {
     if (!BUILD_COMMIT) {
       badge.dataset.state = 'unknown';
       label.textContent = 'Build status unavailable';
-      badge.title = 'This build does not contain a valid commit identifier.';
+      badge.title = 'View changelog — this build has no commit identifier.';
       return;
     }
 
     try {
       const latest = await latestMainCommit();
+      this.latestSha = latest;
       const result = assessBuild(BUILD_COMMIT, latest);
       badge.dataset.state = result.state;
       if (result.state === 'latest') {
         label.textContent = `Latest build · ${shortSha(result.current)}`;
-        badge.title = `Running the latest commit on main (${result.current}).`;
+        badge.title = `Running the latest commit on main (${result.current}) — click to view changelog.`;
       } else {
         label.textContent = `Old build · ${shortSha(result.current)}`;
-        badge.title = `Running ${result.current}; latest on main is ${result.latest}.`;
+        badge.title = `Running ${result.current}; latest on main is ${result.latest} — click to view changelog.`;
       }
     } catch (error) {
       badge.dataset.state = 'unknown';
       label.textContent = `Could not verify build · ${shortSha(BUILD_COMMIT)}`;
-      badge.title = error instanceof Error ? error.message : 'The GitHub build check failed.';
+      badge.title = `${error instanceof Error ? error.message : 'The GitHub build check failed.'} — click to view changelog.`;
     }
   }
 
+  private openChangelog(): void {
+    if (this.changelog) return;
+    this.changelog = new ChangelogDialog({
+      currentSha: this.currentSha,
+      latestSha: this.latestSha,
+      onClose: () => this.closeChangelog(),
+    });
+    this.changelog.mount(this.root);
+  }
+
+  private closeChangelog(): void {
+    if (!this.changelog) return;
+    this.changelog.unmount();
+    this.changelog = null;
+    // Return focus to the badge for keyboard users.
+    (this.root.querySelector('.rf-build-status') as HTMLElement | null)?.focus();
+  }
+
   unmount(): void {
+    this.changelog?.unmount();
+    this.changelog = null;
     this.root.remove();
   }
 }
