@@ -23,6 +23,8 @@ import {
   StormEmitter,
   DevilManager,
   RoverTrailEmitter,
+  dustField,
+  type DustField,
   type FxContext,
   type TrailRover,
 } from './particles/effects';
@@ -67,17 +69,29 @@ export interface WeatherFxOptions {
 const _dir = new THREE.Vector3();
 
 /**
- * Ground point under the middle of the view — where the player is looking.
- * Emission boxes and devil spawns centre here, not under the camera itself:
- * at the default zoom the camera sits ~120 units from its target, so
- * camera-centred dust would fall outside the viewed area entirely.
+ * Where the dust field sits this frame: the ground point under the middle of
+ * the view — where the player is looking — plus the half-diagonal of the
+ * ground footprint the frustum covers there.
+ *
+ * The centre is not under the camera itself: at the default zoom the camera
+ * sits ~120 units from its target, so camera-centred dust would fall outside
+ * the viewed area entirely. The radius is what sizes the emission field: the
+ * frustum's vertical spread, widened by the aspect for the horizontal, and
+ * stretched by the view's grazing angle (a low camera sees a footprint that
+ * runs away toward the horizon). Looking at the horizon the footprint is
+ * unbounded — the field clamps itself at its ceiling instead.
  */
-function viewFocus(cam: THREE.PerspectiveCamera): { x: number; z: number } {
+function viewGeometry(cam: THREE.PerspectiveCamera): { x: number; z: number; radius: number } {
   cam.getWorldDirection(_dir);
-  // Looking at the horizon (or up): fall back to the ground below the camera.
-  if (_dir.y > -0.05) return { x: cam.position.x, z: cam.position.z };
-  const t = Math.min(900, (cam.position.y - 2) / -_dir.y);
-  return { x: cam.position.x + _dir.x * t, z: cam.position.z + _dir.z * t };
+  const grazing = _dir.y > -0.05;
+  const t = grazing ? 0 : Math.min(900, (cam.position.y - 2) / -_dir.y);
+  const x = cam.position.x + _dir.x * t;
+  const z = cam.position.z + _dir.z * t;
+  const dist = Math.max(8, grazing ? 900 : t);
+  const spread = Math.tan((cam.fov * Math.PI) / 360);
+  const width = dist * spread * Math.max(1, cam.aspect);
+  const depth = (dist * spread) / Math.max(0.3, -_dir.y);
+  return { x, z, radius: Math.hypot(width, depth) };
 }
 
 export class WeatherFX {
@@ -123,10 +137,25 @@ export class WeatherFX {
 
   private focusX = 0;
   private focusZ = 0;
+  private viewR = 0;
+  private fieldNow: DustField = dustField(0);
 
   /** Emission centre used by the last sync (ground under the view centre). */
   get focus(): { x: number; z: number } {
     return { x: this.focusX, z: this.focusZ };
+  }
+
+  /**
+   * Half-diagonal of the viewed ground footprint from the last sync — what
+   * sized the emission field. Clamped inside the emitters (`dustField`).
+   */
+  get viewRadius(): number {
+    return this.viewR;
+  }
+
+  /** The emission field envelope the last sync drove (and wrapped to). */
+  get field(): DustField {
+    return this.fieldNow;
   }
 
   /** Call on resize (drawing-buffer height × camera FOV). */
@@ -151,9 +180,12 @@ export class WeatherFX {
         : 0;
     this.prevWind = { speed: w.windSpeed, t: input.time };
     this.windRamp += (inst - this.windRamp) * Math.min(1, dtc / 1.2);
-    const focus = viewFocus(camera);
+    const focus = viewGeometry(camera);
+    const field = dustField(focus.radius);
     this.focusX = focus.x;
     this.focusZ = focus.z;
+    this.viewR = focus.radius;
+    this.fieldNow = field;
     const ctx: FxContext = {
       time: input.time,
       dt: dtc,
@@ -166,6 +198,7 @@ export class WeatherFX {
       dust: w.dust,
       storm: w.storm,
       stormIntensity: w.stormIntensity,
+      viewRadius: focus.radius,
       heightAt: input.heightAt,
       groundTint: input.tintAt,
       rand: this.rand,
@@ -198,9 +231,12 @@ export class WeatherFX {
     this.trails.update(ctx, this.pool, movers);
 
     this.pool.update(dtc, input.time);
-    // Keep the camera box populated: without this, storm grit travelling
-    // 100+ units downwind in one life would evacuate the viewed area.
-    this.pool.wrapAmbient(focus.x, focus.z, 75);
+    // Keep the camera field populated: without this, storm grit travelling
+    // 100+ units downwind in one life would evacuate the viewed area. The
+    // wrap box and the rim feather share the field's half-extent, so the
+    // feather hides the box at every zoom.
+    this.pool.wrapAmbient(focus.x, focus.z, field.half);
+    this.pool.setFalloff(focus.x, focus.z, field.r0, field.half);
     this.points.sync(this.pool);
   }
 
@@ -211,5 +247,7 @@ export class WeatherFX {
     this.prev.clear();
     this.prevWind = null;
     this.windRamp = 0;
+    this.viewR = 0;
+    this.fieldNow = dustField(0);
   }
 }

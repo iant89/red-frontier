@@ -19,6 +19,9 @@ import {
   RoverTrailEmitter,
   MAX_DEVILS,
   devilBand,
+  dustField,
+  FIELD_MIN,
+  FIELD_MAX,
   type FxContext,
 } from '../../src/render/particles/effects';
 import { ParticlePoints, makeSoftSprite } from '../../src/render/particles/ParticlePoints';
@@ -39,6 +42,9 @@ function makeCtx(over: Partial<FxContext> = {}, seed = 1234): FxContext {
     dust: 0.08,
     storm: 'calm',
     stormIntensity: 0,
+    // A default orbit pose: see the WeatherFX controller group for how the
+    // real one is derived from the camera.
+    viewRadius: 150,
     heightAt: () => 0,
     rand: mulberry32(seed),
     ...over,
@@ -925,6 +931,260 @@ test('devil behaviour is deterministic under a seeded RNG', () => {
   };
   assert.equal(drive(1234), drive(1234), 'same seed, same sky');
   assert.notEqual(drive(1234), drive(4321), 'different seed, different weather');
+});
+
+group('Dust field');
+
+/** One emission step, no integration: render arrays hold the spawn state. */
+function spawnSnapshot(
+  emit: (ctx: FxContext, pool: ParticlePool) => void,
+  ctx: FxContext,
+  capacity = 4000,
+  seed = 91,
+): { pos: Float32Array; size: Float32Array; alpha: Float32Array; n: number } {
+  const pool = new ParticlePool(capacity, mulberry32(seed));
+  emit(ctx, pool);
+  const a = renderArrays(pool);
+  const n = pool.writeRender(a.pos, a.col, a.size, a.alpha);
+  return { pos: a.pos, size: a.size, alpha: a.alpha, n };
+}
+
+test('the emission field grows with the view and clamps at both ends', () => {
+  const lo = dustField(5);
+  const mid = dustField(200);
+  const hi = dustField(900);
+  const capped = dustField(9000);
+  assert.equal(lo.half, dustField(FIELD_MIN).half, 'the close-up floor holds');
+  assert.deepEqual(capped, hi, 'the from-orbit ceiling holds');
+  assert.ok(lo.half < mid.half && mid.half < hi.half, `half grows (${lo.half} < ${mid.half} < ${hi.half})`);
+  assert.ok(lo.height <= mid.height && mid.height <= hi.height, 'and so does the layer');
+  assert.ok(lo.size <= mid.size && mid.size < hi.size, `grain holds its screen size (${mid.size} → ${hi.size})`);
+  assert.ok(lo.alpha >= mid.alpha && mid.alpha > hi.alpha, `the far field thins to haze (${mid.alpha} → ${hi.alpha})`);
+  assert.ok(hi.half <= FIELD_MAX, `never past the world (${hi.half} <= ${FIELD_MAX})`);
+  for (const v of [5, 200, 900]) {
+    const f = dustField(v);
+    assert.ok(f.r0 < f.half, 'the feather band sits inside the box');
+    assert.ok(f.half >= Math.max(FIELD_MIN, Math.min(v, FIELD_MAX / 1.45)), 'the box covers the viewed area');
+  }
+});
+
+test('storm grit is finer than the ambient wind dust', () => {
+  const ctx = makeCtx({ storm: 'severe', stormIntensity: 0.9, windX: 16, windZ: 5, windSpeed: 45, dust: 0.8 });
+  const stormy = { ...ctx, dt: 1, rand: mulberry32(92) };
+  const windy = { ...ctx, dt: 1, storm: 'calm' as const, stormIntensity: 0, rand: mulberry32(93) };
+  const s = spawnSnapshot((c, p) => new StormEmitter().update(c, p), stormy);
+  const w = spawnSnapshot((c, p) => new WindEmitter().update(c, p), windy);
+  const bounds = (size: Float32Array, n: number): [number, number, number] => {
+    let min = Infinity;
+    let max = 0;
+    let sum = 0;
+    for (let i = 0; i < n; i++) {
+      min = Math.min(min, size[i]);
+      max = Math.max(max, size[i]);
+      sum += size[i];
+    }
+    return [min, max, sum / n];
+  };
+  const [smin, smax, smean] = bounds(s.size, s.n);
+  const [wmin, wmax, wmean] = bounds(w.size, w.n);
+  assert.ok(s.n > 100 && w.n > 50, 'both emitters fired');
+  assert.ok(smax <= wmax, `storm grit never outgrows wind dust (${smax.toFixed(2)} <= ${wmax.toFixed(2)} m)`);
+  assert.ok(smean < wmean, `and reads finer on average (${smean.toFixed(2)} vs ${wmean.toFixed(2)} m)`);
+  assert.ok(smax < 2, `grit-sized, not cloud-sized (${smax.toFixed(2)} m)`);
+  assert.ok(smin > 0.1, 'but still visible');
+});
+
+test('the storm fills the viewed area at every zoom', () => {
+  const spreads: number[] = [];
+  for (const vr of [60, 250, 690]) {
+    const ctx = makeCtx({ storm: 'severe', stormIntensity: 0.9, windX: 16, windZ: 5, windSpeed: 45, dust: 0.8, viewRadius: vr });
+    const snap = spawnSnapshot((c, p) => new StormEmitter().update(c, p), { ...ctx, dt: 1 }, 8000);
+    const half = dustField(vr).half;
+    let reach = 0;
+    for (let i = 0; i < snap.n; i++) {
+      reach = Math.max(reach, Math.abs(snap.pos[i * 3] - ctx.camX), Math.abs(snap.pos[i * 3 + 2] - ctx.camZ));
+    }
+    assert.ok(reach > half * 0.9, `spawns span the field at viewRadius ${vr} (reach ${reach.toFixed(0)} of ${half.toFixed(0)})`);
+    assert.ok(half >= vr, `the box covers the viewed footprint (${half.toFixed(0)} >= ${vr})`);
+    spreads.push(half);
+  }
+  assert.ok(spreads[1] > spreads[0] * 2 && spreads[2] > spreads[1] * 2, `coverage scales with zoom (${spreads.map((s) => s.toFixed(0)).join(' → ')})`);
+});
+
+test('the rim feather hides the box edge, and only for ambient dust', () => {
+  const f = dustField(200);
+  const pool = new ParticlePool(64, mulberry32(94));
+  pool.setFalloff(0, 0, f.r0, f.half);
+  const radii = [0, 0.3, 0.6, 0.75, 0.9, 0.99, 1.1];
+  for (const r of radii) {
+    const base = { y: 2, z: 0, vx: 0, vy: 0, vz: 0, life: 4, size0: 1, size1: 1, r: 1, g: 1, b: 1, alpha: 1 };
+    pool.spawn({ ...base, x: r * f.half });
+    pool.spawn({ ...base, x: -r * f.half, kind: PKind.Devil });
+    pool.spawn({ ...base, x: r * f.half * 0.7071, z: r * f.half * 0.7071, kind: PKind.Trail });
+  }
+  pool.update(2, 2); // mid-life: the fade envelope is at peak
+  const a = renderArrays(pool);
+  const n = pool.writeRender(a.pos, a.col, a.size, a.alpha);
+  assert.equal(n, radii.length * 3);
+  let prev = Infinity;
+  for (let i = 0; i < radii.length; i++) {
+    const ambient = a.alpha[i * 3];
+    const devil = a.alpha[i * 3 + 1];
+    const trail = a.alpha[i * 3 + 2];
+    assert.equal(devil, 1, `devil dust ignores the feather at r=${radii[i]}`);
+    assert.equal(trail, 1, `trail dust ignores the feather at r=${radii[i]}`);
+    assert.ok(ambient <= prev + 1e-9, `ambient alpha never rises outward (${radii[i]}: ${ambient.toFixed(3)})`);
+    prev = ambient;
+    if (radii[i] <= 0.6) assert.equal(ambient, 1, `full strength well inside the rim (r=${radii[i]})`);
+  }
+  assert.equal(a.alpha[(radii.length - 1) * 3], 0, 'nothing past the rim');
+  assert.ok(a.alpha[4 * 3] < 0.6 && a.alpha[4 * 3] > 0.05, `the band fades gradually (r=0.9: ${a.alpha[4 * 3].toFixed(3)})`);
+});
+
+test('the flow field is coherent: neighbours roll together, far motes roll against', () => {
+  const drive = (gap: number): number => {
+    const pool = new ParticlePool(8, mulberry32(95));
+    for (const x of [0, gap]) {
+      pool.spawn({ x, y: 4, z: 0, vx: 0, vy: 0, vz: 0, life: 6, size0: 1, size1: 1, r: 1, g: 1, b: 1, alpha: 1, turbulence: 40 });
+    }
+    const a = renderArrays(pool);
+    let ax = 0;
+    let az = 0;
+    let bx = 0;
+    let bz = 0;
+    for (let f = 0; f < 30; f++) {
+      pool.writeRender(a.pos, a.col, a.size, a.alpha);
+      const p = [a.pos[0], a.pos[2], a.pos[3], a.pos[5]];
+      pool.update(1 / 60, f / 60);
+      pool.writeRender(a.pos, a.col, a.size, a.alpha);
+      ax += a.pos[0] - p[0];
+      az += a.pos[2] - p[1];
+      bx += a.pos[3] - p[2];
+      bz += a.pos[5] - p[3];
+    }
+    return (ax * bx + az * bz) / Math.max(1e-9, Math.hypot(ax, az) * Math.hypot(bx, bz));
+  };
+  const near = drive(8);
+  const far = drive(79); // half a roll apart: opposite faces turn against each other
+  assert.ok(near > 0.7, `motes in the same roll turn together (cos ${near.toFixed(3)})`);
+  assert.ok(far < -0.5, `opposite faces of a roll turn against each other (cos ${far.toFixed(3)})`);
+});
+
+test('grit paths curve and wander while still transporting downwind', () => {
+  const track = (turbulence: number): { dev: number; swing: number; down: number } => {
+    const pool = new ParticlePool(128, mulberry32(96));
+    const R = mulberry32(97);
+    const N = 40;
+    for (let i = 0; i < N; i++) {
+      pool.spawn({
+        x: (R() - 0.5) * 30,
+        y: 1 + R() * 15,
+        z: (R() - 0.5) * 30,
+        vx: 40 * (0.62 + 0.38 * Math.min(1, R() * 2)),
+        vy: (R() - 0.5) * 1.2,
+        vz: (R() - 0.5) * 1.6,
+        life: 2.4,
+        size0: 1,
+        size1: 1,
+        r: 1,
+        g: 1,
+        b: 1,
+        alpha: 0.5,
+        gravity: 0.25,
+        drag: 0.08,
+        turbulence,
+      });
+    }
+    const a = renderArrays(pool);
+    const frames: Float32Array[] = [];
+    for (let f = 0; f < 144; f++) {
+      pool.update(1 / 60, f / 60);
+      pool.writeRender(a.pos, a.col, a.size, a.alpha);
+      frames.push(Float32Array.from(a.pos.subarray(0, N * 3)));
+    }
+    let dev = 0;
+    let swing = 0;
+    let down = 0;
+    for (let i = 0; i < N; i++) {
+      const x0 = frames[0][i * 3];
+      const z0 = frames[0][i * 3 + 2];
+      const cx = frames[143][i * 3] - x0;
+      const cz = frames[143][i * 3 + 2] - z0;
+      const len = Math.hypot(cx, cz);
+      if (len < 1) continue;
+      let maxd = 0;
+      let worst = 0;
+      for (let f = 0; f < 144; f += 3) {
+        const dx = frames[f][i * 3] - x0;
+        const dz = frames[f][i * 3 + 2] - z0;
+        maxd = Math.max(maxd, Math.abs(dx * cz - dz * cx) / len);
+        if (f > 0 && f < 138) {
+          const h = Math.atan2(frames[f + 6][i * 3 + 2] - frames[f][i * 3 + 2], frames[f + 6][i * 3] - frames[f][i * 3]);
+          worst = Math.max(worst, Math.abs(h));
+        }
+      }
+      dev += maxd / len;
+      swing += worst;
+      down += cx > 0 ? 1 : 0;
+    }
+    return { dev: dev / N, swing: (swing / N) * (180 / Math.PI), down: down / N };
+  };
+  const straight = track(0);
+  const blown = track(40);
+  assert.ok(straight.dev < 0.005, `without turbulence the path is a streak (${straight.dev.toFixed(4)})`);
+  assert.ok(blown.dev > 0.02, `grit wanders off its own chord (${blown.dev.toFixed(3)} of path length)`);
+  assert.ok(blown.swing > 4, `headings swing off the wind by ${(blown.swing).toFixed(1)}° on average`);
+  assert.ok(blown.down > 0.9, `yet the storm still has a direction (${(blown.down * 100).toFixed(0)}% downwind)`);
+});
+
+test('zooming out thins and coarsens the grain instead of emptying the sky', () => {
+  const run = (rig: number): { alive: number; half: number; size: number; alpha: number } => {
+    const scene = new THREE.Scene();
+    const fx = new WeatherFX(scene, { rand: mulberry32(101) });
+    fx.setViewport(900, 55);
+    const cam = new THREE.PerspectiveCamera(55, 1.78, 0.5, 4200);
+    const phi = 0.8;
+    cam.position.set(Math.sin(phi) * Math.sin(0.85) * rig, Math.max(10, Math.cos(phi) * rig), Math.sin(phi) * Math.cos(0.85) * rig);
+    cam.lookAt(0, 4, 0);
+    cam.updateMatrixWorld();
+    const input = makeInput({ windSpeed: 48, windDirRad: 1.4, dust: 0.8, visibility: 0.2, storm: 'severe', stormIntensity: 0.9 });
+    runFx(fx, cam, input, 5);
+    const out = { alive: fx.alive, half: fx.field.half, size: fx.field.size, alpha: fx.field.alpha };
+    fx.dispose(scene);
+    return out;
+  };
+  const near = run(60);
+  const far = run(1200);
+  assert.ok(far.half > near.half * 3, `the field grows with the view (${near.half.toFixed(0)} → ${far.half.toFixed(0)})`);
+  assert.ok(far.size > near.size * 2, `grain holds its screen size (${near.size.toFixed(2)} → ${far.size.toFixed(2)})`);
+  assert.ok(far.alpha < near.alpha, `and thins into haze (${near.alpha.toFixed(2)} → ${far.alpha.toFixed(2)})`);
+  assert.ok(
+    far.alive > near.alive * 0.5 && far.alive < near.alive * 2,
+    `population stays rate-bound, not area-bound (${near.alive} vs ${far.alive})`,
+  );
+});
+
+test('the worst case at maximum zoom stays inside the pool budget', () => {
+  const pool = new ParticlePool(9000, mulberry32(102));
+  const devils: DustDevil[] = [];
+  for (let i = 0; i < MAX_DEVILS; i++) {
+    const d = new DustDevil({ x: i * 200, z: 0, groundY: 0, baseRadius: 6, height: 70 }, mulberry32(103 + i));
+    d.grow(1.8);
+    devils.push(d);
+  }
+  const storm = new StormEmitter();
+  const wind = new WindEmitter();
+  const ctx = makeCtx({ storm: 'severe', stormIntensity: 1, windX: 18, windZ: 6, windSpeed: 55, dust: 0.9, viewRadius: 690 }, 104);
+  let peak = 0;
+  for (let i = 0; i < 600; i++) {
+    ctx.time += 0.05;
+    for (const d of devils) d.update(ctx, pool);
+    storm.update(ctx, pool);
+    wind.update(ctx, pool);
+    pool.update(0.05, ctx.time);
+    peak = Math.max(peak, pool.alive);
+  }
+  assert.ok(peak < 7500, `from orbit the whole sky still fits the pool (peak ${peak} of 9000)`);
 });
 
 group('WeatherFX controller');
