@@ -434,6 +434,7 @@ export class Game {
 
   private pointerDown(e: PointerEvent): void {
     if (!this.started) return;
+    if (this.hud.isWorldMapOpen()) return;
     e.preventDefault();
     try {
       this.canvas.setPointerCapture(e.pointerId);
@@ -609,7 +610,7 @@ export class Game {
       return;
     }
     if (e.key === 'Escape') {
-      if (this.hud.closeAlertHistory() || this.hud.closeBuildInfo()) {
+      if (this.hud.closeWorldMap() || this.hud.closeAlertHistory() || this.hud.closeBuildInfo()) {
         this.audio.command('rover/stop');
         return;
       }
@@ -642,6 +643,12 @@ export class Game {
     }
     if (key === 'h') {
       this.hud.openAlertHistory();
+      this.audio.select();
+      return;
+    }
+    if (key === 'm') {
+      if (this.hud.isWorldMapOpen()) this.hud.closeWorldMap();
+      else this.hud.openWorldMap();
       this.audio.select();
       return;
     }
@@ -1359,6 +1366,11 @@ export class Game {
     this.hud.updateVitals(this.sim);
     this.hud.updateAlerts(this.sim.alerts.list(), this.sim.alerts);
     this.hud.updateAffordability(this.sim);
+    // minimap — cheap, throttled inside HUD by key
+    try {
+      const cam = this.rig ? { x: this.rig.target.x, z: this.rig.target.z } : null;
+      this.hud.updateMinimap(this.sim as any, cam, this.selected as any);
+    } catch {}
 
     if (this.selected) {
       if (this.selected.type === 'rover') {

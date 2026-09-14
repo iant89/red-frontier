@@ -37,6 +37,7 @@ import type { PowerTier } from '../sim/config';
 import type { Alert, Severity } from '../sim/alerts';
 import { isPickedClean, POI_KINDS, salvageTotalKg } from '../sim/pois';
 import type { Poi } from '../sim/pois';
+import { MapRenderer, WorldMapOverlay, fitTransform, type MapTransform } from './WorldMap';
 
 export type OverlayMode = 'none' | 'power' | 'life' | 'weather';
 
@@ -50,6 +51,10 @@ export interface HUDCallbacks {
   onMenu?: () => void;
   /** Toggle the developer-mode panel. */
   onDev?: () => void;
+  /** World map selection. */
+  onMapSelect?: (type: 'rover' | 'building' | 'colonist' | 'poi', id: number) => void;
+  /** World map empty click — optional camera focus. */
+  onMapFocus?: (x: number, z: number) => void;
 }
 
 const fmtKg = (n: number) =>
@@ -186,6 +191,17 @@ export class HUD {
    * would let a stranded rover and a supply drop fight over one node.
    */
   private markerNodes = new Map<string, HTMLElement>();
+
+  // --- minimap + world map (issue #18) ---
+  private minimapCanvas: HTMLCanvasElement | null = null;
+  private minimapCtx: CanvasRenderingContext2D | null = null;
+  private minimapTr: MapTransform | null = null;
+  private worldMap: WorldMapOverlay | null = null;
+  private minimapCamera: { x: number; z: number } | null = null;
+  private minimapSelected: { type: string; id: number } | null = null;
+  private minimapView: SimView | null = null;
+  private minimapCollapsed = false;
+  private lastMinimapKey = '';
 
   private vitalsCollapsed = false;
   private inspectorCollapsed = false;
@@ -348,6 +364,7 @@ export class HUD {
         </div>
         <div class="resources" id="resources"></div>
         <button class="btn idle-btn" id="idle-btn" title="Select the next idle rover (.)">😴 <span class="btn-t">Idle</span> <span class="idle-n" id="idle-n">0</span></button>
+        <button class="btn" id="map-btn" class="btn" title="World map (M)">🗺</button>
         <button class="btn" id="dev-btn" title="Developer mode — world editor (~ backtick)">🛠</button>
         <button class="btn" id="history-btn" title="Alert history (H)">📜</button>
         <button class="btn" id="menu-btn" title="Save and return to the main menu">☰</button>
@@ -417,6 +434,15 @@ export class HUD {
 
       <div class="panel" id="alerts"></div>
       <div id="markers"></div>
+      <div class="panel" id="minimap">
+        <div class="minimap-head hud-drag">
+          <span class="vh-title">Map</span>
+          <span class="vh-sub" id="minimap-sub"></span>
+          <span class="i-spacer"></span>
+          <button class="mini-btn" id="minimap-toggle" title="Collapse minimap">⛶</button>
+        </div>
+        <canvas id="minimap-canvas" width="160" height="160" title="Click to open world map"></canvas>
+      </div>
       <div class="panel" id="inspector"><div class="empty">Select a rover, a building, or your colonist.</div></div>
       <div class="panel" id="buildbar"></div>
       <div class="build-info" id="build-info" style="display:none">
@@ -532,6 +558,135 @@ export class HUD {
     // geometry persisted — plus the one-tap "clear the screen" peek button.
     this.enablePanelWindows();
     this.buildPeekButton();
+    this.buildMinimap();
+    this.buildWorldMap();
+  }
+
+  // ------------------------------------------------ minimap / world map ----
+  private buildMinimap(): void {
+    const canvas = this.el('minimap')?.querySelector('#minimap-canvas') as HTMLCanvasElement | null;
+    if (!canvas) return;
+    this.minimapCanvas = canvas;
+    const ctx = canvas.getContext('2d');
+    if (ctx) this.minimapCtx = ctx;
+
+    // click / tap opens world map
+    const open = (e: Event) => {
+      e.stopPropagation();
+      e.preventDefault();
+      this.openWorldMap();
+    };
+    canvas.addEventListener('pointerdown', open);
+    canvas.addEventListener('click', open);
+
+    // header button collapses minimap
+    try {
+      this.el('minimap-toggle').addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        this.setMinimapCollapsed(!this.minimapCollapsed);
+      });
+    } catch {}
+
+    // map button in topbar
+    try {
+      this.el('map-btn').addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        if (this.worldMap?.isVisible()) this.closeWorldMap();
+        else this.openWorldMap();
+      });
+    } catch {}
+
+    // drag handle for minimap
+    this.el('minimap').querySelector('.minimap-head')?.classList.add('hud-drag');
+    this.ensureGrip(this.el('minimap'));
+
+    const collapsed = this.storeGet('rf-collapse-minimap') === '1';
+    this.setMinimapCollapsed(collapsed);
+  }
+
+  private buildWorldMap(): void {
+    this.worldMap = new WorldMapOverlay({
+      onSelect: (type, id) => {
+        // select in HUD + Game
+        this.cb.onMapSelect?.(type, id);
+        // also trigger normal focus/selection path for compatibility
+        if (type !== 'poi') this.cb.onAction('focus', id);
+        this.minimapSelected = { type, id };
+      },
+      onFocus: (x, z) => {
+        this.cb.onMapFocus?.(x, z);
+      },
+      onClose: () => {
+        // no sim change
+      },
+    });
+  }
+
+  setMinimapCollapsed(on: boolean): void {
+    this.minimapCollapsed = on;
+    try {
+      this.el('minimap').classList.toggle('collapsed', on);
+      const btn = this.el('minimap').querySelector('#minimap-toggle') as HTMLElement | null;
+      if (btn) {
+        btn.textContent = on ? '▸' : '▾';
+        btn.title = on ? 'Expand minimap' : 'Collapse minimap';
+      }
+    } catch {}
+    this.storeSet('rf-collapse-minimap', on ? '1' : '0');
+  }
+
+  openWorldMap(): boolean {
+    if (!this.worldMap) return false;
+    this.worldMap.open();
+    return true;
+  }
+
+  closeWorldMap(): boolean {
+    if (!this.worldMap) return false;
+    if (!this.worldMap.isVisible()) return false;
+    this.worldMap.close();
+    return true;
+  }
+
+  isWorldMapOpen(): boolean {
+    return !!this.worldMap?.isVisible();
+  }
+
+  /** Called every HUD tick from Game.syncUI — updates both canvases. */
+  updateMinimap(sim: SimView, camera: { x: number; z: number } | null, selected: { type: string; id: number } | null): void {
+    this.minimapView = sim;
+    this.minimapCamera = camera;
+    this.minimapSelected = selected;
+
+    // push to world map overlay if open
+    if (this.worldMap?.isVisible()) {
+      this.worldMap.setView(sim, camera, selected);
+    }
+
+    // minimap render throttled by simple key
+    const canvas = this.minimapCanvas;
+    const ctx = this.minimapCtx;
+    if (!canvas || !ctx) return;
+    const w = canvas.width;
+    const h = canvas.height;
+    // cheap change detection: rovers/buildings/pois counts + camera rounded
+    const key = `${sim.world.half}|${sim.rovers.length}|${sim.buildings.length}|${sim.world.pois.length}|${Math.round((camera?.x ?? 0)/5)}|${Math.round((camera?.z ?? 0)/5)}|${selected?.type ?? ''}${selected?.id ?? ''}|${Math.round(sim.colonist.x/3)}|${Math.round(sim.colonist.z/3)}`;
+    if (key === this.lastMinimapKey) return;
+    this.lastMinimapKey = key;
+
+    const tr = fitTransform(w, h, sim.world.half, 0.12);
+    this.minimapTr = tr;
+    try {
+      this.el('minimap-sub').textContent = `${sim.world.half * 2} m`;
+    } catch {}
+
+    MapRenderer.render(ctx, w, h, sim, tr, {
+      showGrid: true,
+      showDeposits: false,
+      showCamera: camera,
+      highlightId: selected as any,
+      time: performance.now(),
+    });
   }
 
   // ------------------------------------------- panel window management ----
@@ -540,6 +695,7 @@ export class HUD {
     vitals: { w: 190, h: 110 },
     inspector: { w: 190, h: 120 },
     log: { w: 180, h: 70 },
+    minimap: { w: 140, h: 140 },
   };
 
   private ensureGrip(panel: HTMLElement): void {
@@ -559,7 +715,10 @@ export class HUD {
   private enablePanelWindows(): void {
     this.el('vitals').querySelector('.vitals-head')?.classList.add('hud-drag');
     this.el('log').querySelector('.lg-title')?.classList.add('hud-drag');
-    for (const id of ['vitals', 'inspector', 'log']) this.ensureGrip(this.el(id));
+    try { this.el('minimap').querySelector('.minimap-head')?.classList.add('hud-drag'); } catch {}
+    for (const id of ['vitals', 'inspector', 'log', 'minimap']) {
+      try { this.ensureGrip(this.el(id)); } catch {}
+    }
     this.applyStoredGeometry();
 
     this.hudRoot.addEventListener('pointerdown', (e) => {
@@ -595,7 +754,7 @@ export class HUD {
   private panelWindowOf(el: HTMLElement): HTMLElement | null {
     let node: HTMLElement | null = el;
     while (node && node !== this.hudRoot) {
-      if (node.id === 'vitals' || node.id === 'inspector' || node.id === 'log') return node;
+      if (node.id === 'vitals' || node.id === 'inspector' || node.id === 'log' || node.id === 'minimap') return node;
       node = node.parentElement;
     }
     return null;
@@ -792,7 +951,7 @@ export class HUD {
   private applyStoredGeometry(): void {
     const vw = window.innerWidth || 1024;
     const vh = window.innerHeight || 768;
-    for (const id of ['vitals', 'inspector', 'log']) {
+    for (const id of ['vitals', 'inspector', 'log', 'minimap']) {
       const raw = this.storeGet(`rf-panel-${id}`);
       if (!raw) continue;
       try {
