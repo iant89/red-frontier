@@ -39,9 +39,10 @@ Status tags match the GDD: **IN** / **PARTIAL** / **OUT**.
 
 **Hard gates that exist today**
 
-- `npm test` — 36 suites / 299 checks (unit, integration, determinism, load, HUD)
+- `npm test` — 40 suites / 366 checks (unit, integration, determinism, load, HUD)
 - `scripts/worker-smoke.mjs` — both transports on every PR
 - `scripts/mobile-smoke.mjs` — headless Chromium play path
+- `scripts/update-check-smoke.mjs` — in-play save-and-reload update flow
 - Determinism: same seed + elapsed time → same state hash (frame-pacing invariant tested)
 
 ---
@@ -138,7 +139,7 @@ src/
   ui/                HUD, menus, wizard, save store, globe picker
   lib/               deterministic RNG + simplex noise
   style.css          play HUD + menu theme
-tests/               36 suites: sim/*, hud/*, render/*, ui/*
+tests/               40 suites: sim/*, hud/*, render/*, ui/*, app/*
 scripts/             test runner, Playwright smokes, screenshots
 docs/design/         this GDD + TDD
 ```
@@ -442,6 +443,28 @@ inspection, deterministic state hash readout, teleport/reveal commands.
 ## 23. Browser Deployment
 
 - Static Vite SPA, GitHub Pages workflow present. — **IN**
+- Build identity: every build stamps its commit into the bundle (`__RF_BUILD_COMMIT__`)
+  and ships `version.json` (`{ commit, builtAt }`) in `dist/` (Vite plugin in
+  `vite.config.ts`). CI uses `GITHUB_SHA`, local builds use `git rev-parse HEAD`. — **IN**
+- In-play update check (`src/app/UpdateCheck.ts`): while a colony runs, the app
+  polls its own `version.json` every ~5 min (same origin, `no-store` + a fresh
+  cache-buster query so no CDN copy can answer stale). Newer commit found →
+  one-shot hand-off to `Game.onNewBuild`: freeze the sim, banner
+  ("NEW BUILD AVAILABLE — saving your colony, then reloading"), persist via the
+  normal save path, dispose the host, reload after 3 s. If the save fails the
+  banner offers "Reload anyway" instead of forcing a state-losing reload.
+  Hidden tabs skip the check and re-arm on return; the check starts at colony
+  launch and stops on menu hand-off or mission end; dev mode is out (HMR covers
+  it, the dev server ships no manifest). QA knob: `?updateCheckMs=…` (≥ 1000 ms). — **IN**
+- Why the manifest and not the GitHub API: the Pages workflow deploys this
+  exact `dist/` tree, so the manifest is by construction the build that is
+  *live* — main can sit ahead of a deploy (a failed smoke gate blocks
+  publishing while main keeps moving), and unauthenticated API calls
+  rate-limit per IP, which a per-player 5-minute poll would burn through. The
+  main-menu badge (`BuildStatus.latestMainCommit`) keeps the GitHub API: it
+  answers a different question ("is main ahead of the build I just loaded?"). — **decision**
+- Update-check gate: `scripts/update-check-smoke.mjs` drives the whole
+  save-and-reload flow in headless Chromium against a served build. — **IN** (run manually / locally)
 - Service Worker offline cache — **OUT**
 - WebGPU detection path — **OUT** (WebGL2 required; splash says so)
 - Save on visibility / before suspension — **PARTIAL**

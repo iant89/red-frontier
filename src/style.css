@@ -1549,6 +1549,36 @@ body {
   border: 1px solid var(--ui-border);
 }
 
+/* In-play update notice (TDD §23): a newer build is live. Top-centre, above
+   the alerts, warm border — important but not an emergency. */
+.update-banner {
+  position: fixed;
+  top: 46px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, calc(100vw - 24px));
+  z-index: 40;
+  background: var(--ui-bg);
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  padding: 10px 14px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+}
+.update-banner .ub-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--warn);
+}
+.update-banner .ub-text {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.update-banner #update-btn {
+  margin-top: 8px;
+}
+
 /* ------------------------------------------------------------ mobile --- */
 @media (max-width: 1080px) {
   #alerts {
@@ -2224,6 +2254,11 @@ body {
 
   #save-flash {
     bottom: 150px;
+  }
+
+  .update-banner {
+    top: auto;
+    bottom: 120px;
   }
 
   /* The weather cell gets room to report the storm's position. */

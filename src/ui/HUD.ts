@@ -24,6 +24,7 @@ import type { Building, Rover, Colonist, RoverTask } from '../sim/Simulation';
 import type { SimView, AlertsView } from '../sim/host';
 import { roverStatusText, colonistStatusText } from '../sim/Simulation';
 import { stormLabel } from '../sim/weather';
+import { shortSha } from './BuildStatus';
 import {
   POWER_TIER_LABELS,
   SUIT_O2_CAPACITY,
@@ -351,6 +352,14 @@ export class HUD {
         <button class="btn" id="history-btn" title="Alert history (H)">📜</button>
         <button class="btn" id="menu-btn" title="Save and return to the main menu">☰</button>
         <div class="toolbar" id="speeds"></div>
+      </div>
+
+      <!-- In-play update notice (TDD §23): a newer build is live, the colony
+           is being saved, and the page will reload onto it. -->
+      <div class="update-banner" id="update-banner" style="display:none" role="status" aria-live="assertive">
+        <div class="ub-title" id="update-title"></div>
+        <div class="ub-text" id="update-text"></div>
+        <button class="btn" id="update-btn" style="display:none"></button>
       </div>
 
       <div class="panel" id="vitals">
@@ -2079,6 +2088,37 @@ export class HUD {
     const h = this.el('hintbar');
     h.style.display = text ? 'flex' : 'none';
     if (text) h.innerHTML = text;
+  }
+
+  /**
+   * In-play update notice (TDD §23): a newer build is live. The banner stages
+   * itself — shown here, then the Game updates the text as saving → reload
+   * progresses, and may attach an action for the save-failed fallback.
+   */
+  showUpdateNotice(current: string | null, latest: string | null): void {
+    this.el('update-title').textContent = 'NEW BUILD AVAILABLE';
+    this.el('update-text').textContent =
+      `You are playing build ${shortSha(current)} — build ${shortSha(latest)} is live. ` +
+      `Saving your colony, then reloading…`;
+    const btn = this.el('update-btn');
+    btn.style.display = 'none';
+    btn.onclick = null;
+    this.el('update-banner').style.display = 'block';
+  }
+
+  updateNoticeText(text: string): void {
+    this.el('update-text').textContent = text;
+  }
+
+  updateNoticeAction(label: string, onClick: () => void): void {
+    const btn = this.el('update-btn');
+    btn.textContent = label;
+    btn.onclick = onClick;
+    btn.style.display = '';
+  }
+
+  hideUpdateNotice(): void {
+    this.el('update-banner').style.display = 'none';
   }
 
   flashSave(txt = 'Saved'): void {

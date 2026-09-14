@@ -69,3 +69,38 @@ export function latestMainCommit(fetcher: typeof fetch = fetch): Promise<string>
 export function shortSha(sha: string | null): string {
   return sha?.slice(0, 7) ?? 'unknown';
 }
+
+/** The manifest the Vite build writes next to the bundle (vite.config.ts). */
+export const MANIFEST_NAME = 'version.json';
+
+/**
+ * Ask the page's own origin which commit it is serving. The GitHub Pages
+ * workflow uploads the built `dist/` tree — manifest included — as one
+ * artifact, so the file that answers is by construction the build that is
+ * live. This is the in-play update check's source of truth (TDD §23); the
+ * GitHub API above answers a different question ("where is main?") and is
+ * what the main-menu badge uses.
+ */
+export function latestDeployedCommit(
+  fetcher: typeof fetch = fetch,
+  url?: string,
+): Promise<string> {
+  // A fresh query string per call: CDN caches key on the full URL, so the
+  // manifest can never be answered from a pre-deploy copy.
+  const target =
+    url ??
+    (() => {
+      try {
+        return new URL(`${MANIFEST_NAME}?t=${Date.now()}`, document.baseURI).toString();
+      } catch {
+        return `${MANIFEST_NAME}?t=${Date.now()}`; // no DOM (tests): relative is enough
+      }
+    })();
+  return fetcher(target, { cache: 'no-store' }).then(async (response) => {
+    if (!response.ok) throw new Error(`manifest returned ${response.status}`);
+    const body = (await response.json()) as { commit?: unknown };
+    const sha = validSha(body.commit);
+    if (!sha) throw new Error('manifest has no valid commit');
+    return sha;
+  });
+}

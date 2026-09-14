@@ -32,6 +32,8 @@ import { LoadGameScreen } from '../ui/LoadGameScreen';
 import { WORLD_SIZES, DEFAULT_WORLD_OPTIONS, hashSeed } from '../sim/difficulty';
 import type { NewGameConfig } from '../sim/difficulty';
 import { AudioSystem } from '../audio/AudioSystem';
+import { BUILD_COMMIT, shortSha } from '../ui/BuildStatus';
+import { UpdateCheck, updateCheckIntervalOverride } from './UpdateCheck';
 
 void SAVE_VERSION;
 
@@ -95,6 +97,8 @@ export class Game {
   private pinchStart = 0;
   private lastAuto = 0;
   private lastInspector = 0;
+  /** In-play update check while a colony runs (TDD §23); null in dev mode. */
+  private updateCheck: UpdateCheck | null = null;
   private started = false;
   private shiftHeld = false;
   private longPressTimer: number | null = null;
@@ -383,6 +387,17 @@ export class Game {
     this.hud.updateVitals(host.view);
     this.syncUI(true);
     this.started = true;
+    // In production builds, watch for a newer deploy while playing (TDD §23).
+    // Dev mode is out: the dev server ships no manifest and HMR already
+    // keeps the page current.
+    if (import.meta.env.PROD) {
+      this.updateCheck = new UpdateCheck({
+        current: BUILD_COMMIT,
+        intervalMs: updateCheckIntervalOverride(),
+        onFound: (latest) => this.onNewBuild(latest),
+      });
+      this.updateCheck.start();
+    }
     this.audio.setScene('game');
     this.audio.setPaused(this.hud.speedIdx === 0);
     this.audio.update(host.view, this.hud.speedIdx === 0 || !!host.view.gameOver);
@@ -1079,10 +1094,18 @@ export class Game {
     if (e) this.rig.target.set(e.x, 4, e.z);
   }
 
-  private save(quiet = false): void {
+  /**
+   * Persist the colony. `quiet` suppresses the flash/sound (autosaves,
+   * menu hand-off); `onDone` reports the outcome to callers that must act
+   * on it — the update-check reload is the one that does.
+   */
+  private save(quiet = false, onDone?: (ok: boolean, stamp: string) => void): void {
     const host = this.host;
     const id = this.saveId;
-    if (!host || !id) return;
+    if (!host || !id) {
+      onDone?.(false, '');
+      return;
+    }
     // Everything about the payload — reading the world, serialising it, and the
     // sol it is stamped with — is taken *before* the handoff, so an autosave can
     // never interleave two colonies if the mission ends mid-write.
@@ -1099,24 +1122,60 @@ export class Game {
             this.hud.flashSave(`Saved · ${stamp}`);
             this.audio.saved();
           }
+          onDone?.(true, stamp);
         } catch (e) {
           // Quota is the realistic failure here; say so rather than failing silently.
           this.hud.flashSave('Save failed — browser storage full?');
           this.audio.reject();
           console.error(e);
+          onDone?.(false, '');
         }
       },
       (e) => {
         this.hud.flashSave('Save failed — the colony could not be read');
         this.audio.reject();
         console.error(e);
+        onDone?.(false, '');
       },
     );
+  }
+
+  /**
+   * A newer build is live (TDD §23). The check has already stopped itself —
+   * one notice per session, never a nag. Freeze the colony so nothing moves
+   * while the save and the reload happen, tell the player what is going on,
+   * persist, and let the reload land them on the new build.
+   */
+  private onNewBuild(latest: string): void {
+    this.hud.setSpeed(0);
+    this.audio.setPaused(true);
+    this.hud.showUpdateNotice(BUILD_COMMIT, latest);
+    this.save(true, (ok, stamp) => {
+      if (ok) {
+        this.audio.saved();
+        this.hud.updateNoticeText(
+          `Colony saved · ${stamp}. Reloading to build ${shortSha(latest)}…`,
+        );
+        // Stop the world before the page goes (see returnToMenu): a host with
+        // a timer inside it must not tick through the reload.
+        this.dev.detach();
+        this.host?.dispose();
+        window.setTimeout(() => window.location.reload(), 3000);
+      } else {
+        this.audio.reject();
+        this.hud.updateNoticeText(
+          `The colony could not be saved — your last autosave is at most ${AUTOSAVE_INTERVAL_S} s old. ` +
+            `Reload to the new build, or keep playing this one.`,
+        );
+        this.hud.updateNoticeAction('Reload anyway', () => window.location.reload());
+      }
+    });
   }
 
   /** Persist the colony and hand control back to the main menu. */
   private returnToMenu(): void {
     if (!this.started) return;
+    this.updateCheck?.stop();
     this.save(true);
     this.hud.flashSave('Saved — returning to menu…');
     // Stop the world before the page goes: a host with a timer inside it must
@@ -1194,6 +1253,9 @@ export class Game {
     const over = view.gameOver;
     if (over && !this.endShown) {
       this.endShown = true;
+      // A dead colony has no business reloading mid-death — the player
+      // returns to the menu, and its badge covers the rest.
+      this.updateCheck?.stop();
       this.save(true);
       this.hud.showEnd(
         'MISSION LOST',
