@@ -39,6 +39,7 @@ import './sim/host.test';
 import './sim/worker.test';
 import './render/particles.test';
 import './render/selection.test';
+import './render/descent-stage.test';
 import './app/update-check.test';
 import './ui/build-status.test';
 import './ui/gestures.test';
@@ -57,4 +58,4 @@ import './hud/devpanel.test';
 
 // Each suite prints one line as it runs; `report` prints the total, every
 // failure, and exits non-zero if anything broke.
-report(41);
+report(42);

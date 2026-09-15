@@ -39,7 +39,7 @@ Status tags match the GDD: **IN** / **PARTIAL** / **OUT**.
 
 **Hard gates that exist today**
 
-- `npm test` — 40 suites / 366 checks (unit, integration, determinism, load, HUD)
+- `npm test` — 42 suites / 388 checks (unit, integration, determinism, load, HUD)
 - `scripts/worker-smoke.mjs` — both transports on every PR
 - `scripts/mobile-smoke.mjs` — headless Chromium play path
 - `scripts/update-check-smoke.mjs` — in-play save-and-reload update flow
@@ -139,7 +139,7 @@ src/
   ui/                HUD, menus, wizard, save store, globe picker
   lib/               deterministic RNG + simplex noise
   style.css          play HUD + menu theme
-tests/               40 suites: sim/*, hud/*, render/*, ui/*, app/*
+tests/               42 suites: sim/*, hud/*, render/*, ui/*, app/*
 scripts/             test runner, Playwright smokes, screenshots
 docs/design/         this GDD + TDD
 ```

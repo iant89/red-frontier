@@ -19,6 +19,7 @@ import {
   splitMarsPbrAtlas,
 } from './marsTerrain';
 import { WeatherFX } from './WeatherFX';
+import { DescentStage } from './DescentStage';
 
 export type OverlayMode = 'none' | 'power' | 'life' | 'weather';
 
@@ -150,6 +151,13 @@ export class GameRenderer {
 
   /** True particle system + weather FX controller (wind, storms, devils, trails). */
   readonly weatherFx: WeatherFX;
+  /**
+   * The landed descent stage at the centre of the pad (sim's landing pod,
+   * `POD_RADIUS`). Presentation only — not pickable, never written to the sim.
+   */
+  descentStage!: DescentStage;
+  /** The renderer's 0..1 daylight term, cached for the stage's ember light. */
+  private daylight = 1;
   private lastSimT = 0;
 
   private sun!: THREE.DirectionalLight;
@@ -214,6 +222,7 @@ export class GameRenderer {
     this.ghostGroup.add(this.ghostBody);
     this.scene.add(this.routeGroup);
     this.buildSpawnPad();
+    this.buildDescentStage();
     this.weatherFx = new WeatherFX(this.scene);
     this.weatherFx.setViewport(canvas.clientHeight || 800, this.camera.fov);
   }
@@ -235,8 +244,10 @@ export class GameRenderer {
     cam.right = ext;
     cam.top = ext;
     cam.bottom = -ext;
-    cam.near = 50;
-    cam.far = 2200;
+    // Near pulled in from 50: the descent stage stands ~55 m over the pad, and
+    // a high sun puts its top closer to the light than the old near plane.
+    cam.near = 30;
+    cam.far = 2400;
     this.sun.shadow.bias = -0.0006;
     this.scene.add(this.sun);
     this.scene.add(this.sun.target);
@@ -281,6 +292,9 @@ export class GameRenderer {
 
     // Daylight strength, and a separate twilight factor for the colour ramp.
     const day = Math.max(0, Math.min(1, sun.altitude * 2.2));
+    // Cached for the descent stage's residual-heat light, which only matters
+    // once the sun stops doing the lighting.
+    this.daylight = day;
     const twilight = Math.max(0, 1 - Math.abs(sun.altitude) * 3.4);
 
     // The sim's dust transmission is the same number the panels use — a storm
@@ -529,6 +543,19 @@ export class GameRenderer {
     this.scene.add(ground);
   }
 
+  /**
+   * Stand the descent stage up on the pad (GDD: the colony's first power plant,
+   * shelter and RTG). It is the sim's landing pod given a body — see
+   * `render/DescentStage.ts` for why it is presentation-only and how its
+   * footprint stays inside the pad's exclusion radius.
+   */
+  private buildDescentStage(): void {
+    const ground = this.world.heightAt(SPAWN_X, SPAWN_Z);
+    this.descentStage = new DescentStage(ground);
+    this.descentStage.group.position.set(SPAWN_X, ground, SPAWN_Z);
+    this.scene.add(this.descentStage.group);
+  }
+
   private makeRing(color: number, radius: number, thickness = 0.35): THREE.Mesh {
     const g = new THREE.Mesh(
       new THREE.RingGeometry(radius - thickness / 2, radius + thickness / 2, 40),
@@ -554,6 +581,9 @@ export class GameRenderer {
       z: -(Math.PI / 2 - el) * 0.55,
     };
     this.applySun(sim.sun, sim.weather.dust, sim.weather.visibility);
+    // The landed stage's burn flickers on sim time, so a paused colony holds
+    // its heat exactly where it was.
+    this.descentStage.sync(sim.simTime, this.daylight);
     const strike = sim.weather.lightning;
     if (strike) {
       this.lightningFlashAt = strike.t;

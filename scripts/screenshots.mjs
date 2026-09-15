@@ -116,6 +116,65 @@ try {
     await page.waitForSelector('.rf-loading', { state: 'detached', timeout: 180000 });
     await settle(page);
     await shot(page, '08-colony.png');
+
+    // ------------------------------------------- descent stage (23–27) ----
+    // The landed stage is the colony's centrepiece, so it gets its own plate:
+    // the strategic read, the windward burn, the tripod, then the same hull at
+    // dusk and deep night — the residual heat is a night feature, and these
+    // two jump the sol through the dev handle the smoke scripts use (no panel
+    // in frame, and the jump re-anchors the sky immediately).
+    const stageFrame = async (name, fn) => {
+      await page.evaluate(fn);
+      await page.waitForTimeout(1200); // let the sun/sim catch the new frame
+      await settle(page);
+      await shot(page, name);
+    };
+    const jumpTod = (step) =>
+      page.evaluate((v) => {
+        const tod = document.querySelector('#dv-tod');
+        tod.value = String(v);
+        tod.dispatchEvent(new Event('input', { bubbles: true }));
+      }, step);
+    try {
+      await page.waitForFunction(() => Boolean(window.__rf?.game?.rig), undefined, {
+        timeout: 15000,
+      });
+      await stageFrame('23-descent-stage.png', () => {
+        const rig = window.__rf.game.rig;
+        rig.target.set(0, 16, 0);
+        rig.theta = 0.55; rig.phi = 1.05; rig.radius = 150;
+        rig.update();
+      });
+      await stageFrame('24-descent-stage-burn.png', () => {
+        const rig = window.__rf.game.rig;
+        rig.target.set(0, 13, 0);
+        rig.theta = 0.39; rig.phi = 1.34; rig.radius = 44;
+        rig.update();
+      });
+      await stageFrame('25-descent-stage-legs.png', () => {
+        const rig = window.__rf.game.rig;
+        rig.target.set(0, 5, 0);
+        rig.theta = 2.2; rig.phi = 1.36; rig.radius = 40;
+        rig.update();
+      });
+      await page.evaluate(() => window.__rf.game.dev.enable());
+      await jumpTod(73); // ~18:15 — last light on the metal
+      await stageFrame('26-descent-stage-dusk.png', () => {
+        const rig = window.__rf.game.rig;
+        rig.target.set(0, 15, 0);
+        rig.theta = 5.9; rig.phi = 1.28; rig.radius = 58;
+        rig.update();
+      });
+      await jumpTod(2); // deep night — embers, pad heat and the beacon
+      await stageFrame('27-descent-stage-night.png', () => {
+        const rig = window.__rf.game.rig;
+        rig.target.set(0, 14, 0);
+        rig.theta = 0.75; rig.phi = 1.12; rig.radius = 96;
+        rig.update();
+      });
+    } catch (e) {
+      console.warn('descent-stage shots skipped:', e.message.split('\n')[0]);
+    }
   } catch (e) {
     console.warn('colony shot skipped:', e.message.split('\n')[0]);
   }
