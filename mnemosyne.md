@@ -120,3 +120,36 @@ Persistent notes for future coding sessions.
 - `src/audio/AudioSystem.ts` is presentation-only procedural Web Audio: it never writes sim state, starts on the first real input gesture to satisfy autoplay policy,
   and is deliberately updated at simulation speed 0 so paused colonies retain environmental ambience and brownout/storm reminders. Keep new `SimCommand` values
   represented in its exhaustive `COMMAND_CUES` map; `tests/audio/system.test.ts` pins that contract.
+
+## Descent stage (the pod, given a body)
+
+- `src/render/DescentStage.ts` draws the sim's landing pod (`POD_RADIUS` = 8 m at
+  SPAWN) as a ~56 m propulsive-landing stage on three splayed legs. **Presentation
+  only**: not in `getPickObjects()` (clicks fall through to terrain), never writes
+  sim state, nothing in a save. The sim's exclusion/charge/shelter rules stay
+  authoritative; the visual footprint (~10.9 m incl. feet) deliberately sits inside
+  the sim's 8 m pod radius plus the 1.5 m rule margin so no *legal* building site
+  can overlap a foot (`rules.ts`: centre ≥ def.radius + POD_RADIUS + 1.5).
+- **Leg azimuths are load-bearing:** `[0, 120, 240]` degrees. `Simulation.ts` parks
+  the starting rovers at (9, 0) and (−9, 4) — i.e. 90° and 294° — inside the pod
+  radius, so a tripod at the wrong phase lands a foot on a rover on frame one.
+  `tests/render/descent-stage.test.ts` pins the ≥3 m clearance; moving a leg or a
+  rover spawn must re-check it.
+- **The burn is two passes on one shell.** A char veil (NormalBlending, dark, alpha
+  = soot) and a heat glow (AdditiveBlending). An additive pass can never darken,
+  which is why the char cannot live in the glow pass — and additive blending in
+  three multiplies source rgb **by source alpha** (SrcAlpha, One), so the glow's
+  intensity must ride in `gl_FragColor.a` with the colour in rgb. An rgb-only
+  payload with alpha 0 compiles, draws, and adds nothing: the quietest shader bug
+  in this repo so far.
+- `BURN` constants are the single source for both the GLSL (`BURN_MATH` templates
+  them in) and the tested pure curve `burnProfile`, so the painted burn and the
+  unit-tested one cannot drift. The glow also multiplies by `(1 - uDay)`: residual
+  heat is a night feature, and at 86 % sun the same shader reads as a stage on
+  fire.
+- Metalness is kept ≈0.3 on the stage: the scene has **no environment map**, so a
+  mirror-metal tank reflects nothing and renders near-black. If an env map ever
+  lands, the stage is the first thing that can afford real metal.
+- Shadow camera near plane went 50 → 30 (`Renderer.buildEnvironment`): a high sun
+  puts the stage's top closer to the directional light than the old near plane,
+  which clipped its shadow.
