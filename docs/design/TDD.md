@@ -39,7 +39,7 @@ Status tags match the GDD: **IN** / **PARTIAL** / **OUT**.
 
 **Hard gates that exist today**
 
-- `npm test` — 42 suites / 388 checks (unit, integration, determinism, load, HUD)
+- `npm test` — 54 suites / 567 checks (unit, integration, determinism, load, HUD)
 - `scripts/worker-smoke.mjs` — both transports on every PR
 - `scripts/mobile-smoke.mjs` — headless Chromium play path
 - `scripts/update-check-smoke.mjs` — in-play save-and-reload update flow
@@ -118,8 +118,18 @@ src/
     navgrid.ts       walk/build grid, reachability flood
     rules.ts         siting + maintenance verdicts (shared by ghost + sim)
     World.ts         seeded terrain handle + deposits + scattered sites
-    Simulation.ts    entities, tick order, construction, tasks, persistence
+    Simulation.ts    orchestration: entities, tick order, rover task dispatch
     difficulty.ts    Settler/Pioneer/Survivor + world sizes/options
+    state/           ColonyState + entity/record shapes (data, no behavior)
+    systems/         extracted tick responsibilities, each a static API over state
+      ClockSystem.ts       sol clock + authoritative sun
+      WeatherSystem.ts     weather progression + its effects on the colony
+      PowerSystem.ts       grid tiers, satisfaction, brownout shedding
+      ProductionSystem.ts  process want / idle reason / mass moved
+      LifeSupportSystem.ts fluid draw, colonist needs, EVA orders
+      ConstructionSystem.ts siting, site materials, crews, progress, completion
+    persistence/     versioned saves: schema, codec, validator, v1…v7 migrations
+    debug/           invariant checks, state hash, profiler, command transcripts
     host/            the seam
       protocol.ts      every legal write, as plain serializable data
       view.ts          SimView — read model (Pick'd from Simulation)
@@ -139,7 +149,7 @@ src/
   ui/                HUD, menus, wizard, save store, globe picker
   lib/               deterministic RNG + simplex noise
   style.css          play HUD + menu theme
-tests/               42 suites: sim/*, hud/*, render/*, ui/*, app/*
+tests/               54 suites: sim/*, hud/*, render/*, ui/*, app/*
 scripts/             test runner, Playwright smokes, screenshots
 docs/design/         this GDD + TDD
 ```
@@ -150,9 +160,9 @@ docs/design/         this GDD + TDD
 |---|---|---|
 | `sim/ecs/` | **not used** | Entities are typed objects on `Simulation` (rovers, buildings, colonist, POIs). Data-oriented enough for the current scale; a formal ECS is not required until entity counts demand it. |
 | `sim/utilities/` | **OUT** | Only power is a network; fluids are tank pools on buildings. |
-| `sim/ai/` | **folded into** `Simulation.ts` | Task queue, auto-dispatch, reservations live next to the entities they drive. |
+| `sim/ai/` | **split** between `Simulation.ts` and `sim/systems/` | Rover task queue, reservations and auto-dispatch still sit next to the entities they drive (Phases 10–13); construction's crew auto-dispatch moved to `ConstructionSystem`. |
 | `sim/research/` | **OUT** | |
-| `sim/save/` | **folded into** `Simulation.snapshot/restore` + migrations | |
+| `sim/save/` | **extracted to** `sim/persistence/` | Schema, codec, validator and the v1…v7 migrations; `Simulation.snapshot/restore` are thin delegates. |
 | `input/` | **folded into** `app/Game.ts` | |
 | `audio/` | **OUT** | |
 | `shared/` | **OUT as a package** | Protocol types live under `sim/host/`; defs are imported directly. |

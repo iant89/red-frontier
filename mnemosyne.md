@@ -387,6 +387,81 @@ Persistent notes for future coding sessions.
   `index.js` 997.8 kB (290 gz) / `sim.worker` 222.7 kB. Recorded in the
   roadmap's "Phase 8 — Recorded" block.
 
+## Refactor Phase 9 (ConstructionSystem) — moved, not redesigned
+
+- `src/sim/systems/ConstructionSystem.ts` owns the construction job that was
+  spread across `Simulation`: `verdict`/`place`/`devSpawn` (siting + the site
+  record), `tickSiteMaterials` (was `tickSiteLogistics`), the material ledger
+  (`commitAvailableMaterials`/`hasMaterials`/`consumeMaterials`/`missingList`),
+  `assignBuilders`, `build` (was `doBuild`), `complete`/`devComplete`,
+  `demolish`. `Simulation`'s public surface is unchanged — `canPlace`,
+  `placeVerdict`, `placeBuilding`, `demolish`, `devSpawnBuilding`,
+  `devCompleteBuilding` are thin delegates, so hosts, `applyCommand`,
+  `Transcript` and every old test kept working untouched.
+- **The siting rule was already extracted and stayed put.** `verdict` calls the
+  same `evaluateSite` in `sim/rules.ts` that `host/mirror.ts` calls. Do not
+  "tidy" the rule into the system — the ghost and the sim agree *because* there
+  is one producer of those strings, on both sides of the wire.
+- **`ConstructionHostHooks` is the fourth instance of the host-hooks pattern**
+  (after `WeatherHostHooks`, `PowerSystemContext`, `LifeSupportHostHooks`):
+  `setTravel`/`finishTask`/`autoAssign`/`disableRover`/`roverWorkMul` are
+  RoverSystem's (Phase 10) and `canDeliverCargo` is LogisticsSystem's
+  (Phase 13). Capacity recompute is *not* a hook — `recomputeCapacitiesState`
+  is already pure over state, so `complete`/`demolish` call it directly.
+- **Phase 7's `completeBuilding` hook now lands here.** The
+  `LifeSupportHostHooks` *contract* did not change (its suite still stubs it);
+  only the implementor moved, exactly as Phase 7 said it would. A colonist
+  assisting to progress 1 still brings a site online — pinned through the live
+  wiring now, not just through a stub.
+- **The material ledger has one owner.** `assembleRover` (garage line) spends
+  through `ConstructionSystem.hasMaterials/consumeMaterials/missingList`
+  instead of private copies — that is §17's "resource accounting must have one
+  authoritative owner", satisfied early. `tickGarages`/`assembleRover`
+  themselves stay in Simulation (Phases 6 and 8 both left them there on
+  purpose: the line consumes `powerSat` and produces rovers, it is not a site).
+- Two pre-existing quirks are now **pinned by tests, not fixed** (Golden
+  Rule 1), and recorded in the roadmap's Phase 9 block:
+  - *One rover can be claimed by two sites and the later site wins.* Sites are
+    staffed in placement order and an auto task is stealable, so the first site
+    keeps a **stale `workerId`** and does no work until the second is online —
+    with the two-rover starting fleet the spare rover never gets dispatched.
+    This is the construction twin of the reservation quirk Phase 1 recorded.
+    Fixing it (exclusive claims, or prefer an unclaimed rover) is a scheduling
+    decision for Phase 10/12.
+  - *A refund into an already-full silo is silently lost.* `demolish`'s comment
+    promises a full refund "even if it overfills the silo" and
+    `SimulationAssertions` permits over-capacity storage on that basis, but the
+    capacity recompute at the end of the same method clamps it straight back.
+    Paid in full only when the silo has room. Somebody should decide which of
+    the three (clamp, comment, invariant note) is wrong — as a behavior change.
+- **Baseline lesson: endpoint hashes are not enough — trace the rate.** The
+  first 48-checkpoint baseline was green but weak: builds finish fast, so most
+  construction checkpoints landed on `progress = 1` and would not have noticed
+  a changed assembly *rate*. What made it sensitive was (a) sampling progress
+  every few ticks into an FNV-hashed trace and (b) **same-seed differentials
+  with exactly one variable** — with/without a workshop pinned 0.003600 →
+  0.004860 per sample (×1.35), calm/peaked-storm pinned 0.013200 → 0.007920
+  (×0.6). Reuse that recipe for Phase 10, where rover speed and wear rates are
+  the whole subject.
+- Test-writing traps hit this phase:
+  - **A stub hook does not apply anything.** `stubHooks().autoAssign` only
+    records, so asserting `rover.command.type === 'construct'` afterwards fails.
+    Assert on `workerId` + the recorded call for the seam, and drive the *live*
+    `sim.step` when the point is what the rover ends up doing.
+  - **`assert.equal(b.state, 'site')` narrows the literal type**, so a later
+    `b.state !== 'online'` loop condition fails to compile (TS2367). Re-query
+    through `sim.buildingById(b.id)?.state` — the idiom `buildAndWait` in
+    `tests/fixtures/sim.ts` already uses.
+  - **Hard-coded world coordinates are a different world on every seed.**
+    `(90, 0)` is legal on seed 700 and sits on a deposit on seed 912. Search
+    for spots (`findSpot`, or a pair-search with a minimum separation) instead.
+- Gate on completion (2026-09-16): 54 suites / 567 checks green
+  (`tests/sim/construction-system.test.ts` +29), typecheck green, build
+  `index.js` 998.3 kB (291.0 gz) / `sim.worker` 223.2 kB, all four browser
+  smokes green on both transports — `worker-smoke` re-proves the phase gate
+  ("ghost and placement agree") in a real browser. Recorded in the roadmap's
+  "Phase 9 — Recorded" block.
+
 ## Refactor Phase 1 (invariants) — the loud-state era
 
 - `src/sim/debug/SimulationAssertions.ts` is the Phase 1 deliverable: pure

@@ -1223,6 +1223,141 @@ Test:
 
 Build ghost and actual placement continue to agree.
 
+## Recorded (Phase 9 complete — 2026-09-16)
+
+Implemented on `arena/01a0ac32-red-frontier`.
+
+**What was built**
+
+- `src/sim/systems/ConstructionSystem.ts` — the construction job, moved
+  verbatim from Simulation behind a state-consuming static API:
+  - `verdict(state, kind, x, z)` — the siting authority. Delegates to the
+    *existing* `evaluateSite` in `sim/rules.ts` with the live world, buildings
+    and deposits. The rule was not copied, moved or rewritten.
+  - `place` / `devSpawn` — site a building (hungry, full cost outstanding) or
+    fab a finished one. Both now share one `newBuilding` factory, which
+    removes the second near-identical `Building` literal that used to sit in
+    `devSpawnBuilding`.
+  - `tickSiteMaterials(state)` — was `Simulation.tickSiteLogistics`. Pours
+    available storage into every unfinished site and keeps the `mats-<id>`
+    alert honest. The old name said "logistics"; the body was always about a
+    site's material ledger, which is this phase's.
+  - `commitAvailableMaterials` / `hasMaterials` / `consumeMaterials` /
+    `missingList` — the material ledger, now with **one owner**. Garage rover
+    assembly (`Simulation.assembleRover`) spends through the same three calls
+    rather than keeping private copies, which is what §17's "resource
+    accounting must have one authoritative owner" asks for.
+  - `assignBuilders(state, hooks)` — worker choice: nearest capable rover,
+    stable sort (distance, then id), auto task, one `workerId` per site.
+  - `build(state, r, b, hooks)` — was `doBuild`. Walk-to-site, assemble,
+    workshop assist, weather throttle, battery/condition wear, completion.
+  - `complete` / `devComplete` — switch a structure on, drop the crew,
+    recompute capacities, log the "+kg per silo / +kWh / +kW peak" extras.
+  - `demolish(state, id, hooks)` — cancellation refunds and dismantling.
+- `ConstructionHostHooks` is the **fourth instance of the host-hooks pattern**
+  (`WeatherHostHooks`, `PowerSystemContext`, `LifeSupportHostHooks`):
+  `setTravel` / `finishTask` / `autoAssign` / `disableRover` / `roverWorkMul`
+  are RoverSystem's (Phase 10), `canDeliverCargo` is LogisticsSystem's
+  (Phase 13). Simulation implements them against its existing private methods,
+  so no rule was copied into the seam. Capacity recompute is *not* a hook —
+  `recomputeCapacitiesState` is already a pure state function.
+- **Phase 7's `completeBuilding` hook now points here.** The
+  `LifeSupportHostHooks.completeBuilding` *contract* is unchanged (its suite
+  still drives it with a stub); only the implementor moved, as Phase 7 said it
+  would. A colonist assisting to progress 1 still brings a site online, and
+  `tests/sim/construction-system.test.ts` pins that through the live wiring.
+- `tickGarages` and `assembleRover` stay in Simulation. The garage *spends*
+  through the material ledger but its assembly line consumes `powerSat` and
+  produces rovers — Phase 6 and Phase 8 both left it there deliberately, and
+  it is not a construction site.
+- Simulation's public surface is unchanged: `canPlace`, `placeVerdict`,
+  `placeBuilding`, `demolish`, `devSpawnBuilding`, `devCompleteBuilding` are
+  now thin delegates. Hosts, `applyCommand`, `Transcript`, `DevMode` and every
+  existing test call the same methods with the same signatures.
+- **Deleted from `Simulation.ts`:** `tickSiteLogistics`, `assignBuilders`,
+  `doBuild`, `completeBuilding`, `commitAvailableMaterials`, `hasMaterials`,
+  `consumeMaterials`, `missingList`, and the two inline `Building` literals
+  (~260 lines). The file is 3,314 lines, from 3,572.
+- `tests/sim/construction-system.test.ts` (29 checks, linked in `full.test.ts`):
+  legal/illegal siting with the exact refusal strings, **the build ghost
+  (`ColonyMirror.canPlace`) agreeing with the sim's verdict across every
+  building kind × six sites, and `place` obeying that verdict** (the phase
+  gate, checked in-process rather than only in the browser), a fresh site
+  making its own spot illegal, hungry/partial/stocked material commits and the
+  alert lifecycle, the ledger the garage shares, worker choice (nearest
+  capable, player orders never stolen, recharging skipped, cargo rovers
+  refused, wanderers and disabled rovers released), overlapping sites,
+  progress arithmetic (`buildPower × SIM_TICK ÷ buildTime`), the workshop's
+  ×1.35 and the storm's ×0.6 as *measured differentials*, battery and
+  condition wear, a flat battery stranding through the hook, completion +
+  capacity growth + idempotence, cancellation refunds, the dev shortcuts, the
+  live tick end to end, save/restore mid-build, and two-same-seed determinism.
+
+**Behavior preservation evidence**
+
+A scripted construction scenario was hashed at **48 checkpoints** with
+`StateHash` before the extraction and re-run after: **byte-identical output**.
+Checkpoints covered siting verdicts, the full site→materials→crew→online
+lifecycle with a tick-by-tick progress trace, overlapping construction,
+cancellation refunds and rover release, colonist assist (traced), a
+**workshop differential** (same seed with and without a workshop: the trace
+pins 0.003600 → 0.004860 progress per sample, i.e. exactly ×1.35), a **storm
+ramp differential** and a **peaked-storm differential** (0.013200 → 0.007920,
+i.e. exactly ×0.6), live vs restored mid-build, the three developer
+shortcuts, and a 7.5-sol soak over a five-building queue.
+
+The trace-based checkpoints are the point: hashing only the endpoints would
+not have caught a changed assembly *rate*.
+
+**Two pre-existing quirks, characterized and deliberately NOT fixed**
+
+Golden Rule 1 forbids behavior changes inside an extraction, so both are now
+pinned by tests and recorded here for a later phase to decide on:
+
+1. **One rover can be claimed by two sites, and the later site wins.**
+   Sites are staffed in placement order and an *auto* task is stealable, so
+   when the same rover is nearest to both, the second site takes it and the
+   first keeps a **stale `workerId`** that only clears when the second site
+   finishes. With the two-rover starting fleet and two nearby sites, the
+   earlier site does no work at all until the later one is online, and the
+   spare rover never gets dispatched. Pinned by `overlapping sites: one rover
+   claimed twice builds the later site first`. This is the construction-side
+   twin of the reservation quirk Phase 1 recorded; the fix (claim a worker
+   exclusively, or prefer an unclaimed rover) is a scheduling decision for
+   RoverSystem (Phase 10) / FleetAutomationSystem (Phase 12).
+2. **A refund into an already-full silo is silently lost.** `demolish`'s
+   comment promises "refund the full amount even if it overfills the silo",
+   and `SimulationAssertions` deliberately permits over-capacity storage on
+   that basis — but the capacity recompute at the *end* of the same method
+   clamps storage straight back to capacity. The refund is only paid in full
+   when the silo has room (the ordinary case). Either the clamp should skip
+   refunded mass or the comment and the invariant note should stop promising
+   it; that is a behavior change, so it is recorded rather than made. Pinned
+   by `a refund lands in full when the silo has room, and is clamped when it
+   does not`.
+
+**Gate results** (Node 22.22.3, 2 CPU workers)
+
+| Gate | Result |
+| --- | --- |
+| `npm run typecheck` | green |
+| `npm test` (54 suites / 567 checks; was 53/538) | green — 133.2 s wall clock |
+| `npm run test:check` | green — all suites linked, all declare `@covers` |
+| `npm run build` | green — `index.js` 998.3 kB (291.0 kB gz), `sim.worker` 223.2 kB |
+| pre/post extraction hash baseline | identical at all 48 checkpoints |
+| `mobile-smoke` | green |
+| `worker-smoke` (`?worker=1`) | green — incl. ghost/placement agreement |
+| `worker-smoke` (`?worker=0`) | green — incl. ghost/placement agreement |
+| `update-check-smoke` | green |
+
+Phase 9's gate ("build ghost and actual placement continue to agree") is
+asserted twice: in-process across every building kind in the new suite, and in
+a real browser on both transports by `worker-smoke`.
+
+The next extraction per roadmap §51 is **Phase 10 — RoverSystem**, listed in
+§52 as the highest-risk phase and the largest. It should absorb the five
+rover-side hooks this phase introduced.
+
 
 # 14. Phase 10 — Extract RoverSystem
 
