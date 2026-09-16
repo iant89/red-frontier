@@ -40,8 +40,51 @@ g.HTMLCanvasElement = dom.window.HTMLCanvasElement;
 g.CustomEvent = dom.window.CustomEvent;
 g.requestAnimationFrame = (cb: FrameRequestCallback) => dom.window.setTimeout(() => cb(0), 16);
 
-// jsdom has no 2D canvas backend; the sparkline just needs the call to be safe.
-(dom.window.HTMLCanvasElement.prototype as any).getContext = () => null;
+// jsdom has no 2D canvas backend. `() => null` was the old answer, and it is a
+// lie with consequences: the minimap, the world map and the power sparkline all
+// bail out when `getContext('2d')` returns null, so every paint path in `ui/`
+// was quietly absent from every HUD suite. The stub below is a *recording*
+// no-op context instead — every 2D call is legal, and `paints` counts them, so
+// a test can assert the map actually drew rather than merely survived.
+//
+// `setCanvasBackend('none')` restores the null answer, which is what a browser
+// that refuses the context looks like. The HUD must still build in that world.
+export const paints = {
+  /** Total 2D calls issued into every canvas since the process started. */
+  calls: 0,
+  /** The same count, per `id`, so a test can say *which* canvas painted. */
+  byCanvas: {} as Record<string, number>,
+};
+
+let canvasBackend: 'stub' | 'none' = 'stub';
+
+/** Switch the fake 2D backend: a recording context, or no context at all. */
+export function setCanvasBackend(next: 'stub' | 'none'): void {
+  canvasBackend = next;
+}
+
+function stubContext2D(canvas: HTMLCanvasElement): any {
+  const state: Record<string, unknown> = { canvas };
+  return new Proxy(state, {
+    get(target, prop) {
+      if (prop in target) return target[prop as string];
+      if (typeof prop !== 'string') return undefined;
+      return () => {
+        paints.calls++;
+        if (canvas.id) paints.byCanvas[canvas.id] = (paints.byCanvas[canvas.id] ?? 0) + 1;
+      };
+    },
+    set(target, prop, value) {
+      target[prop as string] = value;
+      return true;
+    },
+  });
+}
+
+(dom.window.HTMLCanvasElement.prototype as any).getContext = function (this: any, type: string) {
+  if (type !== '2d' || canvasBackend === 'none') return null;
+  return stubContext2D(this);
+};
 
 /** Every callback the HUD can fire, recorded as a string for assertions. */
 export type CallLog = string[];

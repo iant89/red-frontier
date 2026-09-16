@@ -39,7 +39,7 @@ npm run test:sim        # every tests/sim suite
 npm run test:hud        # every tests/hud suite
 npm run test:unit       # the fast formula-level suites
 npm test -- power       # any suite whose name/desc matches "power"
-npm run test:list       # all 42 suites and what each covers
+npm run test:list       # all 43 suites and what each covers
 ```
 
 One URL flag is worth knowing while developing:
@@ -315,7 +315,7 @@ src/
     particles/      true particle system (wind, storm grit, dust devils, rover trails)
   ui/               DOM HUD (vitals, alerts, inspectors, build palette)
   lib/              deterministic RNG + simplex noise
-tests/              36 headless suites (sim/*, hud/*, render/*, ui/*) + linked serial test
+tests/              43 headless suites (sim/*, hud/*, render/*, ui/*) + linked serial test
 scripts/            esbuild test runner: parallel scheduling, filters, --affected, --watch
 ```
 
@@ -379,7 +379,7 @@ scripts/            esbuild test runner: parallel scheduling, filters, --affecte
 
 ### Testing
 
-The tests are split into **36 small suites** that each pin one corner of the
+The tests are split into **43 small suites** that each pin one corner of the
 game, plus one linked serial entry point. A suite is a plain module that
 registers cases with `test()` and finishes with `await finish()`; `scripts/run-tests.mjs`
 bundles and runs any subset in isolated processes. Full runs schedule the
@@ -388,15 +388,16 @@ historically slowest suites first across the available CPU workers.
 ```
 tests/
   harness.ts          test()/group()/finish(), the per-suite report, the roll-up
-  full.test.ts        optional serial run: imports all 42 suites, prints the total
+  full.test.ts        optional serial run: imports all 43 suites, prints the total
   fixtures/sim.ts     shared sim setup (place a building, run N sols, find a seam)
-  fixtures/hud.ts     jsdom bootstrap, one mounted HUD + sim per suite
+  fixtures/hud.ts     jsdom bootstrap, a recording 2D canvas stub, one mounted
+                      HUD + sim per suite
   sim/                power · clock · life-support · colony · soak · build · grid
                       · alerts · weather · storms · rovers · fleet · garage
                       · lights · determinism · persistence · pois · setup
                       · world · devtools · host · worker
   hud/                chrome · weather · inspectors · fleet · garage · controls
-                      · alerts · mobile · dossier · markers · panels · devpanel
+                      · alerts · mobile · dossier · markers · panels · devpanel · worldmap
   render/ particles   ui/ build-status
 ```
 
@@ -475,7 +476,7 @@ in — terrain and camera, the mission wizard, staged construction, the power
 grid, the sol and the water → oxygen → food chain, weather and storms, and the
 rover fleet with queued tasks, automation rules and a garage — plus the first
 slice of **P6/T6** (points of interest, the salvage task, supply drops). The MVP
-building set from GDD §16 is complete. `npm test` is green at 42 suites / 388
+building set from GDD §16 is complete. `npm test` is green at 43 suites / 393
 checks.
 
 1. **Finish the Web Worker move** (TDD T1–T2 hardening). `WorkerSimHost` is in:

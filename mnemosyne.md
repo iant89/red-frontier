@@ -153,3 +153,35 @@ Persistent notes for future coding sessions.
 - Shadow camera near plane went 50 → 30 (`Renderer.buildEnvironment`): a high sun
   puts the stage's top closer to the directional light than the old near plane,
   which clipped its shadow.
+
+## Refactor Phase 0 (baseline) — and the jsdom canvas trap
+
+- `ARCHITECTURAL-REFACTOR-ROADMAP.md` (repo root) is the governing plan since PR #38. Read
+  §3 (Golden Rules), §48 (phase checklist) and §51 (execution order) before touching `sim/`.
+  Phases run 0 → 30; **Phase 0 is recorded complete** in that file's "Recorded baseline"
+  table (typecheck 6.0 s, build 7.0 s, `npm test` 43 suites / 393 checks in 107 s on 2 cores,
+  all four browser smokes green, `index.js` 989 kB). Milestone 1 (§58) is next: invariants,
+  deterministic state hash, perf instrumentation, save validation, command transcripts —
+  *then* Persistence is the first extraction.
+- **CI does not run `npm test`.** `.github/workflows/pages.yml` gates `npm run build` +
+  `mobile-smoke` + `worker-smoke` (both transports) only. That is how main carried 12 red
+  suites: `WorldMapOverlay`'s constructor threw on a null 2D context, and the jsdom fixture
+  answered null for *every* canvas, so `HUD.buildChrome()` died and all `hud/*` went red
+  while CI stayed green. If you fix a HUD bug and only CI is green, run `npm test` anyway.
+- `tests/fixtures/hud.ts` now hands canvases a **recording stub 2D context** instead of
+  `null`. Two consequences to remember:
+  - every `ui/` paint path is now genuinely executed in the HUD suites (minimap, world map,
+    power sparkline) — which is how it found `stopLoop`'s bare `cancelAnimationFrame`: legal
+    in a browser, a `ReferenceError` wherever only `window` is defined. Pair rAF/cAF as
+    `window.requestAnimationFrame` + `window.cancelAnimationFrame`, never bare globals.
+  - `paints.byCanvas[id]` counts 2D calls **per canvas id** and is module-global, so it
+    accumulates across suites in the linked serial run. Assert deltas against a reading you
+    took a line earlier, never absolute counts.
+- `setCanvasBackend('none')` is the knob for "the browser refused the context". `ui/` must
+  degrade there — a canvas is presentation, and a lost canvas may not lose the colony's
+  controls. `tests/hud/worldmap.test.ts` pins that contract; anything new that paints should
+  hold it too (guard the paint, keep open/fit/close/pick working — they are pure geometry).
+- The stub counts calls, it does not rasterise. A wrong `MapTransform` still passes every
+  jsdom test, so *what the map looks like* is only checkable in the browser smokes.
+- Cosmetic, not a bug: `HUD.ts`'s `#map-btn` markup carries `class="btn"` twice; the parser
+  keeps the first, so the button renders correctly. Left alone — unrelated to this fix.

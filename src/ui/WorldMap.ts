@@ -368,11 +368,20 @@ export class MapRenderer {
 
 // -------------------------------------------------------------- overlay --
 
+/**
+ * The overlay is chrome, not a dependency of the colony: everything it does —
+ * open/close, pan, zoom, picking, the coordinate readout — is geometry and
+ * events, and only the painting needs a 2D context. So a canvas without one
+ * (jsdom, a future offscreen fallback, a browser that refused the context)
+ * degrades to an empty map card instead of taking the whole HUD down with it.
+ * Same contract `HUD.buildMinimap` holds: hold the context optionally, guard
+ * the paint, never throw out of a constructor the HUD calls unconditionally.
+ */
 export class WorldMapOverlay {
   private root: HTMLElement;
   private card: HTMLElement;
   private canvas: HTMLCanvasElement;
-  private ctx: CanvasRenderingContext2D;
+  private ctx: CanvasRenderingContext2D | null;
   private coordsEl: HTMLElement;
   private view: SimView | null = null;
   private camera: { x: number; z: number } | null = null;
@@ -428,9 +437,7 @@ export class WorldMapOverlay {
     this.root = overlay;
     this.card = overlay.querySelector('#worldmap-card') as HTMLElement;
     this.canvas = overlay.querySelector('#worldmap-canvas') as HTMLCanvasElement;
-    const ctx = this.canvas.getContext('2d');
-    if (!ctx) throw new Error('worldmap canvas 2d context missing');
-    this.ctx = ctx;
+    this.ctx = this.canvas.getContext('2d');
     this.coordsEl = overlay.querySelector('#wm-coords') as HTMLElement;
 
     // buttons
@@ -528,7 +535,7 @@ export class WorldMapOverlay {
     this.canvas.height = Math.max(200, bh - 28) * dpr;
     this.canvas.style.width = `${Math.max(200, bw)}px`;
     this.canvas.style.height = `${Math.max(200, bh - 28)}px`;
-    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.ctx?.setTransform(dpr, 0, 0, dpr, 0, 0);
     // keep transform centered if it was zero
     if (this.tr.scale < 0.001) this.fit();
     this.render();
@@ -684,13 +691,16 @@ export class WorldMapOverlay {
 
   private stopLoop(): void {
     if (this.animId !== null) {
-      cancelAnimationFrame(this.animId);
+      // `window.`-qualified like `startLoop`'s requestAnimationFrame: the bare
+      // global is a browser affordance, and reaching for it left this method
+      // throwing wherever `window` is provided but the global is not (jsdom).
+      window.cancelAnimationFrame(this.animId);
       this.animId = null;
     }
   }
 
   private render(time = 0): void {
-    if (!this.view) return;
+    if (!this.view || !this.ctx) return;
     const w = this.canvas.clientWidth || 800;
     const h = this.canvas.clientHeight || 600;
     MapRenderer.render(this.ctx, w, h, this.view, this.tr, {
