@@ -715,6 +715,90 @@ Test:
 
 Existing weather tests pass unchanged where possible.
 
+## Recorded (Phase 5 complete — 2026-09-16)
+
+Implemented on `arena/01a0ab2e-red-frontier`.
+
+**What was built**
+
+- `src/sim/systems/WeatherSystem.ts` — the weather behavior that lived in
+  `Simulation.ts`, moved verbatim behind a state-consuming static API:
+  - `WeatherSystem.tick(state, hooks)` (was `Simulation.tickWeather`):
+    advances the model, mirrors `state.dustTransmission`, raises/clears the
+    `storm-inbound` alert, logs storm arrival/passing via `state.alerts`,
+    accrues panel dust per-building from *local* dust, applies wind damage
+    per-building from *local* intensity, dispatches lightning.
+  - `WeatherSystem.tickLightning`, `lightningAnchors`,
+    `resolveLightningStrike(state, hooks, aim)` (were the private
+    `Simulation` methods); `devForceLightningStrike` now delegates.
+  - `WeatherSystem.restore(state, weatherSave)` — the save wiring that lived
+    in `Simulation.restoreFromState` (fresh model from the colony seed,
+    legacy-cell acceptance, `lightningMul` difficulty fallback,
+    `dustTransmission`/`stormAnnounced` re-derivation). Takes `unknown`:
+    schema knowledge stays behind the Phase 3 boundary.
+  - `WeatherSystem.afterTimeJump(state)` — the `devSetTime` re-anchor.
+- **`WeatherHostHooks`** — the phase's one new seam: `tripDamaged`,
+  `disableRover`, `endMission` are effects weather *triggers* but does not
+  *own* (failure/rover domain). Simulation implements them against its
+  existing private methods, so there is no second source of truth;
+  RoverSystem (Phase 10) / FailureSystem (Phase 15) will absorb the
+  implementor, not the contract. Dependency direction is unchanged:
+  Simulation → WeatherSystem → ColonyState/Weather model.
+- The `Weather` model (`sim/weather.ts`) is untouched — progression, storm
+  scheduling, readings, snapshot/restore and the **dedicated RNG streams**
+  (scheduler `rngState` + separate `lightningRngState`) stay exactly where
+  they are; the roadmap's "do not combine streams" rule is now pinned by
+  tests rather than by convention.
+- `src/sim/state/WeatherState.ts` — the Phase 2 placeholder became the real
+  weather-state factory; `ColonyState.createColonyState` now calls
+  `createWeatherState` instead of duplicating the construction.
+- `tests/sim/weather-system.test.ts` (14 checks, linked in `full.test.ts`):
+  storm creation/expiry through the system tick, `dustTransmission`
+  mirroring, panel-dust accrual + floor clamp, wind damage tripping a
+  structure through the hooks, exact-bolt anchoring/damage, the hooks
+  contract driven against a recorder (trip / mission end / rover disable),
+  RNG-stream separation (model- and sim-level), `createWeatherState`
+  seeding, restore wiring incl. the `lightningMul` fallback, time-jump
+  re-anchoring, and deterministic replay (same-seed hash equality +
+  restored-weather equality).
+
+**Behavior preservation evidence**
+
+A scripted weather-heavy scenario (forced regional + severe storms, 3 solar
+arrays taking dust and wind damage, rolled + exact-aim lightning, mid-storm
+save/restore) was hashed at six checkpoints with `StateHash` before the
+extraction and re-run after: **byte-identical output**, including both RNG
+streams and every storm cell. The existing `sim/weather`, `sim/storms`,
+`sim/determinism`, `sim/soak` and `sim/persistence` suites pass unchanged.
+
+**Discovered pre-existing quirk (documented, deliberately not fixed here)**
+
+`Weather.snapshot()` returns its **live** `active`/`scheduled` arrays and
+storm-cell objects. Any code that holds a `Simulation.snapshot()` and lets
+the source sim keep ticking mutates the "save"; restoring it into a second
+sim in-process makes both weathers drive the same cells (positions and
+serpentines advance twice per tick-pair, and the two colonies' skies
+diverge). The shipped paths are safe — `JSON.stringify` (localStorage) and
+`postMessage` (worker) both deep-clone — but direct in-process
+`a.restore(b.snapshot())` aliases. Golden Rule 1 says Phase 5 does not
+change it; the new suite deep-clones (`structuredClone`) its saves and the
+quirk is recorded in `mnemosyne.md`. A future phase touching the weather
+model (or Phase 20's SimView work) should make `snapshot()` return copies.
+
+**Gate results** (Node 22.22.3, 2 CPU workers)
+
+| Gate | Result |
+| --- | --- |
+| `npm run typecheck` | green |
+| `npm test` (50 suites / 497 checks; was 49/483) | green — ~150 s wall clock |
+| `npm run test:check` | green — all suites linked, all declare `@covers` |
+| `npm run build` | green — `index.js` 996.7 kB (290 kB gz), `sim.worker` 221.7 kB, both unchanged |
+| pre/post extraction hash baseline | identical at all six checkpoints |
+| `mobile-smoke` (worker, the default) | green |
+| `mobile-smoke` (`?worker=0`, in-process) | green |
+| `worker-smoke` on both transports | green |
+
+
 
 # 10. Phase 6 — Formalize PowerSystem
 

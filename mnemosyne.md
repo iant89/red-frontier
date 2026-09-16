@@ -215,6 +215,48 @@ Persistent notes for future coding sessions.
   is Phase 2 — ColonyState, then Phase 3 — Persistence as first major extraction.
   Recorded in roadmap §58 "Recorded (Milestone 1 complete)".
 
+## Refactor Phase 5 (WeatherSystem) — and the snapshot-aliasing trap
+
+- `src/sim/systems/WeatherSystem.ts` owns the weather behavior that used to
+  live in `Simulation.ts` (`tickWeather`, the lightning resolver, the restore
+  wiring, the time-jump re-anchor). The `Weather` model in `sim/weather.ts` is
+  **unchanged** — scheduler + lightning RNG streams stay inside it, now pinned
+  by `tests/sim/weather-system.test.ts` instead of by convention.
+- **`WeatherHostHooks` is the pattern for systems that trigger cross-domain
+  effects**: `tripDamaged` / `disableRover` / `endMission` are implemented by
+  Simulation against its existing private methods (no second source of
+  truth). Phase 10 (RoverSystem) and Phase 15 (FailureSystem) replace the
+  *implementor*, not the interface. Expect the same seam for the next
+  extractions that can't be pure-state yet.
+- **`Weather.snapshot()` returns live references** — its `active`/`scheduled`
+  arrays *and* the storm-cell objects inside them. Consequences:
+  - `JSON.stringify` (localStorage saves) and `postMessage` (worker) deep-clone
+    and are safe.
+  - **Direct in-process `simB.restore(simA.snapshot())` aliases the two
+    weathers**: both ticks move the same cells (double speed), readings
+    diverge, and a "restored colony replays the same weather" test fails in
+    ways that look impossible (identical cells + identical simTime, different
+    `windDirRad`). Diagnose by recomputing the reading from state by hand —
+    the mismatch points at shared mutation, not at the math.
+  - Tests must `structuredClone(save)` before restoring into a second sim.
+    (`JSON.parse(JSON.stringify())` is *not* equivalent here: it turns
+    `nextRollAt: Infinity` — suppressed rolls — into `null`, which
+    `Weather.restore`'s `??` reads as "resume rolling".)
+  - Fix belongs to a future phase that touches the model (make `snapshot()`
+    return copies); Golden Rule 1 kept Phase 5 from changing it. Recorded in
+    the roadmap's Phase 5 block.
+- Extraction fidelity was proven with a **pre/post hash baseline**: a
+  weather-heavy script (forced storms, dirtying panels, wind damage, rolled +
+  exact bolts, mid-storm save/restore) hashed at six checkpoints with
+  `StateHash` before the refactor and after — byte-identical. Cheap to redo;
+  do it for every extraction phase.
+- `SOL_SECONDS = 240` (the game sol is compressed) — storm "durMin 300–430"
+  in `STORM_PROFILE` is game-*seconds* despite the name. A 1-sol `run()` is
+  only 4800 ticks; weather suites are cheap.
+- Gate on completion (2026-09-16): 50 suites / 497 checks green, build
+  996.7 kB / sim.worker 221.7 kB unchanged, all four browser smokes green on
+  both transports. Recorded in the roadmap's "Phase 5 — Recorded" block.
+
 ## Refactor Phase 1 (invariants) — the loud-state era
 
 - `src/sim/debug/SimulationAssertions.ts` is the Phase 1 deliverable: pure
