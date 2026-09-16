@@ -26,15 +26,10 @@ import {
   SPAWN_Z,
   BASE_STORAGE_PER_RESOURCE,
   ROVER_CHARGE_THRESHOLD,
-  ROVER_CHARGE_RATE_KW,
-  GARAGE_CHARGE_RATE_KW,
-  ROVER_CHARGE_TIER,
   HOURS_PER_SEC,
   SOLS_PER_SEC,
   SOL_SECONDS,
-  POD_POWER_KW,
   POD_BATTERY_KWH,
-  POD_LIFE_SUPPORT_KW,
   POD_RADIUS,
   COLONIST_SPEED,
   COLONIST_BUILD_POWER,
@@ -123,7 +118,7 @@ import { SolClock } from './clock';
 import type { SunState } from './clock';
 import { stormLabel } from './weather';
 import type { Weather, StormKind, StormKindReal } from './weather';
-import { resolvePower, idlePower, type PowerDemand, type PowerResult } from './power';
+import type { PowerResult } from './power';
 import {
   makePools,
   makeColonist,
@@ -144,6 +139,7 @@ import { coerceTask } from './persistence/SaveValidator';
 import type { SaveState } from './persistence/SaveSchema';
 import { ClockSystem } from './systems/ClockSystem';
 import { WeatherSystem, type WeatherHostHooks } from './systems/WeatherSystem';
+import { PowerSystem, type PowerSystemContext } from './systems/PowerSystem';
 
 // Phase 2 — state extraction
 import {
@@ -169,6 +165,7 @@ import {
   lightningVulnerability,
 } from './state/BuildingState';
 import type { FluidFlow, HistorySample } from './state/ResourceState';
+import { batteryCapacityKWh } from './state/PowerState';
 
 // Re-export for backward compat (old import sites still work)
 export type { RoverTask, RoverCommand, RoverRules, Rover, RoverGoal, RoverPhase, Building, HistorySample, FluidFlow } from './state';
@@ -199,6 +196,19 @@ export class Simulation {
     tripDamaged: (b, cause) => this.tripDamaged(b, cause),
     disableRover: (r) => this.disable(r),
     endMission: (reason) => this.endMission(reason),
+  };
+
+  /**
+   * The production-domain questions PowerSystem asks while building its
+   * demand list and applying its result (Phase 6 seam). Answered by the
+   * machinery that already lives here so nothing is duplicated;
+   * ProductionSystem (Phase 8) will absorb the implementor, not the
+   * contract — the same shape as {@link weatherHooks}.
+   */
+  private readonly powerContext: PowerSystemContext = {
+    desiredThroughput: (b) => this.desiredThroughput(b),
+    runProcess: (b, throughput, hours) => this.runProcess(b, throughput, hours),
+    processBlockReason: (b) => this.processBlockReason(b),
   };
 
   constructor(params: {
@@ -383,13 +393,8 @@ export class Simulation {
 
   /** Total grid battery capacity (kWh), pod included. */
   batteryCapacity(): number {
-    let cap = POD_BATTERY_KWH;
-    for (const b of this.buildings) {
-      if (this.runnable(b) && b.enabled) {
-        cap += BUILDINGS[b.kind].batteryKWh * devLevelMul(b.level);
-      }
-    }
-    return cap;
+    // Phase 6: capacity logic owns itself in state/PowerState.ts
+    return batteryCapacityKWh(this.state);
   }
 
   get sun(): SunState {
@@ -495,13 +500,8 @@ export class Simulation {
 
   /** Somewhere a rover can draw charge: the pod, or any online habitat. */
   nearCharger(x: number, z: number): boolean {
-    if (Math.hypot(SPAWN_X - x, SPAWN_Z - z) < POD_RADIUS + 6) return true;
-    for (const b of this.buildings) {
-      if (!this.runnable(b) || !b.enabled) continue;
-      if (!BUILDINGS[b.kind].providesCharge) continue;
-      if (Math.hypot(b.x - x, b.z - z) < BUILDINGS[b.kind].radius + 5) return true;
-    }
-    return false;
+    // Phase 6: the charger map lives in PowerSystem
+    return PowerSystem.nearCharger(this.state, x, z);
   }
 
   private nearestChargerPoint(x: number, z: number): { x: number; z: number } {
@@ -536,13 +536,8 @@ export class Simulation {
 
   /** Charger output at a position — garages charge twice as fast (GDD §4). */
   private chargeRateKwAt(x: number, z: number): number {
-    for (const b of this.buildings) {
-      if (b.kind !== 'garage' || !this.runnable(b) || !b.enabled) continue;
-      if (Math.hypot(b.x - x, b.z - z) < BUILDINGS.garage.radius + 5) {
-        return GARAGE_CHARGE_RATE_KW * devLevelMul(b.level);
-      }
-    }
-    return ROVER_CHARGE_RATE_KW;
+    // Phase 6: the charger map lives in PowerSystem
+    return PowerSystem.chargeRateKwAt(this.state, x, z);
   }
 
   /**
@@ -1356,7 +1351,8 @@ export class Simulation {
     this.tickExploration();
 
     // 3 & 4. power network, then production scaled by what it delivered.
-    this.tickPower();
+    // Phase 6: delegated to PowerSystem
+    PowerSystem.tick(this.state, this.powerContext);
     this.tickGarages();
 
     // 5. life support & the human
@@ -1597,119 +1593,11 @@ export class Simulation {
   }
 
   // ------------------------------------------------------------ power ----
-
-  /**
-   * Resolve generation, demand and storage for this tick, then run every
-   * building's process at whatever fraction of power it actually received.
-   */
-  private tickPower(): void {
-    const hours = SIM_TICK * HOURS_PER_SEC;
-    const sun = this.clock.sun;
-
-    // ---- generation -------------------------------------------------------
-    let genKw = POD_POWER_KW;
-    for (const b of this.buildings) {
-      b.genKw = 0;
-      if (b.state !== 'online' || !b.enabled || b.damaged) continue;
-      const def = BUILDINGS[b.kind];
-      if (!def.generation || def.powerProduceKw <= 0) continue;
-      /**
-       * TDD §11/§12's solar chain: irradiance x atmospheric dust x panel
-       * cleanliness. The RTG doesn't care what the sky is doing — that is the
-       * point of it.
-       */
-      const out =
-        (def.generation === 'solar'
-          ? def.powerProduceKw * sun.irradiance * this.dustTransmission * b.cleanliness
-          : def.powerProduceKw) * devLevelMul(b.level);
-      b.genKw = out;
-      genKw += out;
-    }
-
-    // ---- demand -----------------------------------------------------------
-    const demands: PowerDemand[] = [];
-    // The pod's own scrubbers and heaters are the highest priority load there is.
-    demands.push({ id: -1, tier: 0, kw: POD_LIFE_SUPPORT_KW });
-
-    const desired = new Map<number, number>();
-    for (const b of this.buildings) {
-      b.loadKw = 0;
-      b.throughput = 0;
-      b.idleReason = '';
-      if (b.state !== 'online') {
-        b.powerSat = 1;
-        continue;
-      }
-      const def = BUILDINGS[b.kind];
-      if (b.damaged) {
-        b.powerSat = 1;
-        b.idleReason = 'Damaged — needs repair';
-        continue;
-      }
-      if (!b.enabled) {
-        b.powerSat = 1;
-        b.idleReason = 'Switched off';
-        continue;
-      }
-      // How hard would this building *like* to run, ignoring power?
-      const want = this.desiredThroughput(b);
-      desired.set(b.id, want);
-      const load = def.idlePowerKw + (def.powerDrawKw - def.idlePowerKw) * want;
-      if (load > 0) demands.push({ id: b.id, tier: def.tier, kw: load });
-    }
-
-    // Rover charging is the lowest-priority load on the grid.
-    for (const r of this.rovers) {
-      const def = ROVERS[r.kind];
-      const wantsCharge =
-        r.phase !== 'disabled' &&
-        r.battery < def.maxBatteryKWh - 1e-6 &&
-        (r.phase === 'charging' || r.goal === 'charge') &&
-        this.nearCharger(r.x, r.z);
-      if (!wantsCharge) {
-        r.chargeSat = 0;
-        continue;
-      }
-      const needKWh = def.maxBatteryKWh - r.battery;
-      const kw = Math.min(this.chargeRateKwAt(r.x, r.z), hours > 0 ? needKWh / hours : 0);
-      if (kw > 0) demands.push({ id: r.id, tier: ROVER_CHARGE_TIER, kw });
-    }
-
-    // ---- resolve ----------------------------------------------------------
-    const capacity = this.batteryCapacity();
-    this.storedKWh = Math.min(this.storedKWh, capacity);
-    const result = resolvePower(genKw, demands, this.storedKWh, capacity, hours);
-    this.power = result;
-    this.storedKWh = result.storedKWh;
-
-    // ---- apply ------------------------------------------------------------
-    for (const b of this.buildings) {
-      if (b.state !== 'online' || !b.enabled || b.damaged) continue;
-      const def = BUILDINGS[b.kind];
-      const sat = result.satisfaction.get(b.id) ?? 1;
-      b.powerSat = sat;
-      const want = desired.get(b.id) ?? 0;
-      const actual = want * sat;
-      b.throughput = actual;
-      b.loadKw = (def.idlePowerKw + (def.powerDrawKw - def.idlePowerKw) * want) * sat;
-      if (def.process) {
-        if (actual > 1e-6) this.runProcess(b, actual, hours);
-        else if (!b.idleReason) {
-          b.idleReason = sat < 0.99 ? 'No power' : this.processBlockReason(b);
-        }
-      }
-    }
-
-    for (const r of this.rovers) {
-      const def = ROVERS[r.kind];
-      const sat = result.satisfaction.get(r.id);
-      if (sat === undefined) continue;
-      r.chargeSat = sat;
-      const needKWh = def.maxBatteryKWh - r.battery;
-      const kw = Math.min(this.chargeRateKwAt(r.x, r.z), hours > 0 ? needKWh / hours : 0);
-      r.battery = Math.min(def.maxBatteryKWh, r.battery + kw * sat * hours);
-    }
-  }
+  // Phase 6: the grid tick (input -> resolver -> output) lives in
+  // systems/PowerSystem.ts — Simulation passes the state plus the
+  // production-domain context. The garage bay (service + assembly), which
+  // *consumes* powerSat rather than resolving it, stays here until its owning
+  // phase extracts it.
 
   /**
    * Rover garages (P4): service the drivetrains of anything parked in the bay
@@ -2466,7 +2354,7 @@ export class Simulation {
       }
     }
     // Parked at a charger, an idle rover tops itself up (grid permitting —
-    // the actual energy transfer happens in tickPower).
+    // the actual energy transfer happens in PowerSystem.tick).
     if (this.nearCharger(r.x, r.z) && r.battery < ROVERS[r.kind].maxBatteryKWh - 1e-6) {
       r.phase = 'charging';
       r.statusText = 'Charging';
@@ -3980,8 +3868,8 @@ export class Simulation {
     this.colonist.order = (cd as { order?: ColonistOrder }).order ?? { type: 'shelter' };
     this.colonist.dead = !!(cd as { dead?: boolean }).dead;
 
-    this.storedKWh = clamp(data.storedKWh ?? 0, 0, this.batteryCapacity());
-    this.power = idlePower(this.batteryCapacity(), this.storedKWh);
+    // Phase 6: grid rebuild delegated to PowerSystem
+    PowerSystem.restore(this.state, data.storedKWh);
 
     this.alerts.reset();
     if (data.alerts) this.alerts.restore(data.alerts);

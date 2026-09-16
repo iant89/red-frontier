@@ -279,6 +279,46 @@ Persistent notes for future coding sessions.
   996.7 kB / sim.worker 221.7 kB unchanged, all four browser smokes green on
   both transports. Recorded in the roadmap's "Phase 5 — Recorded" block.
 
+## Refactor Phase 6 (PowerSystem) — moved, not redesigned
+
+- `src/sim/systems/PowerSystem.ts` owns the grid pipeline that was
+  `Simulation.tickPower` (~110 lines, verbatim move): input (generation +
+  demand) → `resolvePower` (pure, `sim/power.ts`, **untouched**) → output
+  (state + per-building/per-rover apply). `PowerSystem.restore` owns the
+  save clamp; `nearCharger`/`chargeRateKwAt` are statics the Simulation
+  delegates to — one charger map, not two.
+- **`PowerSystemContext` is the second instance of the host-hooks pattern**
+  (`desiredThroughput` / `runProcess` / `processBlockReason`): production
+  questions answered by Simulation's existing private methods. Phase 8
+  (ProductionSystem) absorbs the implementor, not the contract. A useful
+  property discovered while testing: `processBlockReason` is only consulted
+  when satisfaction ≥ 0.99 — during a brownout "No power" wins and the
+  domain is not asked why. That ordering is load-bearing for honest idle
+  reasons; the seam test pins it.
+- **`tickGarages` stays in Simulation on purpose** — it *consumes*
+  `powerSat` (service/assembly rates) rather than resolving the grid; it
+  belongs to a later owner. Noted at the call site and in the system header
+  so the next extraction doesn't "helpfully" drag it in.
+- **Allocation carve-out for the "no allocations in tick" rule**: the
+  per-tick `PowerResult` on `state.power` is deliberate (the view projects
+  it); demand array + desired-throughput map remain the only tick-local
+  scratch. Recorded in the roadmap's Phase 6 block.
+- Behavior preservation: same **pre/post hash baseline** recipe as Phase 5
+  (eight checkpoints: setup/noon/night/brownout/severe-storm dust collapse/
+  availability loss/save-restore) — byte-identical. The baseline script
+  pattern: esbuild-bundle a `/tmp/*.ts` scenario against the repo, run
+  before and after, `diff`.
+- Direct-drive unit tests are the cheap way to test the system in
+  isolation: `devSetTime` recomputes `clock.sun` immediately (no step
+  needed), and `PowerSystem.tick(sim.state, stubCtx)` can be called without
+  `sim.step` — set `state.dustTransmission` by hand (normally the weather
+  tick mirrors it) and give rovers full batteries to keep them out of the
+  demand list.
+- Gate on completion (2026-09-16): 51 suites / 511 checks green
+  (`tests/sim/power-system.test.ts` +13), build 997.2 kB (290 gz) /
+  sim.worker 222.1 kB, all four browser smokes green on both transports.
+  Recorded in the roadmap's "Phase 6 — Recorded" block.
+
 ## Refactor Phase 1 (invariants) — the loud-state era
 
 - `src/sim/debug/SimulationAssertions.ts` is the Phase 1 deliverable: pure

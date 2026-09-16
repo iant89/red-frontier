@@ -852,6 +852,89 @@ All existing power tests pass.
 
 Determinism remains unchanged.
 
+## Recorded (Phase 6 complete — 2026-09-16)
+
+Implemented on `arena/01a0ab2e-red-frontier`.
+
+**What was built**
+
+- `src/sim/systems/PowerSystem.ts` — the grid pipeline that lived in
+  `Simulation.tickPower`, moved verbatim behind a state-consuming static API
+  with the roadmap's input → resolver → output shape called out in stage
+  comments:
+  - `PowerSystem.tick(state, ctx)` — input: generation (pod RTG + per-building
+    solar `irradiance × dustTransmission × cleanliness` or RTG) and demand
+    (tier-0 pod life support, per-building process load from wanted
+    throughput, tier-3 rover charging); resolver: the untouched
+    `resolvePower`; output: `state.power`/`state.storedKWh`, per-building
+    `genKw`/`loadKw`/`throughput`/`powerSat`/`idleReason`, per-rover
+    `chargeSat` + battery charge.
+  - `PowerSystem.restore(state, storedKWh | undefined)` — the save wiring
+    (clamp to the restored capacity, park an `idlePower` result until the
+    next tick).
+  - `PowerSystem.nearCharger(state, x, z)` / `chargeRateKwAt(state, x, z)` —
+    the charger map, moved not duplicated; `Simulation` delegates so there is
+    a single source of truth for UI and rover AI alike.
+- **`PowerSystemContext`** — the phase's one new seam:
+  `desiredThroughput(b)`, `runProcess(b, throughput, hours)`,
+  `processBlockReason(b)` are *production* questions (Phase 8). Simulation
+  implements them against its existing private methods (the same shape as
+  Phase 5's `WeatherHostHooks`); ProductionSystem will absorb the
+  implementor, not the contract.
+- `src/sim/state/PowerState.ts` — the Phase 2 placeholder became the
+  power-state owner: `initialPowerState()` (was inline in `ColonyState`) and
+  `batteryCapacityKWh(state)` (was `Simulation.batteryCapacity`'s body);
+  `Simulation.batteryCapacity()` now delegates.
+- `Simulation.tickPower` deleted (~110 lines); `tickGarages` (service +
+  assembly + spawn, which *consume* `powerSat` rather than resolving it)
+  deliberately stays until its owning phase — noted in the PowerSystem
+  header and at the call site.
+- `src/sim/power.ts` — the pure resolver is **untouched**, by design.
+- `tests/sim/power-system.test.ts` (13 checks, linked in `full.test.ts`):
+  solar-vs-RTG generation (sun × dust × cleanliness, exact noon plate
+  rating, midnight RTG-only), storm-grade sky, `batteryCapacityKWh`
+  gating (online/enabled/undamaged), exact charge-by-day/drain-by-night
+  energy arithmetic, shortage tier-shedding through the live system (life
+  support sacred, tier 1 thinned, charging shed first, `firstShedTier`,
+  flat pack stays flat), even within-tier degradation, rover charging
+  (tier-3, pod base rate, garage fast-charge, distance-honest map), the
+  production context seam (want scales load, `runProcess` gets want ×
+  satisfaction, `processBlockReason` only consulted when power is fine,
+  "No power" wins during a brownout), building availability (switched off /
+  damaged / under-construction idle reasons, generation gating), restore
+  clamping, a save/restore round trip through the real wiring, and
+  two-same-seed determinism at noon and night checkpoints.
+
+**Performance note (roadmap §10)**
+
+The per-tick `PowerResult` stored on `state.power` is the deliberate
+exception to "no unnecessary allocations in the tick" — the view projects
+it, so it is necessary. The tick-local demand array and desired-throughput
+map remain the only scratch allocations, exactly as before extraction.
+
+**Behavior preservation evidence**
+
+A scripted power-heavy scenario (noon/night, brownout with a flat pack,
+severe-storm dust collapse, availability loss through damage/disabled,
+save/restore) was hashed at eight checkpoints with `StateHash` before the
+extraction and re-run after: **byte-identical output**. The existing
+`sim/power`, `sim/grid`, `sim/determinism`, `sim/soak`, `sim/persistence`
+and `sim/life-support` suites pass unchanged.
+
+**Gate results** (Node 22.22.3, 2 CPU workers)
+
+| Gate | Result |
+| --- | --- |
+| `npm run typecheck` | green |
+| `npm test` (51 suites / 511 checks; was 50/498) | green — ~123 s wall clock |
+| `npm run test:check` | green — all suites linked, all declare `@covers` |
+| `npm run build` | green — `index.js` 997.2 kB (290 kB gz), `sim.worker` 222.1 kB |
+| pre/post extraction hash baseline | identical at all eight checkpoints |
+| `worker-smoke` (`?worker=1`) | green |
+| `worker-smoke` (`?worker=0`, in-process) | green |
+| `mobile-smoke` | green |
+| `update-check-smoke` | green |
+
 
 # 11. Phase 7 — Extract LifeSupportSystem
 

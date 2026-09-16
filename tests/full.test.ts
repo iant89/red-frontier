@@ -29,6 +29,7 @@ import './sim/colony.test';
 import './sim/soak.test';
 import './sim/build.test';
 import './sim/grid.test';
+import './sim/power-system.test';
 import './sim/alerts.test';
 import './sim/weather.test';
 import './sim/weather-system.test';
