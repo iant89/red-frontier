@@ -154,15 +154,49 @@ Persistent notes for future coding sessions.
   puts the stage's top closer to the directional light than the old near plane,
   which clipped its shadow.
 
+## Refactor Phase 1 (invariants) — the loud-state era
+
+- `src/sim/debug/SimulationAssertions.ts` is the Phase 1 deliverable: pure
+  `checkInvariants(sim) → InvariantViolation[]` + `assertInvariants` that
+  throws `InvariantError`. **Codes are load-bearing** — tests pin them
+  (`tests/sim/invariants.test.ts`). Add new checks with new stable codes,
+  never renumber.
+- The gate lives at the end of `Simulation.step()`, behind the process-wide
+  `setInvariantChecks()` switch (default **off**). `tests/harness.ts` flips
+  it on, so every suite asserts after every step; the game, worker and
+  browser smokes never do. Full-suite cost was ~11 s.
+- **Two documented exceptions** (module header + check comments): storage
+  may exceed capacity (`demolish()` refunds in full on purpose — only
+  *negative* storage is corruption), and rover battery may briefly exceed
+  the pack (rescue jump-start pays its "give" uncapped; the check only
+  trips above 3× capacity + 10 kWh). If jump-start ever caps at headroom,
+  tighten `rover-battery` to `maxBatteryKWh`.
+- **Test fixtures may not create impossible state** — that is what the gate
+  is for. `sim/pois` used to park rovers at `battery = 999`; it now charges
+  a full pack and tops up *between* steps (`runPowered` in pois.test.ts).
+  The pattern for "energy is not this test's subject": mutate between
+  `step()` calls, never leave an impossible value sitting at a check point.
+- Deliberately NOT checked in Phase 1 (reachable legit states, verified by
+  reading the code, not by guess): reservation ↔ task consistency
+  (`releaseReservations` only looks at the active command, so queued mines
+  can leave stale claims when stop/replaced) and one-rover-multiple-claims
+  (shift-queued mine orders claim each seam). Both are real lifecycle quirks
+  for a future phase to decide on — do not "fix" them inside an extraction
+  without a behavior-change note.
+- Gate on completion (2026-09-16): 44 suites / 413 checks green, build 989 kB
+  unchanged, all four browser smokes green on both transports. Recorded in
+  the roadmap's "Phase 1 — Recorded" block.
+
 ## Refactor Phase 0 (baseline) — and the jsdom canvas trap
 
 - `ARCHITECTURAL-REFACTOR-ROADMAP.md` (repo root) is the governing plan since PR #38. Read
   §3 (Golden Rules), §48 (phase checklist) and §51 (execution order) before touching `sim/`.
   Phases run 0 → 30; **Phase 0 is recorded complete** in that file's "Recorded baseline"
   table (typecheck 6.0 s, build 7.0 s, `npm test` 43 suites / 393 checks in 107 s on 2 cores,
-  all four browser smokes green, `index.js` 989 kB). Milestone 1 (§58) is next: invariants,
-  deterministic state hash, perf instrumentation, save validation, command transcripts —
-  *then* Persistence is the first extraction.
+  all four browser smokes green, `index.js` 989 kB). **Phase 1 (invariants) is done** — see
+  the section below. Remaining Milestone 1 (§58) items: deterministic state hash, perf
+  instrumentation, save validation, command transcripts — *then* Persistence is the first
+  extraction.
 - **CI does not run `npm test`.** `.github/workflows/pages.yml` gates `npm run build` +
   `mobile-smoke` + `worker-smoke` (both transports) only. That is how main carried 12 red
   suites: `WorldMapOverlay`'s constructor threw on a null 2D context, and the jsdom fixture

@@ -21,6 +21,16 @@ const bold = paint(1);
 const dim = paint(2);
 const red = paint(31);
 
+/**
+ * Refactor roadmap Phase 1: every suite runs the simulation with invariant
+ * assertions on, so `simulation.step()` loudly rejects any corrupted state
+ * the moment a test produces one (and any future refactor introduces one).
+ * The switch is process-wide and defaults off, so the shipped game and the
+ * browser smokes never pay for it.
+ */
+import { setInvariantChecks } from '../src/sim/debug/SimulationAssertions';
+setInvariantChecks(true);
+
 export type CaseFn = () => void | Promise<void>;
 
 export interface Case {

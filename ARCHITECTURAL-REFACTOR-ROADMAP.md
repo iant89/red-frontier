@@ -377,6 +377,67 @@ should fail.
     New invariant tests pass.
     Assertions detect intentional corruption.
 
+## Recorded (Phase 1 complete — 2026-09-16)
+
+Implemented on `arena/01a0a815-red-frontier`.
+
+**What was built**
+
+- `src/sim/debug/SimulationAssertions.ts` — a pure, read-only checker:
+  `checkInvariants(sim)` returns `InvariantViolation[]` (stable `code`,
+  `subject`, `message`); `assertInvariants(sim, label)` throws an
+  `InvariantError` carrying them. Codes: `id-unique`, `time-finite`,
+  `rover-battery`, `rover-cargo`, `rover-condition`, `rover-position`,
+  `building-progress`, `building-health`, `building-worker-ref`,
+  `storage-negative`, `fluid-range`, `grid-battery`, `deposit-amount`,
+  `reservation-ref`, `poi-amounts`, `task-deposit-ref`,
+  `task-building-ref`, `task-rover-ref`, `task-poi-ref`, `colonist-state`,
+  `colonist-shelter-ref`.
+- `Simulation.step()` calls the gate after its tick loop when the
+  process-wide switch is on: `setInvariantChecks(true)`. The switch defaults
+  **off**, so the shipped game, the worker and the browser smokes pay
+  nothing; `tests/harness.ts` turns it on once per test process, which means
+  *every* suite now asserts invariants after every simulated step.
+- `tests/sim/invariants.test.ts` (linked in `full.test.ts`, 20 checks):
+  sound-state passes, one corruption test per code, the step-time throw,
+  the switch-off behavior, and a same-seed proof that checks are
+  observationally inert (identical snapshots with checks on vs off).
+
+**Two documented exceptions** (in the module header and at the checks)
+
+- `storage <= capacity` is *not* enforced: `demolish()` refunds delivered
+  materials in full even when that overfills the silo — deliberately.
+  Negative storage is still corruption.
+- `battery <= maxBatteryKWh` is enforced only above `3× capacity + 10 kWh`:
+  a rescue jump-start pays its sized "give" into the stranded rover without
+  capping at the pack's nameplate, so a briefly over-full pack is legal sim
+  behavior today. If the jump-start ever gains a headroom cap, tighten the
+  check to `maxBatteryKWh`.
+
+**What the gate caught on its first run**
+
+`tests/sim/pois.test.ts` parked rovers with `battery = 999` — physically
+impossible state the old suite got away with. The fixture now charges a full
+pack and tops the battery up *between* steps (`runPowered`), removing energy
+as a variable while keeping every checked instant valid. No simulation code
+changed for it (Golden Rule 1).
+
+**Gate results** (Node 22.22.3, 2 CPU workers)
+
+| Gate | Result |
+| --- | --- |
+| `npm run typecheck` | green — 10.6 s |
+| `npm test` (44 suites / 413 checks) | green — 117.9 s wall clock |
+| `npm run test:check` | green — all suites linked, all declare `@covers` |
+| `npm run build` | green — 7.2 s; `index.js` 989 kB (288 kB gz), unchanged |
+| `mobile-smoke` (worker, the default) | green |
+| `mobile-smoke` (`?worker=0`, in-process) | green |
+| `worker-smoke` on both transports | green |
+
+Full-suite wall time grew ~11 s over the Phase 0 baseline (new suite, plus
+per-step checking inside the long soak/pois runs). Deterministic output is
+unchanged: same-seed snapshots compare equal with checks on or off.
+
 
 # 6. Phase 2 — Formalize ColonyState
 
