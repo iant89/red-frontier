@@ -36,6 +36,7 @@ import type { DifficultyId, WorldOptions } from '../difficulty';
 import type { OverlayState } from './overlays';
 import { BATTERY_PIN_OVERLAY } from './overlays';
 import type { SimTransport } from './SimHost';
+import { getProfiler } from '../debug/Profiler';
 
 /** What a weather system is doing, as the panels need it — plain data. */
 export interface WeatherPayload {
@@ -145,7 +146,8 @@ export function projectView(
   overlays: OverlayState,
   events: LogEvent[] = [],
 ): ViewPayload {
-  return {
+  const t0 = getProfiler().isEnabled() ? performance.now() : 0;
+  const payload: ViewPayload = {
     transport,
     version: sim.version,
     seed: sim.seed,
@@ -221,11 +223,10 @@ export function projectView(
     reserveSols: fluidMap((f) => sim.reserveSols(f)),
     netRatePerSol: fluidMap((f) => sim.netRatePerSol(f)),
     storageCapacity: sim.storageCapacity(),
-    // The ids the world is *actually* gripping, not the ids someone asked for: a
-    // pin on a rover that no longer exists is dropped here, so a panel reading
-    // this echo can never show a grip the world has let go of.
     pinnedRovers: livePins(sim, overlays),
   };
+  if (t0) getProfiler().recordViewGeneration(performance.now() - t0);
+  return payload;
 }
 
 function fluidMap(fn: (f: FluidId) => number): Record<FluidId, number> {

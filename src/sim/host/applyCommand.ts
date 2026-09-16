@@ -20,6 +20,7 @@
 
 import type { Simulation } from '../Simulation';
 import type { SimAck, SimCommand } from './protocol';
+import { getProfiler } from '../debug/Profiler';
 /** The ack a command that simply succeeded returns. */
 const ACK: SimAck = { ok: true };
 
@@ -28,6 +29,7 @@ const ACK: SimAck = { ok: true };
  * waiting for; commands with nothing to report return `{ ok: true }`.
  */
 export function applyCommand(sim: Simulation, cmd: SimCommand): SimAck {
+  getProfiler().recordCommand();
   switch (cmd.type) {
     // ------------------------------------------------------- rover orders ----
     case 'rover/move':

@@ -1,5 +1,5 @@
 /**
- * The authoritative simulation.
+ * The authoritative simulation — Phase 2 refactored to use ColonyState.
  *
  * Framework-agnostic by construction: no DOM, no three.js, no wall clock. The
  * renderer and HUD only ever *read* from here. That constraint is what will let
@@ -11,6 +11,9 @@
  *   3. power network          7. movement
  *   4. production             8. construction
  *                             9. failure checks → alerts → history
+ *
+ * Phase 2: Simulation owns a ColonyState (src/sim/state/ColonyState.ts) and
+ * proxies its old public fields for backward compatibility.
  */
 
 import { World } from './World';
@@ -145,220 +148,43 @@ import {
 } from './lifesupport';
 import { AlertBus, type Severity } from './alerts';
 import { assertInvariants, invariantChecksEnabled } from './debug/SimulationAssertions';
+import { getProfiler, profilerEnabled } from './debug/Profiler';
+import { decodeSave } from './persistence/SaveCodec';
+import { coerceTask } from './persistence/SaveValidator';
+import type { SaveState } from './persistence/SaveSchema';
+import { ClockSystem } from './systems/ClockSystem';
 
-// --------------------------------------------------------------- types ----
+// Phase 2 — state extraction
+import {
+  createColonyState,
+  resetExplorationState,
+  recomputeCapacitiesState,
+  type ColonyState,
+} from './state/ColonyState';
+import {
+  type Rover,
+  type RoverTask,
+  type RoverCommand,
+  type RoverRules,
+  type RoverGoal,
+  type RoverPhase,
+  defaultRoverRules,
+  cargoMass,
+  roverStatusText,
+} from './state/RoverState';
+import {
+  type Building,
+  remainingCostTotal,
+  lightningVulnerability,
+} from './state/BuildingState';
+import type { FluidFlow, HistorySample } from './state/ResourceState';
 
-/**
- * A rover task (GDD §5: first-class, queueable, repeatable). `command` is the
- * task currently being executed; `pending` holds the rest of the queue. A
- * `mine` task with `repeat` set is a *haul route*: mine → depot → seam, over
- * and over, until the seam runs dry or the player stops it.
- */
-export type RoverTask =
-  | { type: 'idle' }
-  | { type: 'moveTo'; x: number; z: number }
-  | { type: 'mine'; depositId: number; repeat?: boolean }
-  | { type: 'construct'; buildingId: number }
-  | { type: 'clean'; buildingId: number }
-  | { type: 'repair'; buildingId: number }
-  | { type: 'recover'; roverId: number; give?: number; given?: number }
-  | { type: 'salvage'; poiId: number }
-  | { type: 'unload' }
-  | { type: 'wait'; seconds: number };
-
-/** Kept as an alias so older call sites read naturally. */
-export type RoverCommand = RoverTask;
-
-/**
- * Player-authored automation (GDD §5: "IF battery < 20% → return to charger…"
- * and friends). The behaviours themselves are simulation rules; these switches
- * and thresholds are the player's levers over them, per rover.
- */
-export interface RoverRules {
-  /** Head home to charge below this battery fraction (percent). */
-  chargeFloorPct: number;
-  /** Fetch what the build queue is short of when idle. */
-  autoHaul: boolean;
-  /** Volunteer for automatic repair / panel-cleaning dispatches. */
-  autoService: boolean;
-  /** Recall to a charger when a storm crosses the shelter threshold. */
-  stormShelter: boolean;
-  /** Volunteer to jump-start stranded rovers. */
-  autoRescue: boolean;
-}
-
-export function defaultRoverRules(): RoverRules {
-  return {
-    chargeFloorPct: Math.round(ROVER_CHARGE_THRESHOLD * 100),
-    autoHaul: true,
-    autoService: true,
-    stormShelter: true,
-    autoRescue: true,
-  };
-}
-
-export interface Rover {
-  id: number;
-  kind: RoverKind;
-  label: string;
-  x: number;
-  y: number;
-  z: number;
-  heading: number;
-  battery: number; // kWh
-  cargo: ResourceAmounts;
-  phase: RoverPhase;
-  /** The task at the head of the queue (what the rover is doing now). */
-  command: RoverTask;
-  /** The rest of the queue — executed in order as tasks complete. */
-  pending: RoverTask[];
-  goal: RoverGoal;
-  gx: number;
-  gz: number;
-  gid: number;
-  recharge: boolean;
-  lowBatteryNotified: boolean;
-  statusText: string;
-  /** Fraction of requested charge power actually delivered last tick. */
-  chargeSat: number;
-  /** True when the sim assigned this task, not the player. */
-  autoTask: boolean;
-  /** Drivetrain condition 0..100. Low condition slows work; garages fix it. */
-  condition: number;
-  /** The player's automation levers for this rover. */
-  rules: RoverRules;
-  /** A repeat route is parked at the depot waiting for silo space. */
-  routePaused: boolean;
-  /** "Still holds cargo" warned once per stuck episode, not per tick. */
-  blockNotified: boolean;
-  /** Forced back to base by storm weather; released when the storm passes. */
-  sheltered: boolean;
-  /**
-   * Player switch for the position lights & headlights. When on, the sim
-   * lights them automatically at night or in low visibility (and bills the
-   * rover's battery for it). The yellow emergency strobe of a disabled rover
-   * ignores this switch entirely.
-   */
-  lightsOn: boolean;
-  /** Runtime: headlights + rear strobe are lit right now and drawing power. */
-  lightsActive: boolean;
-  /** Runtime nav waypoints (not saved — recomputed on the next setTravel). */
-  navPath: Array<{ x: number; z: number }>;
-  navI: number;
-}
-
-export type RoverGoal =
-  | 'idle'
-  | 'move'
-  | 'mine'
-  | 'toDepot'
-  | 'unload'
-  | 'toSite'
-  | 'build'
-  | 'toCharge'
-  | 'charge'
-  | 'toService'
-  | 'service'
-  | 'toSalvage'
-  | 'salvage'
-  | 'toRecover'
-  | 'recover';
-
-export type RoverPhase = 'idle' | 'moving' | 'working' | 'charging' | 'disabled';
-
-export interface Building {
-  id: number;
-  kind: BuildingKind;
-  x: number;
-  z: number;
-  rot: number;
-  state: 'site' | 'building' | 'online';
-  remainingCost: ResourceAmounts;
-  needsMaterials: boolean;
-  progress: number;
-  buildTime: number;
-  workerId: number | null;
-  /** Player switch. A disabled building draws nothing and produces nothing. */
-  enabled: boolean;
-  // ---- runtime, recomputed every tick (not authoritative between ticks) ----
-  /** 0..1 — how much of its requested power it received. */
-  powerSat: number;
-  /** 0..1 — how hard the process is actually running. */
-  throughput: number;
-  /** Instantaneous generation (kW). */
-  genKw: number;
-  /** Instantaneous load (kW). */
-  loadKw: number;
-  /** Why it isn't running, for the inspector. */
-  idleReason: string;
-  // ---- Prototype 3: weather exposure --------------------------------------
-  /** Structural health 0..100. Storms chew it down; rovers repair it up. */
-  health: number;
-  /** Panel cleanliness 0..1 — dust on the glass, solar output pays for it. */
-  cleanliness: number;
-  /** Tripped offline by damage; a rover repair brings it back online. */
-  damaged: boolean;
-  // ---- Prototype 4: rover garage ------------------------------------------
-  /** What the assembly line is building right now, if anything. */
-  assembly: { kind: RoverKind; progress: number } | null;
-  // ---- Developer mode (runtime only) ---------------------------------------
-  /**
-   * Developer-mode upgrade level. 1 is the honest baseline; higher levels
-   * scale output and capacity through {@link devLevelMul}. Deliberately
-   * excluded from snapshot()/restore() — a dev-mode boost never touches the
-   * save file, and a loaded colony comes back at level 1.
-   */
-  level: number;
-}
-
+// Re-export for backward compat (old import sites still work)
+export type { RoverTask, RoverCommand, RoverRules, Rover, RoverGoal, RoverPhase, Building, HistorySample, FluidFlow } from './state';
 export type { Colonist } from './lifesupport';
-
-export interface HistorySample {
-  t: number;
-  genKw: number;
-  loadKw: number;
-  storedFrac: number;
-  water: number;
-  oxygen: number;
-  food: number;
-}
-
-export interface FluidFlow {
-  produced: number;
-  consumed: number;
-}
+export { defaultRoverRules, cargoMass, roverStatusText, remainingCostTotal, lightningVulnerability };
 
 const ARRIVE_EPS = 0.6;
-
-function cargoMass(r: Rover): number {
-  let t = 0;
-  for (const k of ALL_RESOURCES) t += r.cargo[k];
-  return t;
-}
-
-function remainingCostTotal(b: Building): number {
-  let t = 0;
-  for (const k of ALL_RESOURCES) t += b.remainingCost[k];
-  return t;
-}
-
-/**
- * How attractive a bolt finds a structure. Open solar arrays and power
- * electronics are the best targets for a static discharge, sealed habitats
- * and buried RTGs the worst — on top of the existing `exposure` ladder.
- */
-function lightningVulnerability(b: { kind: BuildingKind; generation?: 'solar' | 'baseload' }): number {
-  if (b.generation === 'solar') return 1.9;
-  switch (b.kind) {
-    case 'battery':
-    case 'oxygenator':
-      return 1.5;
-    case 'workshop':
-      return 1.3;
-    default:
-      return 1;
-  }
-}
 
 function lerpAngle(a: number, b: number, t: number): number {
   let d = (b - a) % (Math.PI * 2);
@@ -367,116 +193,10 @@ function lerpAngle(a: number, b: number, t: number): number {
   return a + d * t;
 }
 
-/** Human-readable state for the inspector. */
-export function roverStatusText(r: Rover): string {
-  if (r.phase === 'disabled') return 'Disabled — out of power';
-  if (r.sheltered) return 'Sheltering from storm';
-  if (r.routePaused) return 'Route paused — silo full';
-  if (r.command.type === 'wait') return `Waiting (${Math.max(0, Math.ceil(r.command.seconds))} s)`;
-  switch (r.goal) {
-    case 'idle':
-      return r.phase === 'charging' ? 'Charging' : 'Idle';
-    case 'move':
-      return 'Moving';
-    case 'mine':
-      return r.command.type === 'mine' && r.command.repeat ? 'Hauling route' : 'Mining';
-    case 'toDepot':
-    case 'unload':
-      return 'Hauling to storage';
-    case 'toSite':
-      return 'Heading to build site';
-    case 'build':
-      return 'Building';
-    case 'toCharge':
-      return 'Returning to charge';
-    case 'charge':
-      return 'Charging';
-    case 'toService':
-    case 'service':
-      return r.command.type === 'repair' ? 'Repairing' : 'Cleaning panels';
-    case 'toRecover':
-      return 'Responding to stranded rover';
-    case 'recover':
-      return 'Jump-starting a stranded rover';
-    case 'toSalvage':
-      return 'Heading to the site';
-    case 'salvage':
-      return 'Salvaging';
-    default:
-      return r.phase;
-  }
-}
-
 // ---------------------------------------------------------- simulation ----
 
 export class Simulation {
-  world: World;
-  version = SAVE_VERSION;
-  simTime = 0; // game seconds
-  seed: number;
-  /** Difficulty preset chosen in the mission wizard. */
-  difficulty: DifficultyId = 'pioneer';
-  /** Advanced world options chosen in the mission wizard. */
-  worldOptions: WorldOptions = { ...DEFAULT_WORLD_OPTIONS };
-  /** Multiplier on the colonist's per-sol consumption (difficulty). */
-  consumptionMul = 1;
-  private nextId = 1000;
-
-  clock = new SolClock();
-  alerts = new AlertBus();
-
-  rovers: Rover[] = [];
-  buildings: Building[] = [];
-  colonist: Colonist;
-
-  /** Bulk solids in colony storage. */
-  storage: ResourceAmounts = emptyAmounts();
-  /** Life-support fluids. */
-  pools: FluidPools = makePools();
-
-  /** Result of the most recent power resolve — read by the HUD. */
-  power: PowerResult = idlePower(POD_BATTERY_KWH, POD_BATTERY_KWH * 0.6);
-  /** Energy stored in the grid (kWh). Authoritative; `power` mirrors it. */
-  storedKWh = POD_BATTERY_KWH * 0.6;
-
-  /** Per-fluid production/consumption over the last tick, in kg per sol. */
-  flows: Record<FluidId, FluidFlow> = {
-    water: { produced: 0, consumed: 0 },
-    oxygen: { produced: 0, consumed: 0 },
-    food: { produced: 0, consumed: 0 },
-  };
-
-  history: HistorySample[] = [];
-  private lastHistoryAt = -Infinity;
-
-  /** Set once the mission has ended, with the reason. */
-  gameOver: { reason: string; sol: number } | null = null;
-
-  /**
-   * Atmospheric dust transmission, 1 = clear. Driven by the weather system
-   * every tick; solar generation, greenhouse light and the renderer all read
-   * it (TDD §12's single authoritative environment).
-   */
-  dustTransmission = BASE_DUST_TRANSMISSION;
-
-  /** Wind, dust and storms (Prototype 3). */
-  weather = new Weather(0);
-  private stormAnnounced = false;
-
-  /**
-   * Exploration state (GDD §06/§10). The sites themselves live on `World` —
-   * they are places, and the renderer and HUD read them through the world view.
-   * What lives here is the *schedule*: which sol Earth's next cargo mission
-   * lands on. That is authoritative state, so it is saved.
-   */
-  nextDropSol = 0;
-  /**
-   * Its own RNG stream, like the weather's: drop timing must not perturb the
-   * streams that drive anything else, or a colony's skies would change because
-   * a cargo mission was added to the design. Seeded in the constructor (a field
-   * initializer would run before `seed` is set) and re-seeded on restore.
-   */
-  private dropRng: () => number = mulberry32(1);
+  readonly state: ColonyState;
 
   constructor(params: {
     seed: number;
@@ -486,39 +206,83 @@ export class Simulation {
     region?: string | null;
     worldOptions?: Partial<WorldOptions>;
   }) {
-    this.seed = params.seed;
-    this.difficulty = params.difficulty ?? 'pioneer';
-    this.worldOptions = { ...DEFAULT_WORLD_OPTIONS, ...(params.worldOptions ?? {}) };
-    const diff = DIFFICULTIES[this.difficulty] ?? DIFFICULTIES.pioneer;
-    this.consumptionMul = diff.consumptionMul;
-    this.world = new World({
-      seed: params.seed,
-      nearDeposits: params.nearDeposits ?? this.worldOptions.nearDeposits ?? 0.2,
-      worldHalf: params.worldHalf,
-      region: params.region ?? null,
-      richness: richnessMulFor(this.worldOptions.richness),
-    });
-    this.weather = new Weather(params.seed ^ 0x77e711e);
-    this.weather.frequencyMul = diff.stormMul * stormMulFor(this.worldOptions.stormLevel);
-    this.weather.damageMul = diff.damageMul;
-    this.weather.lightningMul = diff.lightningMul;
-    this.colonist = makeColonist(
-      1,
-      'Cmdr. Vega',
-      SPAWN_X,
-      this.world.heightAt(SPAWN_X, SPAWN_Z),
-      SPAWN_Z + 3,
-    );
-    this.spawnStart();
-    this.recomputeCapacities();
-    this.resetExploration();
-    const supplies = diff.suppliesMul * suppliesMulFor(this.worldOptions.supplies);
-    this.pools.amounts = {
-      water: POD_STARTING_FLUIDS.water * supplies,
-      oxygen: POD_STARTING_FLUIDS.oxygen * supplies,
-      food: POD_STARTING_FLUIDS.food * supplies,
-    };
+    this.state = createColonyState(params);
   }
+
+  // ---- state proxies (backward compat) ----
+  get world(): World { return this.state.world; }
+  set world(v: World) { this.state.world = v; }
+  get version(): number { return SAVE_VERSION; }
+  get seed(): number { return this.state.seed; }
+  set seed(v: number) { this.state.seed = v; }
+  get difficulty(): DifficultyId { return this.state.difficulty; }
+  set difficulty(v: DifficultyId) { this.state.difficulty = v; }
+  get worldOptions(): WorldOptions { return this.state.worldOptions; }
+  set worldOptions(v: WorldOptions) { this.state.worldOptions = v; }
+  get consumptionMul(): number { return this.state.consumptionMul; }
+  set consumptionMul(v: number) { this.state.consumptionMul = v; }
+
+  private get nextId(): number { return this.state.nextId; }
+  private set nextId(v: number) { this.state.nextId = v; }
+
+  get clock(): SolClock { return this.state.clock; }
+  set clock(v: SolClock) { this.state.clock = v; }
+  get alerts(): AlertBus { return this.state.alerts; }
+  set alerts(v: AlertBus) { this.state.alerts = v; }
+
+  get rovers(): Rover[] { return this.state.rovers; }
+  set rovers(v: Rover[]) { this.state.rovers = v; }
+  get buildings(): Building[] { return this.state.buildings; }
+  set buildings(v: Building[]) { this.state.buildings = v; }
+  get colonist(): Colonist { return this.state.colonist; }
+  set colonist(v: Colonist) { this.state.colonist = v; }
+
+  get storage(): ResourceAmounts { return this.state.storage; }
+  set storage(v: ResourceAmounts) { this.state.storage = v; }
+  get pools(): FluidPools { return this.state.pools; }
+  set pools(v: FluidPools) { this.state.pools = v; }
+
+  get power(): PowerResult { return this.state.power; }
+  set power(v: PowerResult) { this.state.power = v; }
+  get storedKWh(): number { return this.state.storedKWh; }
+  set storedKWh(v: number) { this.state.storedKWh = v; }
+
+  get flows(): Record<FluidId, FluidFlow> { return this.state.flows; }
+  set flows(v: Record<FluidId, FluidFlow>) { this.state.flows = v; }
+  get lastFlows(): Record<FluidId, FluidFlow> { return this.state.lastFlows; }
+  set lastFlows(v: Record<FluidId, FluidFlow>) { this.state.lastFlows = v; }
+  get flowWindow(): Array<{ t: number; f: Record<FluidId, FluidFlow> }> { return this.state.flowWindow; }
+  set flowWindow(v: Array<{ t: number; f: Record<FluidId, FluidFlow> }>) { this.state.flowWindow = v; }
+
+  get history(): HistorySample[] { return this.state.history; }
+  set history(v: HistorySample[]) { this.state.history = v; }
+  private get lastHistoryAt(): number { return this.state.lastHistoryAt; }
+  private set lastHistoryAt(v: number) { this.state.lastHistoryAt = v; }
+
+  get gameOver(): { reason: string; sol: number } | null { return this.state.gameOver; }
+  set gameOver(v: { reason: string; sol: number } | null) { this.state.gameOver = v; }
+
+  get dustTransmission(): number { return this.state.dustTransmission; }
+  set dustTransmission(v: number) { this.state.dustTransmission = v; }
+
+  get weather(): Weather { return this.state.weather; }
+  set weather(v: Weather) { this.state.weather = v; }
+  private get stormAnnounced(): boolean { return this.state.stormAnnounced; }
+  private set stormAnnounced(v: boolean) { this.state.stormAnnounced = v; }
+
+  get nextDropSol(): number { return this.state.nextDropSol; }
+  set nextDropSol(v: number) { this.state.nextDropSol = v; }
+  private get dropRng(): () => number { return this.state.dropRng; }
+  private set dropRng(v: () => number) { this.state.dropRng = v; }
+
+  get simTime(): number { return this.state.simTime; }
+  set simTime(v: number) { this.state.simTime = v; }
+  private get ticksRun(): number { return this.state.ticksRun; }
+  private set ticksRun(v: number) { this.state.ticksRun = v; }
+  private get remainder(): number { return this.state.remainder; }
+  private set remainder(v: number) { this.state.remainder = v; }
+  private get _storageCapacity(): number { return this.state._storageCapacity; }
+  private set _storageCapacity(v: number) { this.state._storageCapacity = v; }
 
   // ------------------------------------------------------------ setup ----
   private spawnStart(): void {
@@ -526,7 +290,6 @@ export class Simulation {
     this.spawnRoverAt('utility', SPAWN_X - 9, SPAWN_Z + 4, Math.PI);
   }
 
-  /** Spawn a rover of `kind` at world position. Used at start and by the garage line. */
   private spawnRoverAt(kind: RoverKind, x: number, z: number, heading: number): Rover {
     const def = ROVERS[kind];
     const r: Rover = {
@@ -566,49 +329,20 @@ export class Simulation {
   }
 
   private allocId(): number {
-    return this.nextId++;
+    return this.state.nextId++;
   }
 
-  // ------------------------------------------------- derived capacities ----
-
-    /**
-   * The id the next created entity will carry. Public and read-only because the
-   * *client* needs it: an id-allocating command sent to a worker must be
-   * answered before the round trip finishes, and the only honest way to do that
-   * is to know the number the sim is going to hand out. `tests/sim/worker.test.ts`
-   * pins that the reservation is right, and that a wrong one is harmless.
-   */
   get nextEntityId(): number {
-    return this.nextId;
+    return this.state.nextId;
   }
 
-/** Recompute bulk + fluid capacity from whatever is online. */
   recomputeCapacities(): void {
-    let cap = BASE_STORAGE_PER_RESOURCE;
-    const fluid = { ...POD_FLUID_CAPACITY };
-    for (const b of this.buildings) {
-      if (!this.runnable(b)) continue;
-      const def = BUILDINGS[b.kind];
-      const mul = devLevelMul(b.level);
-      cap += def.storagePerResourceKg * mul;
-      if (def.fluidCapacity) {
-        for (const f of ALL_FLUIDS) {
-          fluid[f] += (def.fluidCapacity[f] ?? 0) * mul;
-        }
-      }
-    }
-    this._storageCapacity = cap;
-    for (const r of ALL_RESOURCES) {
-      if (this.storage[r] > cap) this.storage[r] = cap;
-    }
-    this.pools.capacity = fluid;
-    // Trim anything that no longer fits (a building was destroyed / disabled).
-    for (const f of ALL_FLUIDS) {
-      if (this.pools.amounts[f] > fluid[f]) this.pools.amounts[f] = fluid[f];
-    }
+    recomputeCapacitiesState(this.state);
   }
 
-  private _storageCapacity = BASE_STORAGE_PER_RESOURCE;
+  private resetExploration(nextDropSol?: number): void {
+    resetExplorationState(this.state, nextDropSol);
+  }
 
   /** Capacity **per resource type** (kg). */
   storageCapacity(): number {
@@ -1562,15 +1296,12 @@ export class Simulation {
    * Jump the mission calendar: set the sol and the time-of-day fraction
    * (0 = midnight, 0.25 = sunrise, 0.5 = noon). simTime is re-synced so the
    * weather scheduler and history windows stay coherent after the jump.
+   *
+   * Phase 4: clock part delegated to ClockSystem.setTime.
    */
   devSetTime(sol: number, frac: number): void {
-    const target = Math.max(0, Math.floor(sol));
-    const f = clamp(frac, 0, 0.9999);
-    this.clock.restore({ sol: target, frac: f });
-    this.simTime = Math.max(0, (target + f - START_SOL_FRAC) * SOL_SECONDS);
+    ClockSystem.setTime(this.state, sol, frac);
     this.weather.time = this.simTime;
-    // History windows are wall-clock comparisons — let them re-anchor at the
-    // new time rather than starving until simTime catches back up.
     this.lastHistoryAt = -Infinity;
     this.lastFlows = {
       water: { produced: 0, consumed: 0 },
@@ -1582,47 +1313,23 @@ export class Simulation {
 
   // -------------------------------------------------------- main loop ----
 
-  /**
-   * Delivered-time remainder, always held in [0, SIM_TICK). Each call fires the
-   * whole ticks it completes and subtracts *exactly* that much, so the
-   * accumulator telescopes: 60 seconds delivered in 3 600 ragged browser
-   * frames runs exactly as many ticks as 60 seconds delivered in one call, and
-   * the error in the remainder can never compound the way a naive
-   * "ticks owed = floor(total / step)" comparison does once `total` grows into
-   * the tens of thousands (a restored colony used to drift by one tick against
-   * the original for exactly that reason).
-   */
-  private remainder = 0;
-  private ticksRun = 0;
-
   /** Advance simulation by `frameDt` game seconds (fixed substeps applied). */
   step(frameDt: number): number {
-    if (frameDt <= 0 || !Number.isFinite(frameDt)) return 0;
-    this.remainder += frameDt;
-
-    // The epsilon absorbs representation error so that a delivery which is
-    // mathematically a whole number of ticks always yields that many ticks.
-    let owed = Math.floor(this.remainder / SIM_TICK + 1e-9);
-
-    // Bound catch-up so a backgrounded tab can't produce a multi-second freeze.
-    const maxTicks = 400;
-    if (owed > maxTicks) {
-      owed = maxTicks;
-      this.remainder = 0; // drop the backlog rather than fast-forwarding time
-    } else {
-      this.remainder -= owed * SIM_TICK;
-    }
+    // Phase 4: fixed-step accumulation delegated to ClockSystem
+    const owed = ClockSystem.consume(this.state, frameDt);
 
     let ticks = 0;
+    const t0 = profilerEnabled() ? performance.now() : 0;
     while (ticks < owed) {
       this.tick();
-      this.ticksRun++;
       ticks++;
     }
 
-    // Refactor roadmap Phase 1: invariant assertions run in tests only — the
-    // switch is process-wide and stays off in the game and the worker, so
-    // this costs nothing in production (see sim/debug/SimulationAssertions).
+    if (profilerEnabled()) {
+      const dt = performance.now() - t0;
+      getProfiler().recordStep(ticks, dt);
+    }
+
     if (invariantChecksEnabled()) assertInvariants(this, `step at t=${this.simTime.toFixed(2)}s`);
 
     return ticks;
@@ -1631,10 +1338,8 @@ export class Simulation {
   private tick(): void {
     if (this.gameOver) return;
 
-    this.simTime += SIM_TICK;
-
-    // 1. clock & sun
-    const newSol = this.clock.advance(SIM_TICK);
+    // 1. clock & sun — Phase 4: delegated to ClockSystem
+    const newSol = ClockSystem.tick(this.state);
     if (newSol) {
       this.event('info', `A new sol begins. Sol ${this.clock.sol + 1}.`);
     }
@@ -1911,19 +1616,6 @@ export class Simulation {
 
   /** Storm damage has tripped a building offline until it is repaired. */
   // -------------------------------------------------------- exploration ----
-
-  /**
-   * Roll a fresh drop schedule and point it at the launch window. Called once at
-   * mission start and again on restore, where the save supplies the sol the next
-   * mission was already booked for.
-   */
-  private resetExploration(nextDropSol?: number): void {
-    this.dropRng = mulberry32(this.seed ^ 0x2f6e2b1);
-    this.nextDropSol =
-      nextDropSol && nextDropSol > 0
-        ? nextDropSol
-        : DROP_FIRST_SOL_MIN + this.dropRng() * (DROP_FIRST_SOL_MAX - DROP_FIRST_SOL_MIN);
-  }
 
   /** Every site on the planet — found or not. */
   get pois(): Poi[] {
@@ -4180,21 +3872,6 @@ export class Simulation {
     };
   }
 
-  lastFlows: Record<FluidId, FluidFlow> = {
-    water: { produced: 0, consumed: 0 },
-    oxygen: { produced: 0, consumed: 0 },
-    food: { produced: 0, consumed: 0 },
-  };
-
-  /**
-   * Rolling totals over the trailing sol, per fluid. Instantaneous rates are
-   * useless to the player here: a greenhouse runs at 100 % at noon and 15 % at
-   * midnight, so a raw reading would swing from "food surplus" to "starving"
-   * twice a sol. Averaging over a full sol answers the question the player is
-   * actually asking — *am I gaining or losing ground?*
-   */
-  private flowWindow: Array<{ t: number; f: Record<FluidId, FluidFlow> }> = [];
-
   /** Net rate of a fluid in kg/sol, averaged over the trailing sol. */
   netRatePerSol(f: FluidId): number {
     if (this.flowWindow.length === 0) return 0;
@@ -4233,9 +3910,12 @@ export class Simulation {
   }
 
   // ------------------------------------------------------- persistence ----
-  snapshot(): object {
+  // Phase 3: persistence extraction — snapshot returns SaveState, restore
+  // decodes via persistence module (unknown → SaveState → ColonyState).
+
+  snapshot(): SaveState {
     return {
-      version: SAVE_VERSION,
+      version: SAVE_VERSION as 8,
       seed: this.seed,
       difficulty: this.difficulty,
       worldHalf: this.world.half,
@@ -4243,7 +3923,7 @@ export class Simulation {
       worldOptions: { ...this.worldOptions },
       simTime: this.simTime,
       ticksRun: this.ticksRun,
-      clock: this.clock.snapshot(),
+      clock: this.clock.snapshot() as { sol: number; frac: number },
       storage: { ...this.storage },
       fluids: { ...this.pools.amounts },
       storedKWh: this.storedKWh,
@@ -4258,7 +3938,7 @@ export class Simulation {
         suitO2: this.colonist.suitO2,
         inside: this.colonist.inside,
         shelterId: this.colonist.shelterId,
-        order: { ...this.colonist.order },
+        order: { ...this.colonist.order } as { type: string; [k: string]: unknown },
         dead: this.colonist.dead,
       },
       deposits: this.world.deposits.map((d) => ({
@@ -4269,15 +3949,8 @@ export class Simulation {
         amount: d.amount,
         maxAmount: d.maxAmount,
         radius: d.radius,
-        // Scheduler claims are authoritative: they steer the next dispatch.
         reservedBy: d.reservedBy ?? null,
       })),
-      /**
-       * Sites and landed drops. The world could regenerate the *scattered* ones
-       * from the seed, but a colony's found sites, stripped wrecks and the
-       * container sitting under 1.4 sols of dust are player-mutated state, and
-       * TDD §15 says player-mutated chunk state is what gets persisted.
-       */
       pois: this.world.pois.map((p) => ({
         id: p.id,
         kind: p.kind,
@@ -4329,42 +4002,43 @@ export class Simulation {
         damaged: b.damaged,
         assembly: b.assembly ? { ...b.assembly } : null,
       })),
-      weather: this.weather.snapshot(),
-      alerts: this.alerts.snapshot(),
+      weather: this.weather.snapshot() as SaveState['weather'],
+      alerts: this.alerts.snapshot() as SaveState['alerts'],
     };
   }
 
-  /** Restore state from an earlier snapshot(). Mutates this sim in place. */
-  restore(data: any): void {
-    if (!data || typeof data !== 'object') throw new Error('empty save');
-    // TDD §15: migrate what we understand, refuse what we don't.
-    if (data.version === 3) data = migrateV3Save(data);
-    if (data.version === 4) data = migrateV4Save(data);
-    if (data.version === 5) data = migrateV5Save(data);
-    if (data.version === 6) data = migrateV6Save(data);
-    if (data.version === 7) data = migrateV7Save(data);
-    if (data.version !== SAVE_VERSION) {
-      throw new Error(`unsupported save version ${data.version}`);
-    }
+  /**
+   * Restore state from an earlier snapshot(). Mutates this sim in place.
+   * Accepts `unknown` at the boundary — decodes via SaveCodec (validator →
+   * migrations → schema) then applies to ColonyState.
+   */
+  restore(data: unknown): void {
+    const save = decodeSave(data);
+    this.restoreFromState(save);
+  }
+
+  /**
+   * Typed restore path — receives an already-decoded, migrated SaveState.
+   * This is the new boundary per roadmap §7: decodeSave(unknown) → SaveState
+   * → restoreFromState(saveState).
+   */
+  private restoreFromState(data: SaveState): void {
     this.seed = data.seed;
     this.difficulty = DIFFICULTIES[data.difficulty as DifficultyId]
       ? (data.difficulty as DifficultyId)
       : 'pioneer';
     this.worldOptions = { ...DEFAULT_WORLD_OPTIONS, ...(data.worldOptions ?? {}) };
     this.consumptionMul = (DIFFICULTIES[this.difficulty] ?? DIFFICULTIES.pioneer).consumptionMul;
-    this.simTime = data.simTime || 0;
-    // The tick counter is authoritative; the delivery remainder restarts at
-    // zero (where it sits within a frame either way, and it never changes how
-    // many ticks a given total of delivered time produces).
-    this.ticksRun = data.ticksRun ?? Math.floor(this.simTime / SIM_TICK + 1e-9);
-    this.remainder = 0;
-    this.clock.restore(data.clock);
+    // Phase 4: clock/time restore delegated to ClockSystem
+    ClockSystem.restore(this.state, {
+      simTime: data.simTime,
+      ticksRun: (data as { ticksRun?: number }).ticksRun,
+      clock: data.clock as { sol?: number; frac?: number },
+    });
     this.weather = new Weather(this.seed ^ 0x77e711e);
     this.weather.time = this.simTime;
     if (data.weather) this.weather.restore(data.weather);
-    // A pre-lightning save has no `lightningMul` in its weather block; give it
-    // the one its difficulty implies rather than silently defaulting to 1.
-    if (!Number.isFinite(data.weather?.lightningMul)) {
+    if (!Number.isFinite((data.weather as { lightningMul?: unknown })?.lightningMul as number)) {
       this.weather.lightningMul = (DIFFICULTIES[this.difficulty] ?? DIFFICULTIES.pioneer).lightningMul;
     }
     this.dustTransmission = this.weather.solarTransmission;
@@ -4372,15 +4046,13 @@ export class Simulation {
     this.storage = { ...emptyAmounts(), ...(data.storage ?? {}) };
     this.gameOver = data.gameOver ?? null;
 
-    // The terrain must match the original exactly (seed + region + size);
-    // deposits themselves are restored from the save below.
     this.world = new World({
       seed: data.seed,
       nearDeposits: 0.2,
       worldHalf: Number.isFinite(data.worldHalf) ? data.worldHalf : 640,
       region: typeof data.region === 'string' ? data.region : null,
     });
-    this.world.deposits = (data.deposits ?? []).map((d: any) => ({
+    this.world.deposits = (data.deposits ?? []).map((d) => ({
       id: d.id,
       resource: d.resource,
       x: d.x,
@@ -4388,22 +4060,18 @@ export class Simulation {
       amount: d.amount,
       maxAmount: d.maxAmount,
       radius: d.radius,
-      reservedBy: Number.isFinite(d.reservedBy) ? d.reservedBy : null,
+      reservedBy: Number.isFinite(d.reservedBy as unknown as number) ? (d.reservedBy as number) : null,
     }));
-    // Sites and drops come back as written, so a stripped wreck stays stripped
-    // and a container with 1.4 sols of dust left still has 1.4 sols left. A save
-    // with none (v6 and older, or a world where nothing was ever found) keeps
-    // the scatter the seed generated.
     if (Array.isArray(data.pois)) {
       this.world.setPois(
-        (data.pois as any[])
-          .filter((p) => p && Number.isFinite(p.id) && POI_KINDS[p.kind as PoiKind])
+        (data.pois as unknown as Array<Record<string, unknown>>)
+          .filter((p) => p && Number.isFinite(p.id as number) && POI_KINDS[p.kind as PoiKind])
           .map((p) => ({
-            id: p.id,
+            id: p.id as number,
             kind: p.kind as PoiKind,
             x: Number(p.x) || 0,
             z: Number(p.z) || 0,
-            salvage: { ...(p.salvage ?? {}) },
+            salvage: { ...((p.salvage as Record<string, number>) ?? {}) },
             energyKWh: Math.max(0, Number(p.energyKWh) || 0),
             discovered: !!p.discovered,
             solsToBury: Math.max(0, Number(p.solsToBury) || 0),
@@ -4414,10 +4082,10 @@ export class Simulation {
     }
     this.resetExploration(Number(data.exploration?.nextDropSol));
 
-    this.rovers = (data.rovers ?? []).map((r: any) => {
+    this.rovers = (data.rovers ?? []).map((r) => {
       const command = coerceTask(r.command) ?? { type: 'idle' as const };
       const pending = Array.isArray(r.pending)
-        ? (r.pending as any[]).map(coerceTask).filter((t): t is RoverTask => t !== null)
+        ? (r.pending as unknown[]).map(coerceTask).filter((t): t is RoverTask => t !== null)
         : [];
       return {
         id: r.id,
@@ -4446,14 +4114,14 @@ export class Simulation {
         routePaused: false,
         blockNotified: !!r.blockNotified,
         sheltered: !!r.sheltered,
-        lightsOn: r.lightsOn !== false,
+        lightsOn: (r as { lightsOn?: unknown }).lightsOn !== false,
         lightsActive: false,
         navPath: [],
         navI: 0,
       };
     });
 
-    this.buildings = (data.buildings ?? []).map((b: any) => ({
+    this.buildings = (data.buildings ?? []).map((b) => ({
       id: b.id,
       kind: b.kind,
       x: b.x,
@@ -4475,24 +4143,14 @@ export class Simulation {
       cleanliness: b.cleanliness ?? 1,
       damaged: !!b.damaged,
       assembly:
-        b.assembly && ROVERS[b.assembly.kind as RoverKind]
-          ? { kind: b.assembly.kind, progress: b.assembly.progress ?? 0 }
+        b.assembly && ROVERS[(b.assembly as { kind: RoverKind }).kind as RoverKind]
+          ? { kind: (b.assembly as { kind: RoverKind }).kind, progress: (b.assembly as { progress: number }).progress ?? 0 }
           : null,
-      // Developer-mode upgrades are runtime-only by design: a loaded colony
-      // always comes back at base level, whatever the live game had.
       level: 1,
     }));
 
-    /**
-     * Rovers resume *at rest*: the in-flight phase is not saved, so re-derive
-     * the one resting state the power grid needs to see. A rover parked at a
-     * charger with room in its battery was plugged in when the save closed,
-     * and must still read as charging when it reopens — otherwise the first
-     * tick after a load silently skips a charge the live colony got, and a
-     * reloaded save drifts from the original by exactly that one tick.
-     */
     for (const r of this.rovers) {
-      if (r.battery <= 0) continue; // a flat rover stays dark (it re-strands itself)
+      if (r.battery <= 0) continue;
       if (r.battery >= ROVERS[r.kind].maxBatteryKWh - 1e-6) continue;
       if (this.nearCharger(r.x, r.z)) {
         r.phase = 'charging';
@@ -4506,22 +4164,22 @@ export class Simulation {
       this.pools.amounts[f] = clamp(this.pools.amounts[f], 0, this.pools.capacity[f]);
     }
 
-    const cd = data.colonist ?? {};
+    const cd = data.colonist ?? ({} as SaveState['colonist']);
     this.colonist = makeColonist(
-      cd.id ?? 1,
-      cd.name ?? 'Cmdr. Vega',
-      cd.x ?? SPAWN_X,
+      (cd as { id?: number }).id ?? 1,
+      (cd as { name?: string }).name ?? 'Cmdr. Vega',
+      (cd as { x?: number }).x ?? SPAWN_X,
       0,
-      cd.z ?? SPAWN_Z,
+      (cd as { z?: number }).z ?? SPAWN_Z,
     );
     this.colonist.y = this.world.heightAt(this.colonist.x, this.colonist.z);
-    this.colonist.heading = cd.heading ?? 0;
-    this.colonist.health = cd.health ?? 100;
-    this.colonist.suitO2 = cd.suitO2 ?? SUIT_O2_CAPACITY;
-    this.colonist.inside = cd.inside ?? true;
-    this.colonist.shelterId = cd.shelterId ?? 0;
-    this.colonist.order = (cd.order as ColonistOrder) ?? { type: 'shelter' };
-    this.colonist.dead = !!cd.dead;
+    this.colonist.heading = (cd as { heading?: number }).heading ?? 0;
+    this.colonist.health = (cd as { health?: number }).health ?? 100;
+    this.colonist.suitO2 = (cd as { suitO2?: number }).suitO2 ?? SUIT_O2_CAPACITY;
+    this.colonist.inside = (cd as { inside?: boolean }).inside ?? true;
+    this.colonist.shelterId = (cd as { shelterId?: number }).shelterId ?? 0;
+    this.colonist.order = (cd as { order?: ColonistOrder }).order ?? { type: 'shelter' };
+    this.colonist.dead = !!(cd as { dead?: boolean }).dead;
 
     this.storedKWh = clamp(data.storedKWh ?? 0, 0, this.batteryCapacity());
     this.power = idlePower(this.batteryCapacity(), this.storedKWh);
@@ -4537,116 +4195,6 @@ export class Simulation {
     for (const d of this.world.deposits) maxId = Math.max(maxId, d.id + 1);
     this.nextId = maxId;
   }
-}
-
-// ------------------------------------------------- save helpers (P4) ----
-
-/**
- * Validate one task out of a (possibly untrusted) save: shape-check every
- * field and drop anything malformed rather than executing it (TDD §24).
- */
-function coerceTask(t: any): RoverTask | null {
-  if (!t || typeof t.type !== 'string') return null;
-  switch (t.type) {
-    case 'moveTo':
-      return Number.isFinite(t.x) && Number.isFinite(t.z)
-        ? { type: 'moveTo', x: t.x, z: t.z }
-        : null;
-    case 'mine':
-      return Number.isFinite(t.depositId)
-        ? { type: 'mine', depositId: t.depositId, ...(t.repeat ? { repeat: true } : {}) }
-        : null;
-    case 'construct':
-    case 'clean':
-    case 'repair':
-      return Number.isFinite(t.buildingId) ? { type: t.type, buildingId: t.buildingId } : null;
-    case 'recover':
-      return Number.isFinite(t.roverId)
-        ? {
-            type: 'recover',
-            roverId: t.roverId,
-            ...(Number.isFinite(t.give) ? { give: t.give, given: t.given ?? 0 } : {}),
-          }
-        : null;
-    case 'salvage':
-      return Number.isFinite(t.poiId) ? { type: 'salvage', poiId: t.poiId } : null;
-    case 'unload':
-      return { type: 'unload' };
-    case 'wait':
-      return { type: 'wait', seconds: Math.max(0, Number(t.seconds) || 0) };
-    default:
-      return null;
-  }
-}
-
-/**
- * v3 → v4 (Prototype 4). What changed: rovers grew a task queue, drivetrain
- * condition and automation rules; buildings (garages) grew an assembly slot.
- * Old rovers had a single `command` — it becomes the one task in the queue —
- * and the old `autoHaul` flag carries over as the matching rule. From there
- * the v4 → v5 step adds the position-lights switch.
- */
-function migrateV3Save(data: any): any {
-  const d: any = { ...data, version: 4 };
-  d.rovers = (data.rovers ?? []).map((r: any) => {
-    const rules = defaultRoverRules();
-    rules.autoHaul = r.autoHaul !== false;
-    return { ...r, pending: [], condition: 100, rules };
-  });
-  d.buildings = (data.buildings ?? []).map((b: any) => ({ ...b, assembly: null }));
-  return migrateV4Save(d);
-}
-
-/**
- * v4 → v5. Rovers grew position lights: a player switch that the sim honours
- * automatically at night and in blowing dust. Every existing rover is
- * assumed to have shipped with the switch armed.
- */function migrateV4Save(data: any): any {
-  const d: any = { ...data, version: 5 };
-  d.rovers = (data.rovers ?? []).map((r: any) => ({ ...r, lightsOn: r.lightsOn !== false }));
-  return migrateV5Save(d);
-}
-
-/**
- * v5 → v6. Colonies gained a difficulty, a world size, a chosen landing
- * region and advanced world options. Older saves predate the mission wizard,
- * so they land on the classic defaults: Pioneer, medium claim, random site.
- */
-function migrateV5Save(data: any): any {
-  return migrateV6Save({
-    ...data,
-    version: 6,
-    difficulty: 'pioneer',
-    worldHalf: 640,
-    region: null,
-    worldOptions: { ...DEFAULT_WORLD_OPTIONS },
-  });
-}
-
-/**
- * v6 → v7. Colonies gained an explorable planet: scattered points of interest
- * (GDD §06) and Earth cargo missions on a schedule (GDD §10).
- *
- * Neither has a v6 equivalent, so an older save simply has not found anything
- * yet: the sites are regenerated from the seed on restore (`World` scatters them
- * in its constructor and `restore` only replaces the list when the save carries
- * one), and the drop schedule is re-rolled from the launch window. A colony
- * saved before the feature existed therefore behaves exactly as it did, plus a
- * planet with somewhere to go.
- */
-function migrateV6Save(data: any): any {
-  return migrateV7Save({ ...data, version: 7 });
-}
-
-/**
- * v7 → v8. The weather block gains lightning state (a seeded strike RNG and a
- * difficulty-scaled frequency multiplier). Both are optional on restore with
- * seed-derived / difficulty-derived defaults, so the migration itself only has
- * to bump the version — an older save keeps its sky and simply gains the new
- * storm hazard.
- */
-function migrateV7Save(data: any): any {
-  return { ...data, version: SAVE_VERSION };
 }
 
 export { colonistStatusText };

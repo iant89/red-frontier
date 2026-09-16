@@ -154,6 +154,67 @@ Persistent notes for future coding sessions.
   puts the stage's top closer to the directional light than the old near plane,
   which clipped its shadow.
 
+## Milestone 1 — deterministic state hash (StateHash)
+
+- `src/sim/debug/StateHash.ts`: `hashSimulation(sim)` → `rf1-<14hex>-<14hex>`
+  (two cyrb53 lanes over canonical-JSON — keys sorted, entity arrays sorted
+  by id). **A 53-bit hash needs 14 hex digits** — padStart(13) was a real
+  bug caught by the format test; keep the `{14}` in the regex.
+- Hashes **live state, deliberately not `snapshot()`** — so a persistence bug
+  can't hide behind the tool that polices it, and Phase 3's codec rework
+  won't churn the hash. Consequence: a live sim and its just-restored twin
+  do **not** hash equal — restore resumes rovers/buildings *at rest*
+  (goal/nav/chargeSat/history reset by design). Compare restored-vs-restored,
+  or compare after both advance. `tests/sim/state-hash.test.ts` pins this.
+- Excluded on purpose (would churn without behavior change): `statusText`,
+  `idleReason`, rover `label`, colonist `name`; also unobservable: `remainder`
+  and the `dropRng` closure counter (a dropRng divergence surfaces one roll
+  later as a real `nextDropSol`/drop diff, which *is* hashed).
+- Sensitivity-test pattern: restore by **captured exact value**, never by
+  inverse arithmetic — `x + 0.1; x - 0.1` leaves float residue and the
+  back-to-baseline assert fails.
+- The hash module is imported only by tests: it tree-shakes out of the app
+  bundle (build size unchanged). If you ever wire it into dev tooling,
+  remember it becomes bundle weight.
+
+## Milestone 1 — remaining pieces (Profiler, Save validation, Transcripts)
+
+- `src/sim/debug/Profiler.ts`: dev-only diagnostics with process-wide switch
+  (`setProfilerEnabled`, default off, enabled in `tests/harness.ts`). Counters:
+  ticks, pathfinds (`NavGrid.findPath`), commands (`applyCommand`), workerMessages
+  (`WorkerSimHost.post` + `workerRuntime` send wrapper), viewGenerations + timing
+  (`projectView`). `Simulation.step()` measures batch time via `performance.now()`.
+  `snapshot(sim)` reports tick, simTime, realMs, entities/rovers/buildings/deposits/pois,
+  activeTasks (non-idle command or pending), pathfinds, commands, workerMessages,
+  viewGenerations, stepTimeMs/viewTimeMs and averages. `report(sim)` adds summary +
+  table identical to roadmap's example. Observationally inert (same snapshot with
+  profiler on/off). Tree-shakes out of bundle when not imported.
+  `tests/sim/profiler.test.ts` (10 checks) pins counters, timing, reset, report format,
+  inertness.
+
+- `tests/sim/save-validation.test.ts` (26 checks): malformed-save suite covering
+  Phase 3 requirements — empty save, missing version, unsupported version, non-object,
+  invalid task shapes (coerced to idle), pending queue filtering, invalid building/
+  rover/poi refs, negative storage flagged by invariants, fluid clamping, battery/cargo
+  bounds, missing arrays defaulting, corrupt weather fallback, lightningMul fallback,
+  invalid poi kind filtering, reservedBy coercion, plus v3→v8 historical migrations
+  and round-trip determinism after migration. Uses `checkInvariants` for negative cases.
+
+- `src/sim/debug/Transcript.ts`: transcript format `{ seed, difficulty?, worldHalf?,
+  region?, worldOptions?, commands: [{ tick, command }], durationTicks? }` where tick
+  is Simulation ticks (SIM_TICK = 1/20s). `replayTranscript()` sorts by tick,
+  delivers tick-0 pre-tick, fixed-step loop, deterministic. `TranscriptBuilder`
+  ergonomic helper, `validateTranscript()` shape errors, `canonicalTranscriptJson()`
+  sorted-keys JSON for stable hashing. `tests/sim/transcript.test.ts` (12 checks):
+  validation, canonical stability, same-transcript identical hash (via StateHash),
+  different seed/commands diverge, building placement, mining haul, builder ergonomics,
+  empty transcript, manual vs transcript replay (ticks = round(20*240*sols)), hash pinning
+  `rf1-…` format. Intended use for refactor policing: pin hash before extraction, compare after.
+
+- Milestone 1 is now **complete** (48 suites / 471 checks green). Next per roadmap §51
+  is Phase 2 — ColonyState, then Phase 3 — Persistence as first major extraction.
+  Recorded in roadmap §58 "Recorded (Milestone 1 complete)".
+
 ## Refactor Phase 1 (invariants) — the loud-state era
 
 - `src/sim/debug/SimulationAssertions.ts` is the Phase 1 deliverable: pure

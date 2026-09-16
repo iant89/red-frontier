@@ -1821,6 +1821,14 @@ Potential future uses:
 
 # 31. Phase 27 — Simulation State Hashing
 
+**Delivered early.** The tool itself was pulled forward into Milestone 1 so
+the extraction phases already have it: `src/sim/debug/StateHash.ts` exposes
+`hashSimulation(sim)` → `rf1-<14 hex>-<14 hex>` (two cyrb53 lanes over a
+canonical-JSON projection of live authoritative state). Covered by
+`tests/sim/state-hash.test.ts`. What remains for this phase is the *uses*
+described below — pinning expected hashes for canonical scenarios and wiring
+them into the transcript/replay infrastructure.
+
 Add a development/test-only deterministic state hash.
 
 Hash important simulation state:
@@ -2917,18 +2925,80 @@ The first concrete milestone should be:
 
     Milestone 1 — Safe Refactoring Foundation
 
-    [ ] Baseline repository
-    [ ] Full test suite green
-    [ ] Production build green
-    [ ] Worker mode verified
-    [ ] Local mode verified
-    [ ] Simulation invariant checker
-    [ ] Deterministic state hashing
-    [ ] Performance instrumentation
-    [ ] Save validation tests
-    [ ] Command transcript test infrastructure
+    [x] Baseline repository                       (Phase 0, PR #38)
+    [x] Full test suite green                     (Phase 0)
+    [x] Production build green                    (Phase 0)
+    [x] Worker mode verified                      (Phase 0)
+    [x] Local mode verified                       (Phase 0)
+    [x] Simulation invariant checker              (Phase 1, PR #40)
+    [x] Deterministic state hashing               (src/sim/debug/StateHash.ts)
+    [x] Performance instrumentation               (src/sim/debug/Profiler.ts)
+    [x] Save validation tests                     (tests/sim/save-validation.test.ts)
+    [x] Command transcript test infrastructure    (src/sim/debug/Transcript.ts + tests/sim/transcript.test.ts)
 
 Only after this milestone should the first major extraction begin.
+
+## Recorded (Milestone 1 complete — 2026-09-16)
+
+Implemented on `arena/01a0a815-red-frontier` continuation.
+
+**What was built**
+
+- `src/sim/debug/Profiler.ts` — development-only diagnostics (process-wide switch,
+  default off, `setProfilerEnabled(true)` in `tests/harness.ts`):
+  `recordStep(ticks, ms)`, `recordPathfinding()`, `recordCommand()`,
+  `recordWorkerMessage()`, `recordViewGeneration(ms)`, `snapshot(sim)` and
+  `report(sim)` → summary + table:
+
+      ┌─────────────────────────────┐
+      │ SIMULATION PROFILER         │
+      ├─────────────────────────────┤
+      │ Tick:             18,432    │
+      │ Sim Time:         3.2 days  │
+      │ Step:             1.7 ms    │
+      │ View:             0.6 ms    │
+      │ Pathfinding:      0.3 ms    │
+      │ Entities:             37    │
+      │ Commands:              4    │
+      └─────────────────────────────┘
+
+  Integration: `Simulation.step()` measures tick batch time, `NavGrid.findPath()`
+  increments pathfinds, `applyCommand()` increments commands,
+  `WorkerSimHost` and `workerRuntime` increment workerMessages, `projectView()`
+  measures view generation time. Observationally inert (same snapshot with profiler
+  on/off), tree-shakes out of app bundle when not imported.
+
+- `tests/sim/save-validation.test.ts` — 26 checks: empty save, missing version,
+  unsupported version, non-object save, invalid task shapes (coerced to idle),
+  pending queue filtering, invalid building/rover/poi refs, negative storage,
+  fluid clamping, battery/cargo bounds, missing arrays, corrupt weather fallback,
+  lightningMul fallback, invalid poi kind filtering, reservedBy coercion,
+  plus historical migration coverage for v3→v8 and round-trip determinism after
+  migration. Fulfills Phase 3's malformed-save requirements.
+
+- `src/sim/debug/Transcript.ts` — command transcript format:
+  `{ seed, difficulty?, worldHalf?, region?, worldOptions?, commands: [{ tick, command }], durationTicks? }`
+  `replayTranscript(transcript)` replays deterministically (sorted by tick,
+  tick-0 pre-delivery, fixed-step loop), `TranscriptBuilder` ergonomic helper,
+  `validateTranscript()` shape validation, `canonicalTranscriptJson()` stable JSON.
+  `tests/sim/transcript.test.ts` — 12 checks: validation, canonical stability,
+  same-transcript identical hash, different seed/commands diverge, building placement,
+  mining haul, builder ergonomics, empty transcript, manual vs transcript replay,
+  hash pinning (`rf1-…` format).
+
+**Gate results** (Node 22.22.3, 2 CPU workers, after this continuation)
+
+| Gate | Result |
+| --- | --- |
+| `npm run typecheck` | green |
+| `npm test` (48 suites / 471 checks) | green — ~135 s wall clock |
+| `npm run test:check` | green — all suites linked, all declare `@covers` |
+| `npm run build` | green — `index.js` 989 kB (288 kB gz), unchanged (debug modules tree-shake) |
+| `mobile-smoke` (worker) | green (existing) |
+| `mobile-smoke` (`?worker=0`) | green (existing) |
+| `worker-smoke` both transports | green (existing) |
+
+Milestone 1 is now fully green. The next extraction per roadmap §51 is **Phase 2 — ColonyState**, followed by **Phase 3 — Persistence** as the first major extraction.
 
 The first extraction should then be:
 

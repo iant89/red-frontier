@@ -8,6 +8,7 @@
  */
 
 import { WORLD_HALF, SPAWN_RADIUS } from './config';
+import { getProfiler } from './debug/Profiler';
 
 export const NAV_CELL = 8;
 /** Rise/run above this over one cell is a drop-off, not a ramp. */
@@ -109,6 +110,7 @@ export class NavGrid {
 
   /** A* on walkable, reachable cells. Snaps the goal to the nearest driveable cell. */
   findPath(ax: number, az: number, bx: number, bz: number): NavPoint[] | null {
+    getProfiler().recordPathfinding();
     const n = this.n;
     let si = this.clampI(this.toI(ax));
     let sj = this.clampI(this.toI(az));

@@ -34,6 +34,7 @@ import type { NewGameConfig } from '../sim/difficulty';
 import { AudioSystem } from '../audio/AudioSystem';
 import { BUILD_COMMIT, shortSha } from '../ui/BuildStatus';
 import { UpdateCheck, updateCheckIntervalOverride } from './UpdateCheck';
+import { getProfiler, resetProfiler, setProfilerEnabled } from '../sim/debug/Profiler';
 
 void SAVE_VERSION;
 
@@ -377,6 +378,10 @@ export class Game {
     this.hud.setDevActive(false);
     this.hud.setBuild(null);
     this.lastAuto = performance.now();
+    // Profiler is development-only diagnostics (Milestone 1): reset on every
+    // launch, disabled until dev mode is turned on. Tests enable it via harness.
+    resetProfiler();
+    setProfilerEnabled(false);
     this.renderer = new GameRenderer(this.canvas, host.view.world);
     this.renderer.setOverlay(this.hud.overlay as OverlayMode);
     this.rig = new CameraRig(this.renderer.camera, host.view.world.half);
@@ -886,17 +891,39 @@ export class Game {
     if (on === this.dev.enabled) return;
     if (on) {
       this.dev.enable();
+      // Milestone 1 profiler: enable diagnostics when dev mode is on.
+      // Expose via window for console inspection (dev-only, tree-shakes in prod if unused).
+      setProfilerEnabled(true);
+      resetProfiler();
+      try {
+        (window as any).profiler = getProfiler();
+        (window as any).profilerReport = () => {
+          const rep = getProfiler().report();
+          console.log(rep.summary);
+          console.log(rep.table);
+          return rep;
+        };
+      } catch {
+        /* headless */
+      }
     } else {
       // Every modifier stops dead: pins released, any armed spawn disarmed.
       this.setArmedSpawn(null);
       this.dev.disable();
+      setProfilerEnabled(false);
+      try {
+        delete (window as any).profiler;
+        delete (window as any).profilerReport;
+      } catch {
+        /* headless */
+      }
     }
     this.devPanel.setEnabled(on);
     this.hud.setDevActive(on);
     this.hud.addLog(
       'info',
       on
-        ? '🛠 Developer mode ON — world edits are live and stay out of the save file.'
+        ? '🛠 Developer mode ON — world edits are live and stay out of the save file. Profiler enabled (window.profilerReport()).'
         : '🛠 Developer mode OFF — modifiers released.',
     );
     this.syncUI(true);
