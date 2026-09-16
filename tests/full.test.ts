@@ -19,6 +19,7 @@ import './sim/world.test';
 import './sim/setup.test';
 import './sim/clock.test';
 import './sim/invariants.test';
+import './sim/state-hash.test';
 import './sim/life-support.test';
 import './sim/colony.test';
 import './sim/soak.test';
@@ -60,4 +61,4 @@ import './hud/worldmap.test';
 
 // Each suite prints one line as it runs; `report` prints the total, every
 // failure, and exits non-zero if anything broke.
-report(44);
+report(45);
