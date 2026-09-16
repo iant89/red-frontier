@@ -25,11 +25,13 @@ import './sim/profiler.test';
 import './sim/save-validation.test';
 import './sim/transcript.test';
 import './sim/life-support.test';
+import './sim/life-support-system.test';
 import './sim/colony.test';
 import './sim/soak.test';
 import './sim/build.test';
 import './sim/grid.test';
 import './sim/power-system.test';
+import './sim/production-system.test';
 import './sim/alerts.test';
 import './sim/weather.test';
 import './sim/weather-system.test';
@@ -67,4 +69,4 @@ import './hud/worldmap.test';
 
 // Each suite prints one line as it runs; `report` prints the total, every
 // failure, and exits non-zero if anything broke.
-report(49);
+report(53);

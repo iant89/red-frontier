@@ -31,11 +31,6 @@ import {
   SOL_SECONDS,
   POD_BATTERY_KWH,
   POD_RADIUS,
-  COLONIST_SPEED,
-  COLONIST_BUILD_POWER,
-  COLONIST_O2_PER_SOL,
-  COLONIST_WATER_PER_SOL,
-  COLONIST_FOOD_PER_SOL,
   SUIT_O2_CAPACITY,
   HISTORY_SAMPLES,
   HISTORY_INTERVAL_S,
@@ -120,12 +115,6 @@ import { stormLabel } from './weather';
 import type { Weather, StormKind, StormKindReal } from './weather';
 import type { PowerResult } from './power';
 import {
-  makePools,
-  makeColonist,
-  applyColonistNeeds,
-  addFluid,
-  takeFluid,
-  fluidHeadroom,
   colonistStatusText,
   type Colonist,
   type ColonistOrder,
@@ -140,6 +129,8 @@ import type { SaveState } from './persistence/SaveSchema';
 import { ClockSystem } from './systems/ClockSystem';
 import { WeatherSystem, type WeatherHostHooks } from './systems/WeatherSystem';
 import { PowerSystem, type PowerSystemContext } from './systems/PowerSystem';
+import { ProductionSystem } from './systems/ProductionSystem';
+import { LifeSupportSystem, type LifeSupportHostHooks } from './systems/LifeSupportSystem';
 
 // Phase 2 — state extraction
 import {
@@ -199,16 +190,25 @@ export class Simulation {
   };
 
   /**
-   * The production-domain questions PowerSystem asks while building its
-   * demand list and applying its result (Phase 6 seam). Answered by the
-   * machinery that already lives here so nothing is duplicated;
-   * ProductionSystem (Phase 8) will absorb the implementor, not the
-   * contract — the same shape as {@link weatherHooks}.
+   * Phase 8: the production-domain answers PowerSystem needs now live in
+   * ProductionSystem. Simulation only wires the context; the implementor
+   * is no longer here. Same shape as {@link weatherHooks}.
    */
   private readonly powerContext: PowerSystemContext = {
-    desiredThroughput: (b) => this.desiredThroughput(b),
-    runProcess: (b, throughput, hours) => this.runProcess(b, throughput, hours),
-    processBlockReason: (b) => this.processBlockReason(b),
+    desiredThroughput: (b) => ProductionSystem.desiredThroughput(this.state, b),
+    runProcess: (b, throughput, hours) => ProductionSystem.runProcess(this.state, b, throughput, hours),
+    processBlockReason: (b) => ProductionSystem.processBlockReason(this.state, b),
+  };
+
+  /**
+   * Cross-domain effects LifeSupportSystem triggers but does not own
+   * (Phase 7 seam). Death ends the mission (FailureSystem, Phase 15);
+   * assisting construction completes a building (ConstructionSystem,
+   * Phase 9). Same shape as {@link weatherHooks} / {@link powerContext}.
+   */
+  private readonly lifeSupportHooks: LifeSupportHostHooks = {
+    endMission: (reason) => this.endMission(reason),
+    completeBuilding: (b) => this.completeBuilding(b),
   };
 
   constructor(params: {
@@ -442,22 +442,8 @@ export class Simulation {
 
   /** Every pressurised volume the colonist could shelter in (pod is id 0). */
   shelters(): Array<{ id: number; x: number; z: number; radius: number; recycles: boolean }> {
-    const out = [
-      { id: 0, x: SPAWN_X, z: SPAWN_Z, radius: POD_RADIUS, recycles: false },
-    ];
-    for (const b of this.buildings) {
-      if (!this.runnable(b)) continue;
-      const def = BUILDINGS[b.kind];
-      if (!def.pressurized) continue;
-      out.push({
-        id: b.id,
-        x: b.x,
-        z: b.z,
-        radius: def.radius,
-        recycles: b.kind === 'habitat' && b.enabled,
-      });
-    }
-    return out;
+    // Phase 7: the shelter map lives in LifeSupportSystem
+    return LifeSupportSystem.shelters(this.state);
   }
 
   depositAt(x: number, z: number): { d: Deposit; reach: number } | null {
@@ -984,35 +970,8 @@ export class Simulation {
   }
 
   orderColonist(order: ColonistOrder): void {
-    const c = this.colonist;
-    if (c.dead) return;
-    if (order.type === 'moveTo') {
-      /**
-       * Refuse an EVA the suit cannot survive. The colonist carries a fixed
-       * oxygen reserve, so there is a hard radius beyond which walking out is
-       * simply suicide — the sim should say so rather than let the player
-       * discover it by killing their only human.
-       */
-      const from = this.nearestShelter(order.x, order.z);
-      const legDist = Math.hypot(order.x - from.x, order.z - from.z);
-      const solsOfSuit = c.suitO2 / COLONIST_O2_PER_SOL;
-      const reach = solsOfSuit * SOL_SECONDS * COLONIST_SPEED * 0.45;
-      if (legDist > reach) {
-        this.event(
-          'warn',
-          `Too far for an EVA — ${c.name}'s suit holds about ${Math.round(reach)} m of round trip.`,
-        );
-        return;
-      }
-      // A dust storm is the other hard no: visibility gone, grit in the seals.
-      if (this.weather.blocksEVAAt(c.x, c.z)) {
-        this.event('warn', 'EVA refused — the storm is too severe to go outside.');
-        return;
-      }
-      c.gx = order.x;
-      c.gz = order.z;
-    }
-    c.order = order;
+    // Phase 7: EVA range, weather refusal and the order itself live in LifeSupportSystem
+    LifeSupportSystem.order(this.state, order);
   }
 
   // -------------------------------------------------------- placement ----
@@ -1356,7 +1315,8 @@ export class Simulation {
     this.tickGarages();
 
     // 5. life support & the human
-    this.tickLifeSupport();
+    // Phase 7: delegated to LifeSupportSystem
+    LifeSupportSystem.tick(this.state, this.lifeSupportHooks);
 
     // 6/7/8. logistics, jobs, movement, construction
     this.tickSiteLogistics();
@@ -1373,7 +1333,7 @@ export class Simulation {
       if (r.phase === 'disabled') continue;
       this.moveRover(r);
     }
-    this.tickColonistMovement();
+    LifeSupportSystem.tickColonist(this.state, this.lifeSupportHooks);
 
     // 9. failure checks, alerts, history
     this.evaluateAlerts();
@@ -1593,11 +1553,12 @@ export class Simulation {
   }
 
   // ------------------------------------------------------------ power ----
-  // Phase 6: the grid tick (input -> resolver -> output) lives in
-  // systems/PowerSystem.ts — Simulation passes the state plus the
-  // production-domain context. The garage bay (service + assembly), which
-  // *consumes* powerSat rather than resolving it, stays here until its owning
-  // phase extracts it.
+  // Phase 6: the grid tick lives in systems/PowerSystem.ts.
+  // Phase 8: the production-domain answers (desiredThroughput / runProcess /
+  // processBlockReason) live in systems/ProductionSystem.ts — Simulation
+  // only wires them into PowerSystemContext. The garage bay (service +
+  // assembly), which *consumes* powerSat rather than converting mass, stays
+  // here until its owning phase extracts it.
 
   /**
    * Rover garages (P4): service the drivetrains of anything parked in the bay
@@ -1633,163 +1594,12 @@ export class Simulation {
     }
   }
 
-  /**
-   * How hard a process wants to run this tick, 0..1, considering only its
-   * inputs and its output headroom — power is applied separately.
-   */
-  private desiredThroughput(b: Building): number {
-    const def = BUILDINGS[b.kind];
-    if (!def.process) return def.powerDrawKw > 0 ? 1 : 0;
-    const hours = SIM_TICK * HOURS_PER_SEC;
-    const p = def.process;
-    // An upgraded line moves mul× the mass per hour, so its *want* is gated
-    // against the multiplied rates too — the gate and the flow must agree.
-    const mul = devLevelMul(b.level);
-    let factor = 1;
-
-    if (p.solidIn) {
-      for (const res of ALL_RESOURCES) {
-        const rate = p.solidIn[res];
-        if (!rate) continue;
-        const need = rate * mul * hours;
-        factor = Math.min(factor, need > 0 ? this.storage[res] / need : 1);
-      }
-    }
-    if (p.fluidIn) {
-      for (const f of ALL_FLUIDS) {
-        const rate = p.fluidIn[f];
-        if (!rate) continue;
-        const need = rate * mul * hours;
-        factor = Math.min(factor, need > 0 ? this.pools.amounts[f] / need : 1);
-      }
-    }
-    if (p.fluidOut) {
-      for (const f of ALL_FLUIDS) {
-        const rate = p.fluidOut[f];
-        if (!rate) continue;
-        const make = rate * mul * hours;
-        factor = Math.min(factor, make > 0 ? fluidHeadroom(this.pools, f) / make : 1);
-      }
-    }
-    if (p.needsLight) {
-      // Crops slow to a crawl in the dark rather than stopping dead — grow
-      // lamps keep a trickle going, which is what the power draw is for.
-      // The panels' own dust film does not matter here (the crops are inside),
-      // but the sky's ambient dust absolutely does.
-      const light = 0.15 + 0.85 * clamp(this.clock.sun.irradiance * this.dustTransmission, 0, 1);
-      factor = Math.min(factor, light);
-    }
-    return clamp(factor, 0, 1);
-  }
-
-  /** Why a process with power is still not running. */
-  private processBlockReason(b: Building): string {
-    if (b.damaged) return 'Damaged — needs repair';
-    const def = BUILDINGS[b.kind];
-    const p = def.process;
-    if (!p) return '';
-    if (p.solidIn) {
-      for (const res of ALL_RESOURCES) {
-        if (p.solidIn[res] && this.storage[res] <= 1e-6) {
-          return `Out of ${RESOURCES[res].label}`;
-        }
-      }
-    }
-    if (p.fluidIn) {
-      for (const f of ALL_FLUIDS) {
-        if (p.fluidIn[f] && this.pools.amounts[f] <= 1e-6) {
-          return `Out of ${FLUIDS[f].label}`;
-        }
-      }
-    }
-    if (p.fluidOut) {
-      for (const f of ALL_FLUIDS) {
-        if (p.fluidOut[f] && fluidHeadroom(this.pools, f) <= 1e-6) {
-          return `${FLUIDS[f].label} tanks full`;
-        }
-      }
-    }
-    if (p.needsLight && this.clock.sun.irradiance < 0.02) return 'Waiting for daylight';
-    return 'Idle';
-  }
-
-  /** Move mass through a process at `rate` (0..1) for `hours` Mars hours. */
-  private runProcess(b: Building, rate: number, hours: number): void {
-    const p = BUILDINGS[b.kind].process!;
-    const perSol = 1 / (hours <= 0 ? 1 : hours) / (SIM_TICK * SOLS_PER_SEC ? 1 : 1);
-    void perSol;
-
-    // A developer-mode upgraded line converts more mass for the same power.
-    const mul = devLevelMul(b.level);
-
-    if (p.solidIn) {
-      for (const res of ALL_RESOURCES) {
-        const r = p.solidIn[res];
-        if (!r) continue;
-        const take = r * mul * rate * hours;
-        this.storage[res] = Math.max(0, this.storage[res] - take);
-      }
-    }
-    if (p.fluidIn) {
-      for (const f of ALL_FLUIDS) {
-        const r = p.fluidIn[f];
-        if (!r) continue;
-        const got = takeFluid(this.pools, f, r * mul * rate * hours);
-        this.flows[f].consumed += got;
-      }
-    }
-    if (p.fluidOut) {
-      for (const f of ALL_FLUIDS) {
-        const r = p.fluidOut[f];
-        if (!r) continue;
-        const made = addFluid(this.pools, f, r * mul * rate * hours);
-        this.flows[f].produced += made;
-      }
-    }
-  }
-
   // ----------------------------------------------------- life support ----
-
-  private tickLifeSupport(): void {
-    // Difficulty appetite: a Survivor crew burns through stores faster.
-    const sols = SIM_TICK * SOLS_PER_SEC * this.consumptionMul;
-    const c = this.colonist;
-    if (c.dead) return;
-
-    // Which shelter (if any) is the colonist inside?
-    let inside = false;
-    let shelterId = -1;
-    let recycles = false;
-    for (const s of this.shelters()) {
-      if (Math.hypot(s.x - c.x, s.z - c.z) <= s.radius + 1.5) {
-        inside = true;
-        shelterId = s.id;
-        recycles = s.recycles;
-        break;
-      }
-    }
-    const wasInside = c.inside;
-    c.inside = inside;
-    c.shelterId = inside ? shelterId : -1;
-    if (wasInside && !inside) {
-      this.event('info', `${c.name} has gone EVA. Suit O₂ reserve: ${(c.suitO2 * 60 / COLONIST_O2_PER_SOL / 24.66).toFixed(0)} min.`);
-    } else if (!wasInside && inside) {
-      this.event('ok', `${c.name} is back inside and repressurised.`);
-    }
-
-    const before = { ...this.pools.amounts };
-    const outcome = applyColonistNeeds(c, this.pools, sols, recycles);
-    void before;
-
-    this.flows.oxygen.consumed += COLONIST_O2_PER_SOL * sols * outcome.met.oxygen;
-    this.flows.water.consumed += COLONIST_WATER_PER_SOL * sols * outcome.met.water;
-    this.flows.food.consumed += COLONIST_FOOD_PER_SOL * sols * outcome.met.food;
-    this.flows.water.produced += outcome.reclaimed;
-
-    if (c.dead && !this.gameOver) {
-      this.endMission(`${c.name} did not survive.`);
-    }
-  }
+  // Phase 7: the fluid draw, shelter occupancy, EVA orders, colonist motion
+  // and colonist/fluid restore live in systems/LifeSupportSystem.ts —
+  // Simulation passes the state plus the cross-domain hooks. Alerts that
+  // *report* life-support state (low O₂, colonist health) stay in
+  // evaluateAlerts until AlertSystem (Phase 16) extracts them.
 
   private endMission(reason: string): void {
     this.gameOver = { reason, sol: this.clock.sol + 1 };
@@ -1801,112 +1611,6 @@ export class Simulation {
       this.simTime,
       this.clock.format(),
     );
-  }
-
-  // --------------------------------------------------- colonist motion ----
-
-  private tickColonistMovement(): void {
-    const c = this.colonist;
-    if (c.dead) {
-      c.activity = 'incapacitated';
-      return;
-    }
-
-    // Out of suit oxygen? Override any order and run for the nearest airlock.
-    const suitCritical = !c.inside && c.suitO2 <= SUIT_O2_CAPACITY * 0.25;
-    if (suitCritical && c.order.type !== 'shelter') {
-      c.order = { type: 'shelter' };
-      this.event('crit', `${c.name}'s suit reserve is critical — aborting EVA.`);
-    }
-
-    // A storm rolling in does the same: nobody is outside in a severe storm.
-    if (!c.inside && this.weather.blocksEVAAt(c.x, c.z) && c.order.type !== 'shelter') {
-      c.order = { type: 'shelter' };
-      this.event('crit', `${c.name} recalled — the storm is too severe to stay outside.`);
-    }
-
-    let tx = c.x;
-    let tz = c.z;
-    let arriveActivity: Colonist['activity'] = 'sheltered';
-
-    switch (c.order.type) {
-      case 'shelter': {
-        const s = this.nearestShelter(c.x, c.z);
-        tx = s.x;
-        tz = s.z;
-        arriveActivity = 'sheltered';
-        break;
-      }
-      case 'moveTo':
-        tx = c.order.x;
-        tz = c.order.z;
-        // Standing at the destination is a valid state: the colonist waits
-        // there (on suit reserves) until told otherwise or the suit forces an
-        // abort. Silently drifting home would make EVA orders feel ignored.
-        arriveActivity = 'walking';
-        break;
-      case 'assist': {
-        const b = this.buildingById(c.order.buildingId);
-        if (!b || b.state === 'online') {
-          c.order = { type: 'shelter' };
-          return;
-        }
-        tx = b.x;
-        tz = b.z;
-        arriveActivity = 'assisting';
-        break;
-      }
-    }
-
-    const dx = tx - c.x;
-    const dz = tz - c.z;
-    const dist = Math.hypot(dx, dz);
-    const arriveAt =
-      c.order.type === 'assist'
-        ? BUILDINGS[
-            this.buildingById((c.order as { buildingId: number }).buildingId)?.kind ?? 'habitat'
-          ].radius + 3
-        : c.order.type === 'shelter'
-          ? 1.5
-          : ARRIVE_EPS;
-
-    if (dist > arriveAt) {
-      const stepLen = COLONIST_SPEED * SIM_TICK;
-      const ux = dx / dist;
-      const uz = dz / dist;
-      c.x += ux * Math.min(stepLen, dist);
-      c.z += uz * Math.min(stepLen, dist);
-      c.heading = lerpAngle(c.heading, Math.atan2(ux, uz), 0.2);
-      c.activity = c.order.type === 'shelter' ? 'returning' : 'walking';
-    } else {
-      c.activity = arriveActivity;
-      // Assisting the build crew: a real, if modest, contribution.
-      if (c.order.type === 'assist') {
-        const b = this.buildingById(c.order.buildingId);
-        if (b && b.state === 'building' && remainingCostTotal(b) <= 0) {
-          b.progress = Math.min(
-            1,
-            b.progress + (COLONIST_BUILD_POWER * SIM_TICK) / b.buildTime,
-          );
-          if (b.progress >= 1) this.completeBuilding(b);
-        }
-      }
-    }
-    c.y = this.world.heightAt(c.x, c.z);
-  }
-
-  private nearestShelter(x: number, z: number): { x: number; z: number } {
-    const list = this.shelters();
-    let best = list[0];
-    let bestD = Infinity;
-    for (const s of list) {
-      const d = Math.hypot(s.x - x, s.z - z);
-      if (d < bestD) {
-        bestD = d;
-        best = s;
-      }
-    }
-    return { x: best.x, z: best.z };
   }
 
   // -------------------------------------------------- task assignment ----
@@ -3846,27 +3550,8 @@ export class Simulation {
     }
 
     this.recomputeCapacities();
-    this.pools.amounts = { ...emptyFluids(), ...(data.fluids ?? {}) };
-    for (const f of ALL_FLUIDS) {
-      this.pools.amounts[f] = clamp(this.pools.amounts[f], 0, this.pools.capacity[f]);
-    }
-
-    const cd = data.colonist ?? ({} as SaveState['colonist']);
-    this.colonist = makeColonist(
-      (cd as { id?: number }).id ?? 1,
-      (cd as { name?: string }).name ?? 'Cmdr. Vega',
-      (cd as { x?: number }).x ?? SPAWN_X,
-      0,
-      (cd as { z?: number }).z ?? SPAWN_Z,
-    );
-    this.colonist.y = this.world.heightAt(this.colonist.x, this.colonist.z);
-    this.colonist.heading = (cd as { heading?: number }).heading ?? 0;
-    this.colonist.health = (cd as { health?: number }).health ?? 100;
-    this.colonist.suitO2 = (cd as { suitO2?: number }).suitO2 ?? SUIT_O2_CAPACITY;
-    this.colonist.inside = (cd as { inside?: boolean }).inside ?? true;
-    this.colonist.shelterId = (cd as { shelterId?: number }).shelterId ?? 0;
-    this.colonist.order = (cd as { order?: ColonistOrder }).order ?? { type: 'shelter' };
-    this.colonist.dead = !!(cd as { dead?: boolean }).dead;
+    // Phase 7: fluid clamp + colonist rebuild delegated to LifeSupportSystem
+    LifeSupportSystem.restore(this.state, data.fluids, data.colonist);
 
     // Phase 6: grid rebuild delegated to PowerSystem
     PowerSystem.restore(this.state, data.storedKWh);

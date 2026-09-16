@@ -988,6 +988,66 @@ Test:
 
 No life-support logic remains in `Simulation.ts` except orchestration.
 
+## Recorded (Phase 7 complete — 2026-09-16)
+
+Implemented on `arena/01a0abe2-red-frontier`.
+
+**What was built**
+
+- `src/sim/systems/LifeSupportSystem.ts` — the survival pipeline that lived in
+  `Simulation.ts`, moved verbatim behind a state-consuming static API with the
+  same input → resolver → output shape as PowerSystem:
+  - `LifeSupportSystem.tick(state, hooks)` (was `Simulation.tickLifeSupport`):
+    shelter occupancy (`hypot ≤ radius + 1.5`), EVA enter/exit log (suit
+    minutes use the literal `24.66`), `applyColonistNeeds`, flow accounting,
+    death → `hooks.endMission`. Does **not** consult `state.power` — a
+    brownout still consumes, which is current behaviour.
+  - `LifeSupportSystem.tickColonist(state, hooks)` (was
+    `tickColonistMovement`): suit-critical abort (25 %), storm recall via
+    `blocksEVAAt`, walk/assist locomotion, assist → `hooks.completeBuilding`.
+  - `LifeSupportSystem.order(state, order)` (was `orderColonist`): suit-reach
+    refusal (`0.45 ×` round-trip) and storm EVA refusal.
+  - `LifeSupportSystem.shelters` / `nearestShelter` — the pressurised-volume
+    map (pod id 0); `Simulation.shelters()` delegates.
+  - `LifeSupportSystem.restore(state, fluids, colonistSave)` — fluid clamp +
+    colonist rebuild. Takes `unknown`: schema knowledge stays behind the
+    Phase 3 boundary.
+- **`LifeSupportHostHooks`** — the phase's one new seam: `endMission` (failure
+  domain, Phase 15) and `completeBuilding` (construction domain, Phase 9).
+  Simulation implements them against its existing private methods, so there
+  is no second source of truth. Same shape as `WeatherHostHooks` /
+  `PowerSystemContext`.
+- `src/sim/lifesupport.ts` — the pure needs resolver (`applyColonistNeeds`,
+  `makeColonist`) is **untouched**, by design.
+- Alerts that *report* life-support state (low O₂, colonist health) stay in
+  `evaluateAlerts` until AlertSystem (Phase 16) extracts them.
+- `tests/sim/life-support-system.test.ts` (15 checks, linked in
+  `full.test.ts`): exact per-sol draw, Survivor `consumptionMul`, depleted
+  O₂/water/food ladder, EVA burns the suit not the tanks, brownout still
+  consumes, `HEALTH_REGEN` recovery, habitat water reclaim, EVA range and
+  storm refusal/recall, critical-suit abort, death through the hooks seam
+  (system does not latch `gameOver` itself), assist → `completeBuilding`
+  through the hooks, restore clamping, save/restore round trip, two-same-seed
+  determinism.
+
+**Behavior preservation evidence**
+
+A scripted life-support scenario (one sol, EVA out/back, depleted oxygen,
+habitat+extractor+oxygenator+greenhouse chain, storm EVA recall, mid-EVA
+save/restore, critical-suit abort) was hashed at nine checkpoints with
+`StateHash` before the extraction and re-run after: **byte-identical output**.
+The existing `sim/life-support`, `sim/determinism`, `sim/soak` and
+`sim/persistence` suites pass unchanged.
+
+**Gate results** (Node 22, 2 CPU workers)
+
+| Gate | Result |
+| --- | --- |
+| `npm run typecheck` | green |
+| `npm test` (52 suites / 526 checks; was 51/511) | green — 155.0 s wall clock |
+| `npm run test:check` | green — all suites linked, all declare `@covers` |
+| `npm run build` | green — `index.js` 997.8 kB (290 kB gz), `sim.worker` 222.7 kB |
+| pre/post extraction hash baseline | identical at all nine checkpoints |
 
 # 12. Phase 8 — Extract ProductionSystem
 
@@ -1046,6 +1106,58 @@ Test:
 
 Production is independent from Simulation orchestration.
 
+## Recorded (Phase 8 complete — 2026-09-16)
+
+Implemented on `arena/01a0abe2-red-frontier`.
+
+**What was built**
+
+- `src/sim/systems/ProductionSystem.ts` — the three production-domain answers
+  that lived on Simulation, moved verbatim behind a state-consuming static API:
+  - `desiredThroughput(state, b)` — how hard a process wants to run (0..1)
+    from solids, fluids, tank headroom and (for greenhouses) light. Power is
+    applied later by PowerSystem.
+  - `processBlockReason(state, b)` — why a powered process is still idle
+    (damaged, out of an input, tanks full, waiting for daylight).
+  - `runProcess(state, b, rate, hours)` — move the mass; upgrade levels
+    multiply conversion; fluid flows are accounted.
+- **`PowerSystemContext` is unchanged.** Phase 6 left the implementor on
+  Simulation; this phase absorbs it. Simulation only wires:
+  `ProductionSystem.desiredThroughput(this.state, b)` (and the two siblings)
+  into the existing context object. PowerSystem still owns *when* a process
+  runs (satisfaction × want) and *whether* the domain is asked why it is idle
+  ("No power" wins a brownout).
+- Processes stay declarative (`BuildingDef.process` in `sim/defs.ts`). Adding
+  a conversion building still does not require Simulation.ts changes for the
+  conversion itself.
+- `tickGarages` (service + assembly) stays in Simulation — it consumes
+  `powerSat` rather than converting mass.
+- `tests/sim/production-system.test.ts` (12 checks, linked in `full.test.ts`):
+  stocked want=1, missing ice, full tanks, partial-silo scaling, stalled vs
+  completed tick, plate-rate ice→water, oxygenator + light-gated greenhouse
+  (15% crawl at night), developer upgrade multiplier, night brownout
+  (throughput = want × sat), two lines in one tick, idle reasons through the
+  live PowerSystem wiring, two-same-seed determinism.
+
+**Behavior preservation evidence**
+
+A scripted production scenario (extractor at noon, ice→water→oxygen chain,
+greenhouse food, no-ice stall, tanks-full stall, night brownout, level-3
+upgrade, mid-run save/restore, night crop crawl) was hashed at ten
+checkpoints with `StateHash` before the extraction and re-run after:
+**byte-identical output**. The existing `sim/power-system`, `sim/grid`,
+`sim/life-support`, `sim/determinism`, `sim/soak` and `sim/persistence`
+suites pass unchanged.
+
+**Gate results** (Node 22, 2 CPU workers)
+
+| Gate | Result |
+| --- | --- |
+| `npm run typecheck` | green |
+| `npm test` (53 suites / 538 checks; was 52/526) | green — 146.7 s wall clock |
+| `npm run test:check` | green — all suites linked, all declare `@covers` |
+| `npm run build` | green — `index.js` 997.8 kB (290 kB gz), `sim.worker` 222.7 kB |
+| pre/post extraction hash baseline | identical at all ten checkpoints |
 
 # 13. Phase 9 — Extract ConstructionSystem
 

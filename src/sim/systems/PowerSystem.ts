@@ -54,8 +54,8 @@ import {
 
 /**
  * The production-domain questions PowerSystem must ask to build its demand
- * list and apply its result. Implemented by Simulation; ProductionSystem
- * (Phase 8) will absorb the implementor, not the contract.
+ * list and apply its result. Implemented by ProductionSystem (Phase 8);
+ * Simulation only wires the context. The contract did not change.
  */
 export interface PowerSystemContext {
   /** How hard a building's process wants to run this tick, 0..1, ignoring power. */
