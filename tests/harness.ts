@@ -29,7 +29,10 @@ const red = paint(31);
  * browser smokes never pay for it.
  */
 import { setInvariantChecks } from '../src/sim/debug/SimulationAssertions';
+import { setProfilerEnabled, resetProfiler } from '../src/sim/debug/Profiler';
 setInvariantChecks(true);
+setProfilerEnabled(true);
+resetProfiler();
 
 export type CaseFn = () => void | Promise<void>;
 

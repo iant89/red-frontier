@@ -24,14 +24,31 @@ import { decodeCommand } from './protocol';
 import { projectView } from './projection';
 import { runOverlays, type OverlayState } from './overlays';
 import type { HostReply, HostRequest } from './messages';
+import { getProfiler, setProfilerEnabled, resetProfiler } from '../debug/Profiler';
+
+// Development-only: enable profiler in worker so step/pathfinding timing is
+// recorded even when the host is the main thread. The main thread's
+// WorkerSimHost counts messages; the worker counts ticks/pathfinds/commands.
+// In production, the switch stays off (default) so there is zero cost.
+// Tests enable it via harness; dev builds enable it via Game's dev mode toggle
+// (main thread) and via DEV flag here for the worker side.
+if (import.meta.env.DEV) {
+  setProfilerEnabled(true);
+  resetProfiler();
+}
 
 export interface SimRuntime {
   handle(message: HostRequest): void;
 }
 
-export function createSimRuntime(send: (reply: HostReply) => void): SimRuntime {
+export function createSimRuntime(sendRaw: (reply: HostReply) => void): SimRuntime {
   let sim: Simulation | null = null;
   let overlays: OverlayState = {};
+
+  function send(reply: HostReply): void {
+    getProfiler().recordWorkerMessage();
+    sendRaw(reply);
+  }
 
   /**
    * The colony, or a message-shaped error — never an unhandled throw.

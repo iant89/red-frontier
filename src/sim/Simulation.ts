@@ -145,6 +145,7 @@ import {
 } from './lifesupport';
 import { AlertBus, type Severity } from './alerts';
 import { assertInvariants, invariantChecksEnabled } from './debug/SimulationAssertions';
+import { getProfiler, profilerEnabled } from './debug/Profiler';
 
 // --------------------------------------------------------------- types ----
 
@@ -1614,10 +1615,16 @@ export class Simulation {
     }
 
     let ticks = 0;
+    const t0 = profilerEnabled() ? performance.now() : 0;
     while (ticks < owed) {
       this.tick();
       this.ticksRun++;
       ticks++;
+    }
+
+    if (profilerEnabled()) {
+      const dt = performance.now() - t0;
+      getProfiler().recordStep(ticks, dt);
     }
 
     // Refactor roadmap Phase 1: invariant assertions run in tests only — the

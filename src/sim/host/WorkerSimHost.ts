@@ -33,6 +33,7 @@ import type { ViewPayload } from './projection';
 import type { OverlayState } from './overlays';
 import type { SimHost, SimTransport } from './SimHost';
 import type { SimBootParams, SimLogEvent, SimSnapshot, SimView } from './view';
+import { getProfiler } from '../debug/Profiler';
 
 export interface WorkerInit {
   /** Exactly one of these: a fresh colony, or one being resumed. */
@@ -232,10 +233,12 @@ export class WorkerSimHost implements SimHost {
 
   private post(message: HostRequest): void {
     if (this.disposed) return;
+    getProfiler().recordWorkerMessage();
     this.port.postMessage(message);
   }
 
   private receive(reply: HostReply): void {
+    getProfiler().recordWorkerMessage();
     switch (reply.kind) {
       case 'view':
         this.loadView(reply.view);
