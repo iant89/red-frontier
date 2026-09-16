@@ -32,7 +32,7 @@ import { getProfiler, setProfilerEnabled, resetProfiler } from '../debug/Profile
 // In production, the switch stays off (default) so there is zero cost.
 // Tests enable it via harness; dev builds enable it via Game's dev mode toggle
 // (main thread) and via DEV flag here for the worker side.
-if (import.meta.env.DEV) {
+if ((import.meta as any).env?.DEV) {
   setProfilerEnabled(true);
   resetProfiler();
 }
