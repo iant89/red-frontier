@@ -26,15 +26,10 @@ import {
   SPAWN_Z,
   BASE_STORAGE_PER_RESOURCE,
   ROVER_CHARGE_THRESHOLD,
-  ROVER_CHARGE_RATE_KW,
-  GARAGE_CHARGE_RATE_KW,
-  ROVER_CHARGE_TIER,
   HOURS_PER_SEC,
   SOLS_PER_SEC,
   SOL_SECONDS,
-  POD_POWER_KW,
   POD_BATTERY_KWH,
-  POD_LIFE_SUPPORT_KW,
   POD_RADIUS,
   COLONIST_SPEED,
   COLONIST_BUILD_POWER,
@@ -51,12 +46,10 @@ import {
   REPAIR_RESTART_HEALTH,
   ROVER_REPAIR_RATE,
   ROVER_CLEAN_RATE,
-  PANEL_DIRT_PER_SOL,
   AUTO_CLEAN_THRESHOLD,
   STORM_SHELTER_INTENSITY,
   STORM_EVA_INTENSITY,
   STORM_WORK_MUL,
-  CLEANLINESS_FLOOR,
   ROVER_CONDITION_SLOW,
   ROVER_CONDITION_ALERT,
   ROVER_WEAR_WORK_S,
@@ -81,14 +74,6 @@ import {
   DROP_FIRST_SOL_MAX,
   DROP_GAP_SOL_MIN,
   DROP_GAP_SOL_MAX,
-  LIGHTNING_ANCHOR_CHANCE,
-  LIGHTNING_STRIKE_RADIUS,
-  LIGHTNING_CORE_RADIUS,
-  LIGHTNING_AIM_JITTER,
-  LIGHTNING_DAMAGE_K,
-  LIGHTNING_ROVER_CONDITION,
-  LIGHTNING_ROVER_BATTERY_FRAC,
-  LIGHTNING_COLONIST_DAMAGE,
 } from './config';
 import type { PowerTier } from './config';
 import type {
@@ -131,9 +116,9 @@ import {
 import type { Poi, PoiKind } from './pois';
 import { SolClock } from './clock';
 import type { SunState } from './clock';
-import { Weather, stormLabel } from './weather';
-import type { StormKind, StormKindReal } from './weather';
-import { resolvePower, idlePower, type PowerDemand, type PowerResult } from './power';
+import { stormLabel } from './weather';
+import type { Weather, StormKind, StormKindReal } from './weather';
+import type { PowerResult } from './power';
 import {
   makePools,
   makeColonist,
@@ -153,6 +138,8 @@ import { decodeSave } from './persistence/SaveCodec';
 import { coerceTask } from './persistence/SaveValidator';
 import type { SaveState } from './persistence/SaveSchema';
 import { ClockSystem } from './systems/ClockSystem';
+import { WeatherSystem, type WeatherHostHooks } from './systems/WeatherSystem';
+import { PowerSystem, type PowerSystemContext } from './systems/PowerSystem';
 
 // Phase 2 — state extraction
 import {
@@ -178,6 +165,7 @@ import {
   lightningVulnerability,
 } from './state/BuildingState';
 import type { FluidFlow, HistorySample } from './state/ResourceState';
+import { batteryCapacityKWh } from './state/PowerState';
 
 // Re-export for backward compat (old import sites still work)
 export type { RoverTask, RoverCommand, RoverRules, Rover, RoverGoal, RoverPhase, Building, HistorySample, FluidFlow } from './state';
@@ -197,6 +185,31 @@ function lerpAngle(a: number, b: number, t: number): number {
 
 export class Simulation {
   readonly state: ColonyState;
+
+  /**
+   * Cross-domain side effects WeatherSystem triggers but does not own
+   * (Phase 5 seam). Implemented against the machinery that already lives
+   * here so no second source of truth appears; RoverSystem (Phase 10) and
+   * FailureSystem (Phase 15) will absorb the implementor, not the contract.
+   */
+  private readonly weatherHooks: WeatherHostHooks = {
+    tripDamaged: (b, cause) => this.tripDamaged(b, cause),
+    disableRover: (r) => this.disable(r),
+    endMission: (reason) => this.endMission(reason),
+  };
+
+  /**
+   * The production-domain questions PowerSystem asks while building its
+   * demand list and applying its result (Phase 6 seam). Answered by the
+   * machinery that already lives here so nothing is duplicated;
+   * ProductionSystem (Phase 8) will absorb the implementor, not the
+   * contract — the same shape as {@link weatherHooks}.
+   */
+  private readonly powerContext: PowerSystemContext = {
+    desiredThroughput: (b) => this.desiredThroughput(b),
+    runProcess: (b, throughput, hours) => this.runProcess(b, throughput, hours),
+    processBlockReason: (b) => this.processBlockReason(b),
+  };
 
   constructor(params: {
     seed: number;
@@ -380,13 +393,8 @@ export class Simulation {
 
   /** Total grid battery capacity (kWh), pod included. */
   batteryCapacity(): number {
-    let cap = POD_BATTERY_KWH;
-    for (const b of this.buildings) {
-      if (this.runnable(b) && b.enabled) {
-        cap += BUILDINGS[b.kind].batteryKWh * devLevelMul(b.level);
-      }
-    }
-    return cap;
+    // Phase 6: capacity logic owns itself in state/PowerState.ts
+    return batteryCapacityKWh(this.state);
   }
 
   get sun(): SunState {
@@ -492,13 +500,8 @@ export class Simulation {
 
   /** Somewhere a rover can draw charge: the pod, or any online habitat. */
   nearCharger(x: number, z: number): boolean {
-    if (Math.hypot(SPAWN_X - x, SPAWN_Z - z) < POD_RADIUS + 6) return true;
-    for (const b of this.buildings) {
-      if (!this.runnable(b) || !b.enabled) continue;
-      if (!BUILDINGS[b.kind].providesCharge) continue;
-      if (Math.hypot(b.x - x, b.z - z) < BUILDINGS[b.kind].radius + 5) return true;
-    }
-    return false;
+    // Phase 6: the charger map lives in PowerSystem
+    return PowerSystem.nearCharger(this.state, x, z);
   }
 
   private nearestChargerPoint(x: number, z: number): { x: number; z: number } {
@@ -533,13 +536,8 @@ export class Simulation {
 
   /** Charger output at a position — garages charge twice as fast (GDD §4). */
   private chargeRateKwAt(x: number, z: number): number {
-    for (const b of this.buildings) {
-      if (b.kind !== 'garage' || !this.runnable(b) || !b.enabled) continue;
-      if (Math.hypot(b.x - x, b.z - z) < BUILDINGS.garage.radius + 5) {
-        return GARAGE_CHARGE_RATE_KW * devLevelMul(b.level);
-      }
-    }
-    return ROVER_CHARGE_RATE_KW;
+    // Phase 6: the charger map lives in PowerSystem
+    return PowerSystem.chargeRateKwAt(this.state, x, z);
   }
 
   /**
@@ -1298,10 +1296,11 @@ export class Simulation {
    * weather scheduler and history windows stay coherent after the jump.
    *
    * Phase 4: clock part delegated to ClockSystem.setTime.
+   * Phase 5: weather re-anchor delegated to WeatherSystem.afterTimeJump.
    */
   devSetTime(sol: number, frac: number): void {
     ClockSystem.setTime(this.state, sol, frac);
-    this.weather.time = this.simTime;
+    WeatherSystem.afterTimeJump(this.state);
     this.lastHistoryAt = -Infinity;
     this.lastFlows = {
       water: { produced: 0, consumed: 0 },
@@ -1345,13 +1344,15 @@ export class Simulation {
     }
 
     // 2. weather (TDD §4's tick order puts it right after the clock)
-    this.tickWeather();
+    // Phase 5: delegated to WeatherSystem
+    WeatherSystem.tick(this.state, this.weatherHooks);
 
     // 2b. the world past the base: what the fleet has found, and what Earth sent
     this.tickExploration();
 
     // 3 & 4. power network, then production scaled by what it delivered.
-    this.tickPower();
+    // Phase 6: delegated to PowerSystem
+    PowerSystem.tick(this.state, this.powerContext);
     this.tickGarages();
 
     // 5. life support & the human
@@ -1380,239 +1381,17 @@ export class Simulation {
   }
 
   // ------------------------------------------------------------ weather ----
-
-  /**
-   * Advance the weather, then let it work on the colony: solar panels gather
-   * dust, wind chews on exposed structures, and storms interrupt work.
-   */
-  private tickWeather(): void {
-    const wx = this.weather;
-    wx.tick(SIM_TICK, this.simTime, this.clock.sol);
-    this.dustTransmission = wx.solarTransmission;
-
-    // ---- forecast announcements ------------------------------------------
-    const fc = wx.forecast();
-    if (fc) {
-      const mins = Math.max(1, Math.round((fc.arrivesIn / 60)));
-      this.alerts.raise(
-        'storm-inbound',
-        fc.kind === 'severe' || fc.kind === 'planetary' ? 'crit' : 'warn',
-        `${stormLabel(fc.kind)} forecast`,
-        `Winds arrive in about ${mins} min. Charge batteries, shelter the crews, clean the arrays.`,
-        this.simTime,
-        this.clock.format(),
-      );
-    }
-
-    // ---- storm arrival / passing ------------------------------------------
-    if (wx.current() && !this.stormAnnounced) {
-      this.stormAnnounced = true;
-      this.alerts.clear('storm-inbound', this.simTime, this.clock.format());
-      const active = wx.current()!;
-      const sev: Severity =
-        active.kind === 'severe' || active.kind === 'planetary'
-          ? 'crit'
-          : active.kind === 'devil'
-            ? 'info'
-            : 'warn';
-      this.event(
-        sev,
-        `${stormLabel(active.kind)} on site — solar output falling, crews recalled.`,
-      );
-    }
-    if (!wx.current() && this.stormAnnounced) {
-      this.stormAnnounced = false;
-      this.event('ok', 'The storm has passed. Dust is settling; solar recovers as the air clears.');
-    }
-
-    // ---- dust settles on the panels ---------------------------------------
-    // Ambient dust grinds in slowly; a storm sandblasts the array. Each panel
-    // accretes the dust in the air *where it stands*, not the colony's average
-    // — an array caught in the gust front dirties faster than one in the lee.
-    const sols = SIM_TICK * SOLS_PER_SEC;
-    for (const b of this.buildings) {
-      if (b.state !== 'online') continue;
-      const def = BUILDINGS[b.kind];
-      if (def.generation !== 'solar') continue;
-      if (b.cleanliness > CLEANLINESS_FLOOR) {
-        const dirt = wx.localDust(b.x, b.z) * PANEL_DIRT_PER_SOL * sols;
-        b.cleanliness = Math.max(CLEANLINESS_FLOOR, b.cleanliness - dirt);
-      }
-    }
-
-    // ---- wind damage --------------------------------------------------------
-    // The damage a structure takes is its *local* weather, so two arrays on
-    // opposite sides of the yard can age differently through the same storm.
-    for (const b of this.buildings) {
-      if (b.state !== 'online' || b.damaged) continue;
-      const rate = wx.damageRateAt(b.x, b.z);
-      if (rate <= 0) continue;
-      const def = BUILDINGS[b.kind];
-      const before = b.health;
-      b.health = Math.max(0, b.health - rate * def.exposure * SIM_TICK);
-      if (b.health <= DAMAGED_HEALTH && before > DAMAGED_HEALTH) {
-        this.tripDamaged(b);
-      }
-    }
-
-    // ---- lightning ----------------------------------------------------------
-    // Static from the dust: strike chance rises with the storm. Runs last in
-    // the weather block so a bolt that trips a structure does it before the
-    // power resolve sees the building.
-    this.tickLightning();
-  }
-
-  // --------------------------------------------------------- lightning ----
-
-  /**
-   * Roll the lightning hazard once this tick and, if the sky fires, resolve
-   * a strike. The chance is a Poisson arrival from {@link Weather.lightningHazard},
-   * drawn from the weather's own seeded stream so a replayed storm strikes the
-   * same bolts at the same instants.
-   */
-  private tickLightning(): void {
-    const hazard = this.weather.lightningHazard();
-    if (hazard <= 0) return;
-    const p = 1 - Math.exp(-hazard * SIM_TICK);
-    if (this.weather.lightningRoll() >= p) return;
-    this.resolveLightningStrike();
-  }
-
-  /**
-   * The entities a bolt would rather hit than empty regolith: exposed
-   * structures (weighted by exposure × vulnerability), rovers out in the
-   * open, and a colonist on EVA. Each carries a weight for the weighted pick.
-   */
-  private lightningAnchors(): Array<{ x: number; z: number; w: number }> {
-    const out: Array<{ x: number; z: number; w: number }> = [];
-    for (const b of this.buildings) {
-      if (b.state !== 'online' || b.damaged) continue;
-      const def = BUILDINGS[b.kind];
-      out.push({ x: b.x, z: b.z, w: def.exposure * lightningVulnerability(def) });
-    }
-    for (const r of this.rovers) {
-      if (r.phase === 'disabled') continue;
-      out.push({ x: r.x, z: r.z, w: 1 });
-    }
-    const c = this.colonist;
-    if (!c.dead && !c.inside) out.push({ x: c.x, z: c.z, w: 0.8 });
-    return out;
-  }
-
-  /**
-   * Resolve one lightning strike: pick a landing spot (mostly a random point,
-   * sometimes aimed at an exposed entity), damage whatever is under it, flash
-   * the renderer via {@link Weather.lastStrike}, and write the log line.
-   *
-   * `aim === 'exact'` is the developer-panel path: it drops the bolt dead on
-   * the most exposed thing standing, with no jitter and no RNG, so a test (or
-   * a dev) can reproduce a hit at will.
-   */
-  private resolveLightningStrike(aim: 'roll' | 'exact' = 'roll'): void {
-    const wx = this.weather;
-    const half = this.world.half;
-    const anchors = this.lightningAnchors();
-
-    let x = 0;
-    let z = 0;
-    let aimed = false;
-
-    if (aim === 'exact' && anchors.length > 0) {
-      const target = anchors.slice().sort((a, b) => b.w - a.w || a.x - b.x || a.z - b.z)[0];
-      x = target.x;
-      z = target.z;
-      aimed = true;
-    } else if (anchors.length > 0 && wx.lightningRoll() < LIGHTNING_ANCHOR_CHANCE) {
-      const total = anchors.reduce((s, a) => s + a.w, 0);
-      let r = wx.lightningRoll() * total;
-      let chosen = anchors[anchors.length - 1];
-      for (const a of anchors) {
-        r -= a.w;
-        if (r <= 0) {
-          chosen = a;
-          break;
-        }
-      }
-      x = chosen.x + (wx.lightningRoll() * 2 - 1) * LIGHTNING_AIM_JITTER;
-      z = chosen.z + (wx.lightningRoll() * 2 - 1) * LIGHTNING_AIM_JITTER;
-      aimed = true;
-    } else {
-      x = (wx.lightningRoll() * 2 - 1) * half;
-      z = (wx.lightningRoll() * 2 - 1) * half;
-    }
-
-    // ---- damage ------------------------------------------------------------
-    let hurtBuildings = 0;
-    let tripped = false;
-    for (const b of this.buildings) {
-      if (b.state !== 'online') continue;
-      const def = BUILDINGS[b.kind];
-      const d = Math.hypot(b.x - x, b.z - z);
-      const reach = LIGHTNING_STRIKE_RADIUS + def.radius;
-      if (d > reach) continue;
-      const falloff = 1 - d / reach;
-      const damage = LIGHTNING_DAMAGE_K * def.exposure * lightningVulnerability(def) * falloff * wx.damageMul;
-      if (damage <= 0.01) continue;
-      const before = b.health;
-      b.health = Math.max(0, b.health - damage);
-      hurtBuildings++;
-      if (b.health <= DAMAGED_HEALTH && before > DAMAGED_HEALTH) {
-        this.tripDamaged(b, 'lightning');
-        tripped = true;
-      }
-    }
-
-    let hurtRovers = 0;
-    for (const r of this.rovers) {
-      if (r.phase === 'disabled') continue;
-      const d = Math.hypot(r.x - x, r.z - z);
-      if (d > LIGHTNING_STRIKE_RADIUS) continue;
-      const falloff = 1 - d / LIGHTNING_STRIKE_RADIUS;
-      r.condition = Math.max(0, r.condition - LIGHTNING_ROVER_CONDITION * falloff);
-      hurtRovers++;
-      // A near-direct hit can flash a chunk of the pack away; a flat battery
-      // strands the rover exactly like the ride home would.
-      if (d <= LIGHTNING_CORE_RADIUS) {
-        r.battery = Math.max(0, r.battery - ROVERS[r.kind].maxBatteryKWh * LIGHTNING_ROVER_BATTERY_FRAC);
-        if (r.battery <= 0) this.disable(r);
-      }
-    }
-
-    let hurtColonist = false;
-    const c = this.colonist;
-    if (!c.dead && !c.inside) {
-      const d = Math.hypot(c.x - x, c.z - z);
-      if (d <= LIGHTNING_STRIKE_RADIUS) {
-        const falloff = 1 - d / LIGHTNING_STRIKE_RADIUS;
-        c.health = Math.max(0, c.health - LIGHTNING_COLONIST_DAMAGE * falloff);
-        hurtColonist = true;
-        if (c.health <= 0) {
-          c.dead = true;
-          this.endMission(`${c.name} was struck by lightning on EVA.`);
-        }
-      }
-    }
-
-    wx.lastStrike = { x, z, t: this.simTime };
-
-    // ---- log ---------------------------------------------------------------
-    const at = aimed ? 'near the colony' : `${Math.round(x)}, ${Math.round(z)}`;
-    if (hurtColonist || tripped) {
-      this.event(
-        'crit',
-        `⚡ Lightning struck at ${at} — ${tripped ? 'a structure is down' : `${c.name} took the hit`}.`,
-      );
-    } else if (hurtBuildings > 0 || hurtRovers > 0) {
-      this.event('warn', `⚡ Lightning struck at ${at} — ${hurtBuildings + hurtRovers} machine${hurtBuildings + hurtRovers === 1 ? '' : 's'} singed.`);
-    } else {
-      this.event('info', `⚡ Lightning struck the regolith at ${at}.`);
-    }
-  }
+  // Phase 5: the weather tick, its colony effects (panel dust, wind damage)
+  // and the lightning resolver live in systems/WeatherSystem.ts — Simulation
+  // passes the state plus the cross-domain hooks. Weather *queries* (shelter,
+  // EVA limits, work rates) stay inline at their call sites until the phases
+  // that own them extract those systems.
 
   /** Test/cheat hook (TDD §22): drop a bolt on the most exposed target now. */
   devForceLightningStrike(): void {
-    this.resolveLightningStrike('exact');
+    WeatherSystem.resolveLightningStrike(this.state, this.weatherHooks, 'exact');
   }
+
 
   /** Storm damage has tripped a building offline until it is repaired. */
   // -------------------------------------------------------- exploration ----
@@ -1814,119 +1593,11 @@ export class Simulation {
   }
 
   // ------------------------------------------------------------ power ----
-
-  /**
-   * Resolve generation, demand and storage for this tick, then run every
-   * building's process at whatever fraction of power it actually received.
-   */
-  private tickPower(): void {
-    const hours = SIM_TICK * HOURS_PER_SEC;
-    const sun = this.clock.sun;
-
-    // ---- generation -------------------------------------------------------
-    let genKw = POD_POWER_KW;
-    for (const b of this.buildings) {
-      b.genKw = 0;
-      if (b.state !== 'online' || !b.enabled || b.damaged) continue;
-      const def = BUILDINGS[b.kind];
-      if (!def.generation || def.powerProduceKw <= 0) continue;
-      /**
-       * TDD §11/§12's solar chain: irradiance x atmospheric dust x panel
-       * cleanliness. The RTG doesn't care what the sky is doing — that is the
-       * point of it.
-       */
-      const out =
-        (def.generation === 'solar'
-          ? def.powerProduceKw * sun.irradiance * this.dustTransmission * b.cleanliness
-          : def.powerProduceKw) * devLevelMul(b.level);
-      b.genKw = out;
-      genKw += out;
-    }
-
-    // ---- demand -----------------------------------------------------------
-    const demands: PowerDemand[] = [];
-    // The pod's own scrubbers and heaters are the highest priority load there is.
-    demands.push({ id: -1, tier: 0, kw: POD_LIFE_SUPPORT_KW });
-
-    const desired = new Map<number, number>();
-    for (const b of this.buildings) {
-      b.loadKw = 0;
-      b.throughput = 0;
-      b.idleReason = '';
-      if (b.state !== 'online') {
-        b.powerSat = 1;
-        continue;
-      }
-      const def = BUILDINGS[b.kind];
-      if (b.damaged) {
-        b.powerSat = 1;
-        b.idleReason = 'Damaged — needs repair';
-        continue;
-      }
-      if (!b.enabled) {
-        b.powerSat = 1;
-        b.idleReason = 'Switched off';
-        continue;
-      }
-      // How hard would this building *like* to run, ignoring power?
-      const want = this.desiredThroughput(b);
-      desired.set(b.id, want);
-      const load = def.idlePowerKw + (def.powerDrawKw - def.idlePowerKw) * want;
-      if (load > 0) demands.push({ id: b.id, tier: def.tier, kw: load });
-    }
-
-    // Rover charging is the lowest-priority load on the grid.
-    for (const r of this.rovers) {
-      const def = ROVERS[r.kind];
-      const wantsCharge =
-        r.phase !== 'disabled' &&
-        r.battery < def.maxBatteryKWh - 1e-6 &&
-        (r.phase === 'charging' || r.goal === 'charge') &&
-        this.nearCharger(r.x, r.z);
-      if (!wantsCharge) {
-        r.chargeSat = 0;
-        continue;
-      }
-      const needKWh = def.maxBatteryKWh - r.battery;
-      const kw = Math.min(this.chargeRateKwAt(r.x, r.z), hours > 0 ? needKWh / hours : 0);
-      if (kw > 0) demands.push({ id: r.id, tier: ROVER_CHARGE_TIER, kw });
-    }
-
-    // ---- resolve ----------------------------------------------------------
-    const capacity = this.batteryCapacity();
-    this.storedKWh = Math.min(this.storedKWh, capacity);
-    const result = resolvePower(genKw, demands, this.storedKWh, capacity, hours);
-    this.power = result;
-    this.storedKWh = result.storedKWh;
-
-    // ---- apply ------------------------------------------------------------
-    for (const b of this.buildings) {
-      if (b.state !== 'online' || !b.enabled || b.damaged) continue;
-      const def = BUILDINGS[b.kind];
-      const sat = result.satisfaction.get(b.id) ?? 1;
-      b.powerSat = sat;
-      const want = desired.get(b.id) ?? 0;
-      const actual = want * sat;
-      b.throughput = actual;
-      b.loadKw = (def.idlePowerKw + (def.powerDrawKw - def.idlePowerKw) * want) * sat;
-      if (def.process) {
-        if (actual > 1e-6) this.runProcess(b, actual, hours);
-        else if (!b.idleReason) {
-          b.idleReason = sat < 0.99 ? 'No power' : this.processBlockReason(b);
-        }
-      }
-    }
-
-    for (const r of this.rovers) {
-      const def = ROVERS[r.kind];
-      const sat = result.satisfaction.get(r.id);
-      if (sat === undefined) continue;
-      r.chargeSat = sat;
-      const needKWh = def.maxBatteryKWh - r.battery;
-      const kw = Math.min(this.chargeRateKwAt(r.x, r.z), hours > 0 ? needKWh / hours : 0);
-      r.battery = Math.min(def.maxBatteryKWh, r.battery + kw * sat * hours);
-    }
-  }
+  // Phase 6: the grid tick (input -> resolver -> output) lives in
+  // systems/PowerSystem.ts — Simulation passes the state plus the
+  // production-domain context. The garage bay (service + assembly), which
+  // *consumes* powerSat rather than resolving it, stays here until its owning
+  // phase extracts it.
 
   /**
    * Rover garages (P4): service the drivetrains of anything parked in the bay
@@ -2683,7 +2354,7 @@ export class Simulation {
       }
     }
     // Parked at a charger, an idle rover tops itself up (grid permitting —
-    // the actual energy transfer happens in tickPower).
+    // the actual energy transfer happens in PowerSystem.tick).
     if (this.nearCharger(r.x, r.z) && r.battery < ROVERS[r.kind].maxBatteryKWh - 1e-6) {
       r.phase = 'charging';
       r.statusText = 'Charging';
@@ -3179,6 +2850,32 @@ export class Simulation {
     const def = ROVERS[r.kind];
     const hours = SIM_TICK * HOURS_PER_SEC;
     const reach = 8;
+
+    /**
+     * A full hold turns for home and *keeps* its depot heading. This check
+     * must run before the distance check below — the exact order `doMine`
+     * uses. The at-site branch used to sit in front of it and clobbered
+     * goal/phase back to `salvage` every tick before re-calling beginUnload,
+     * which re-pathed from scratch each tick (the rover never got past the
+     * first A* waypoint and froze just outside the reach ring); and once a
+     * loaded rover crossed the ring, the far branch turned it straight back
+     * to the site — the "hauling to storage ↔ heading to the site"
+     * ping-pong.
+     */
+    if (def.capacityKg - cargoMass(r) <= 0.01) {
+      if (this.nearDepot(r.x, r.z)) {
+        // Full silos park the rover at the depot — retrying as consumption
+        // frees room — with the same "Route paused" read a stuck haul
+        // route gives, instead of twiddling depot paths every tick.
+        r.routePaused = !this.canDeliverAny(r);
+        this.tryUnload(r);
+      } else {
+        this.beginUnload(r);
+      }
+      return;
+    }
+    r.routePaused = false;
+
     const dist = Math.hypot(p.x - r.x, p.z - r.z);
     if (dist > reach) {
       r.gid = p.id;
@@ -3191,10 +2888,6 @@ export class Simulation {
     r.statusText = p.kind === 'supplyDrop' ? 'Recovering cargo' : 'Salvaging';
 
     const room = def.capacityKg - cargoMass(r);
-    if (room <= 0.01) {
-      this.beginUnload(r);
-      return;
-    }
     const rate = salvageRateKgS(p.kind) * this.weather.workMultiplierAt(r.x, r.z) * this.roverWorkMul(r);
     const { takenKg, perResource } = takeSalvage(p, room, rate, SIM_TICK);
     for (const res of ALL_RESOURCES) {
@@ -4035,14 +3728,8 @@ export class Simulation {
       ticksRun: (data as { ticksRun?: number }).ticksRun,
       clock: data.clock as { sol?: number; frac?: number },
     });
-    this.weather = new Weather(this.seed ^ 0x77e711e);
-    this.weather.time = this.simTime;
-    if (data.weather) this.weather.restore(data.weather);
-    if (!Number.isFinite((data.weather as { lightningMul?: unknown })?.lightningMul as number)) {
-      this.weather.lightningMul = (DIFFICULTIES[this.difficulty] ?? DIFFICULTIES.pioneer).lightningMul;
-    }
-    this.dustTransmission = this.weather.solarTransmission;
-    this.stormAnnounced = !!this.weather.current();
+    // Phase 5: weather rebuild + derived flags delegated to WeatherSystem
+    WeatherSystem.restore(this.state, data.weather);
     this.storage = { ...emptyAmounts(), ...(data.storage ?? {}) };
     this.gameOver = data.gameOver ?? null;
 
@@ -4181,8 +3868,8 @@ export class Simulation {
     this.colonist.order = (cd as { order?: ColonistOrder }).order ?? { type: 'shelter' };
     this.colonist.dead = !!(cd as { dead?: boolean }).dead;
 
-    this.storedKWh = clamp(data.storedKWh ?? 0, 0, this.batteryCapacity());
-    this.power = idlePower(this.batteryCapacity(), this.storedKWh);
+    // Phase 6: grid rebuild delegated to PowerSystem
+    PowerSystem.restore(this.state, data.storedKWh);
 
     this.alerts.reset();
     if (data.alerts) this.alerts.restore(data.alerts);

@@ -1,7 +1,12 @@
 /**
- * Phase 2 — Weather state placeholder.
- * Weather lives in sim/weather.ts; this module will own weather state
- * extraction in Phase 5. For Phase 2 it provides a factory.
+ * Phase 2/5 — Weather state.
+ *
+ * Owns weather-state construction: the Weather model instance seeded from the
+ * colony seed (dedicated stream — never the world/deposit/POI/cargo RNG) with
+ * the difficulty × storm-option multipliers applied. The behavior that *drives*
+ * it lives in `sim/systems/WeatherSystem.ts` (Phase 5); the model itself
+ * (progression, storm scheduling, readings, snapshot/restore) lives in
+ * `sim/weather.ts`.
  */
 
 import { Weather } from '../weather';

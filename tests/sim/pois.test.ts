@@ -232,6 +232,57 @@ test('a stripped site hands over its cells, then refuses further orders', () => 
   assert.ok(kg > 0, 'precondition: the drop carried cargo');
 });
 
+test('a full hold hauls home instead of ping-ponging with the site', () => {
+  const sim = new Simulation({ seed: 55, nearDeposits: 0.2 });
+  buildOnline(sim, 'warehouse');
+  sim.weather.debugSuppressRolls(); // the haul loop is the subject, not the sky
+  const site = nearestSite(sim);
+  site.discovered = true;
+  // Far more than one hold (mining: 1500 kg) and more than the silos can
+  // take: the rover must haul, unload, and go back out for the rest — and
+  // when the silos finally cap out, park at the depot instead of twitching.
+  const res = (Object.keys(site.salvage)[0] ?? 'iron') as ResourceId;
+  site.salvage[res] = Math.max(site.salvage[res] ?? 0, 6000);
+
+  const r = parkAt(sim, sim.rovers[0].id, site.x, site.z);
+  assert.equal(sim.issueSalvage(r.id, site.id), true);
+  const cap = ROVERS[r.kind].capacityKg;
+
+  // Once the hold fills, the rover must leave and *keep* leaving: the buggy
+  // order of checks in doSalvage turned a loaded rover straight back around
+  // (or froze it on the reach ring) the moment it tried to head home — goal
+  // flipping toSalvage↔toDepot, the rover twitching, cargo never delivered.
+  let flips = 0;
+  let hauled = false;
+  let wentBackOut = false;
+  const ticks = Math.round(20 * SOL_SECONDS * 3);
+  for (let i = 0; i < ticks; i++) {
+    sim.step(1 / 20);
+    r.battery = ROVERS[r.kind].maxBatteryKWh; // energy is not this test's subject
+    const load = Object.values(r.cargo).reduce((a, b) => a + b, 0);
+    const awayFromSite = Math.hypot(site.x - r.x, site.z - r.z) > 8;
+    if (load >= cap - 0.01 && awayFromSite) {
+      hauled = true;
+      // The bug's signature: a loaded rover turned back *out* to the site.
+      // (Parking at the depot on full silos — goal idle, routePaused — is
+      // the legitimate end state, so only the outbound goal counts.)
+      if (r.goal === 'toSalvage') flips++;
+    }
+    if (hauled && load < cap - 1 && r.goal === 'toSalvage') wentBackOut = true;
+  }
+  assert.ok(hauled, 'precondition: the hold filled and the rover set out for the depot');
+  assert.equal(flips, 0, 'a loaded rover must keep its depot heading until it unloads');
+  assert.ok(wentBackOut, 'after unloading, the rover heads back out for the rest');
+  assert.ok(
+    sim.storage[res] > 500,
+    `the hauls must actually reach the silos (${Math.round(sim.storage[res])} kg delivered)`,
+  );
+  assert.ok(salvageTotalKg(site) < 6000 - 500, 'the hauls drained the site');
+  // The silos cap out before the site is stripped: the loaded rover parks at
+  // the depot (retrying as room frees) rather than looping depot paths.
+  assert.equal(r.routePaused, true, 'a loaded rover on full silos parks at the depot');
+});
+
 test('a settlement site is a marker, not a job', () => {
   const sim = new Simulation({ seed: 31, nearDeposits: 0.2 });
   let site = sim.world.pois.find((p) => p.kind === 'settlementSite');

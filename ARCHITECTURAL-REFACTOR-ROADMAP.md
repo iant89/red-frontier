@@ -715,6 +715,90 @@ Test:
 
 Existing weather tests pass unchanged where possible.
 
+## Recorded (Phase 5 complete — 2026-09-16)
+
+Implemented on `arena/01a0ab2e-red-frontier`.
+
+**What was built**
+
+- `src/sim/systems/WeatherSystem.ts` — the weather behavior that lived in
+  `Simulation.ts`, moved verbatim behind a state-consuming static API:
+  - `WeatherSystem.tick(state, hooks)` (was `Simulation.tickWeather`):
+    advances the model, mirrors `state.dustTransmission`, raises/clears the
+    `storm-inbound` alert, logs storm arrival/passing via `state.alerts`,
+    accrues panel dust per-building from *local* dust, applies wind damage
+    per-building from *local* intensity, dispatches lightning.
+  - `WeatherSystem.tickLightning`, `lightningAnchors`,
+    `resolveLightningStrike(state, hooks, aim)` (were the private
+    `Simulation` methods); `devForceLightningStrike` now delegates.
+  - `WeatherSystem.restore(state, weatherSave)` — the save wiring that lived
+    in `Simulation.restoreFromState` (fresh model from the colony seed,
+    legacy-cell acceptance, `lightningMul` difficulty fallback,
+    `dustTransmission`/`stormAnnounced` re-derivation). Takes `unknown`:
+    schema knowledge stays behind the Phase 3 boundary.
+  - `WeatherSystem.afterTimeJump(state)` — the `devSetTime` re-anchor.
+- **`WeatherHostHooks`** — the phase's one new seam: `tripDamaged`,
+  `disableRover`, `endMission` are effects weather *triggers* but does not
+  *own* (failure/rover domain). Simulation implements them against its
+  existing private methods, so there is no second source of truth;
+  RoverSystem (Phase 10) / FailureSystem (Phase 15) will absorb the
+  implementor, not the contract. Dependency direction is unchanged:
+  Simulation → WeatherSystem → ColonyState/Weather model.
+- The `Weather` model (`sim/weather.ts`) is untouched — progression, storm
+  scheduling, readings, snapshot/restore and the **dedicated RNG streams**
+  (scheduler `rngState` + separate `lightningRngState`) stay exactly where
+  they are; the roadmap's "do not combine streams" rule is now pinned by
+  tests rather than by convention.
+- `src/sim/state/WeatherState.ts` — the Phase 2 placeholder became the real
+  weather-state factory; `ColonyState.createColonyState` now calls
+  `createWeatherState` instead of duplicating the construction.
+- `tests/sim/weather-system.test.ts` (14 checks, linked in `full.test.ts`):
+  storm creation/expiry through the system tick, `dustTransmission`
+  mirroring, panel-dust accrual + floor clamp, wind damage tripping a
+  structure through the hooks, exact-bolt anchoring/damage, the hooks
+  contract driven against a recorder (trip / mission end / rover disable),
+  RNG-stream separation (model- and sim-level), `createWeatherState`
+  seeding, restore wiring incl. the `lightningMul` fallback, time-jump
+  re-anchoring, and deterministic replay (same-seed hash equality +
+  restored-weather equality).
+
+**Behavior preservation evidence**
+
+A scripted weather-heavy scenario (forced regional + severe storms, 3 solar
+arrays taking dust and wind damage, rolled + exact-aim lightning, mid-storm
+save/restore) was hashed at six checkpoints with `StateHash` before the
+extraction and re-run after: **byte-identical output**, including both RNG
+streams and every storm cell. The existing `sim/weather`, `sim/storms`,
+`sim/determinism`, `sim/soak` and `sim/persistence` suites pass unchanged.
+
+**Discovered pre-existing quirk (documented, deliberately not fixed here)**
+
+`Weather.snapshot()` returns its **live** `active`/`scheduled` arrays and
+storm-cell objects. Any code that holds a `Simulation.snapshot()` and lets
+the source sim keep ticking mutates the "save"; restoring it into a second
+sim in-process makes both weathers drive the same cells (positions and
+serpentines advance twice per tick-pair, and the two colonies' skies
+diverge). The shipped paths are safe — `JSON.stringify` (localStorage) and
+`postMessage` (worker) both deep-clone — but direct in-process
+`a.restore(b.snapshot())` aliases. Golden Rule 1 says Phase 5 does not
+change it; the new suite deep-clones (`structuredClone`) its saves and the
+quirk is recorded in `mnemosyne.md`. A future phase touching the weather
+model (or Phase 20's SimView work) should make `snapshot()` return copies.
+
+**Gate results** (Node 22.22.3, 2 CPU workers)
+
+| Gate | Result |
+| --- | --- |
+| `npm run typecheck` | green |
+| `npm test` (50 suites / 497 checks; was 49/483) | green — ~150 s wall clock |
+| `npm run test:check` | green — all suites linked, all declare `@covers` |
+| `npm run build` | green — `index.js` 996.7 kB (290 kB gz), `sim.worker` 221.7 kB, both unchanged |
+| pre/post extraction hash baseline | identical at all six checkpoints |
+| `mobile-smoke` (worker, the default) | green |
+| `mobile-smoke` (`?worker=0`, in-process) | green |
+| `worker-smoke` on both transports | green |
+
+
 
 # 10. Phase 6 — Formalize PowerSystem
 
@@ -767,6 +851,89 @@ Power calculations should avoid unnecessary allocations inside the simulation ti
 All existing power tests pass.
 
 Determinism remains unchanged.
+
+## Recorded (Phase 6 complete — 2026-09-16)
+
+Implemented on `arena/01a0ab2e-red-frontier`.
+
+**What was built**
+
+- `src/sim/systems/PowerSystem.ts` — the grid pipeline that lived in
+  `Simulation.tickPower`, moved verbatim behind a state-consuming static API
+  with the roadmap's input → resolver → output shape called out in stage
+  comments:
+  - `PowerSystem.tick(state, ctx)` — input: generation (pod RTG + per-building
+    solar `irradiance × dustTransmission × cleanliness` or RTG) and demand
+    (tier-0 pod life support, per-building process load from wanted
+    throughput, tier-3 rover charging); resolver: the untouched
+    `resolvePower`; output: `state.power`/`state.storedKWh`, per-building
+    `genKw`/`loadKw`/`throughput`/`powerSat`/`idleReason`, per-rover
+    `chargeSat` + battery charge.
+  - `PowerSystem.restore(state, storedKWh | undefined)` — the save wiring
+    (clamp to the restored capacity, park an `idlePower` result until the
+    next tick).
+  - `PowerSystem.nearCharger(state, x, z)` / `chargeRateKwAt(state, x, z)` —
+    the charger map, moved not duplicated; `Simulation` delegates so there is
+    a single source of truth for UI and rover AI alike.
+- **`PowerSystemContext`** — the phase's one new seam:
+  `desiredThroughput(b)`, `runProcess(b, throughput, hours)`,
+  `processBlockReason(b)` are *production* questions (Phase 8). Simulation
+  implements them against its existing private methods (the same shape as
+  Phase 5's `WeatherHostHooks`); ProductionSystem will absorb the
+  implementor, not the contract.
+- `src/sim/state/PowerState.ts` — the Phase 2 placeholder became the
+  power-state owner: `initialPowerState()` (was inline in `ColonyState`) and
+  `batteryCapacityKWh(state)` (was `Simulation.batteryCapacity`'s body);
+  `Simulation.batteryCapacity()` now delegates.
+- `Simulation.tickPower` deleted (~110 lines); `tickGarages` (service +
+  assembly + spawn, which *consume* `powerSat` rather than resolving it)
+  deliberately stays until its owning phase — noted in the PowerSystem
+  header and at the call site.
+- `src/sim/power.ts` — the pure resolver is **untouched**, by design.
+- `tests/sim/power-system.test.ts` (13 checks, linked in `full.test.ts`):
+  solar-vs-RTG generation (sun × dust × cleanliness, exact noon plate
+  rating, midnight RTG-only), storm-grade sky, `batteryCapacityKWh`
+  gating (online/enabled/undamaged), exact charge-by-day/drain-by-night
+  energy arithmetic, shortage tier-shedding through the live system (life
+  support sacred, tier 1 thinned, charging shed first, `firstShedTier`,
+  flat pack stays flat), even within-tier degradation, rover charging
+  (tier-3, pod base rate, garage fast-charge, distance-honest map), the
+  production context seam (want scales load, `runProcess` gets want ×
+  satisfaction, `processBlockReason` only consulted when power is fine,
+  "No power" wins during a brownout), building availability (switched off /
+  damaged / under-construction idle reasons, generation gating), restore
+  clamping, a save/restore round trip through the real wiring, and
+  two-same-seed determinism at noon and night checkpoints.
+
+**Performance note (roadmap §10)**
+
+The per-tick `PowerResult` stored on `state.power` is the deliberate
+exception to "no unnecessary allocations in the tick" — the view projects
+it, so it is necessary. The tick-local demand array and desired-throughput
+map remain the only scratch allocations, exactly as before extraction.
+
+**Behavior preservation evidence**
+
+A scripted power-heavy scenario (noon/night, brownout with a flat pack,
+severe-storm dust collapse, availability loss through damage/disabled,
+save/restore) was hashed at eight checkpoints with `StateHash` before the
+extraction and re-run after: **byte-identical output**. The existing
+`sim/power`, `sim/grid`, `sim/determinism`, `sim/soak`, `sim/persistence`
+and `sim/life-support` suites pass unchanged.
+
+**Gate results** (Node 22.22.3, 2 CPU workers)
+
+| Gate | Result |
+| --- | --- |
+| `npm run typecheck` | green |
+| `npm test` (51 suites / 511 checks; was 50/498) | green — ~123 s wall clock |
+| `npm run test:check` | green — all suites linked, all declare `@covers` |
+| `npm run build` | green — `index.js` 997.2 kB (290 kB gz), `sim.worker` 222.1 kB |
+| pre/post extraction hash baseline | identical at all eight checkpoints |
+| `worker-smoke` (`?worker=1`) | green |
+| `worker-smoke` (`?worker=0`, in-process) | green |
+| `mobile-smoke` | green |
+| `update-check-smoke` | green |
 
 
 # 11. Phase 7 — Extract LifeSupportSystem

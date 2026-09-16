@@ -20,7 +20,8 @@
 
 import { World } from '../World';
 import { SolClock } from '../clock';
-import { Weather } from '../weather';
+import { createWeatherState } from './WeatherState';
+import type { Weather } from '../weather';
 import { AlertBus } from '../alerts';
 import { mulberry32 } from '../../lib/rng';
 import {
@@ -44,9 +45,10 @@ import {
 } from '../defs';
 import type { ResourceAmounts, FluidId, RoverKind, BuildingKind } from '../defs';
 import { ALL_RESOURCES, ALL_FLUIDS } from '../defs';
-import { DIFFICULTIES, DEFAULT_WORLD_OPTIONS, stormMulFor, richnessMulFor, suppliesMulFor } from '../difficulty';
+import { DIFFICULTIES, DEFAULT_WORLD_OPTIONS, richnessMulFor, suppliesMulFor } from '../difficulty';
 import type { DifficultyId, WorldOptions } from '../difficulty';
-import { idlePower, type PowerResult } from '../power';
+import { initialPowerState } from './PowerState';
+import type { PowerResult } from '../power';
 import { makePools, makeColonist, type Colonist, type FluidPools } from '../lifesupport';
 import { DROP_FIRST_SOL_MIN, DROP_FIRST_SOL_MAX } from '../config';
 import { defaultRoverRules, type Rover, type RoverTask } from './RoverState';
@@ -124,17 +126,14 @@ export function createColonyState(params: ColonyStateParams): ColonyState {
     richness: richnessMulFor(worldOptions.richness),
   });
 
-  const weather = new Weather(seed ^ 0x77e711e);
-  weather.frequencyMul = diff.stormMul * stormMulFor(worldOptions.stormLevel);
-  weather.damageMul = diff.damageMul;
-  weather.lightningMul = diff.lightningMul;
+  const weather = createWeatherState(seed, difficulty, worldOptions);
 
   const clock = new SolClock();
   const alerts = new AlertBus();
   const colonist = makeColonist(1, 'Cmdr. Vega', SPAWN_X, world.heightAt(SPAWN_X, SPAWN_Z), SPAWN_Z + 3);
   const storage = emptyAmounts();
   const pools = makePools();
-  const power = idlePower(POD_BATTERY_KWH, POD_BATTERY_KWH * 0.6);
+  const power = initialPowerState();
   const storedKWh = POD_BATTERY_KWH * 0.6;
 
   const flows: Record<FluidId, FluidFlow> = {
