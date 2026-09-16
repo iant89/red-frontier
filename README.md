@@ -39,7 +39,7 @@ npm run test:sim        # every tests/sim suite
 npm run test:hud        # every tests/hud suite
 npm run test:unit       # the fast formula-level suites
 npm test -- power       # any suite whose name/desc matches "power"
-npm run test:list       # all 43 suites and what each covers
+npm run test:list       # all 54 suites and what each covers
 ```
 
 One URL flag is worth knowing while developing:
@@ -296,12 +296,22 @@ src/
     alerts.ts       alert bus (conditions) + event log (occurrences)
     weather.ts      wind, dust, storm scheduler + envelopes
     pois.ts         site/drop content tables + the pure salvage maths
+    rules.ts        the siting + maintenance verdicts, shared by both sides
     World.ts        seeded terrain + deposits + scattered sites
-    Simulation.ts   entities, tick order, construction, persistence
+    Simulation.ts   orchestration: entities, tick order, rover task dispatch
+    state/          ColonyState and the entity/record shapes (data, no behavior)
+    systems/        extracted tick responsibilities, each a static API over state
+      ClockSystem.ts      the sol clock and the authoritative sun
+      WeatherSystem.ts    weather progression + what it does to the colony
+      PowerSystem.ts      the grid: tiers, satisfaction, brownout shedding
+      ProductionSystem.ts what a process wants, why it is idle, the mass it moves
+      LifeSupportSystem.ts the fluid draw, the colonist, EVA orders
+      ConstructionSystem.ts siting, site materials, crews, progress, completion
+    persistence/    versioned saves: schema, codec, validator, v1…v7 migrations
+    debug/          invariant checks, deterministic state hash, profiler, transcripts
     host/           the seam: SimCommand protocol, SimView read model, the host
       protocol.ts     every legal write, as plain serializable data
       view.ts         SimView — the read model, derived from Simulation by Pick
-      rules.ts        the siting + maintenance verdicts, shared by both sides
       applyCommand.ts the dispatch table (sim-side, worker-reusable)
       overlays.ts     runtime edits as *data* (a name + ids), never closures
       projection.ts   the view payload a host answers with
@@ -315,7 +325,7 @@ src/
     particles/      true particle system (wind, storm grit, dust devils, rover trails)
   ui/               DOM HUD (vitals, alerts, inspectors, build palette)
   lib/              deterministic RNG + simplex noise
-tests/              43 headless suites (sim/*, hud/*, render/*, ui/*) + linked serial test
+tests/              54 headless suites (sim/*, hud/*, render/*, ui/*, app/*) + linked serial test
 scripts/            esbuild test runner: parallel scheduling, filters, --affected, --watch
 ```
 
@@ -388,7 +398,7 @@ historically slowest suites first across the available CPU workers.
 ```
 tests/
   harness.ts          test()/group()/finish(), the per-suite report, the roll-up
-  full.test.ts        optional serial run: imports all 43 suites, prints the total
+  full.test.ts        optional serial run: imports all 54 suites, prints the total
   fixtures/sim.ts     shared sim setup (place a building, run N sols, find a seam)
   fixtures/hud.ts     jsdom bootstrap, a recording 2D canvas stub, one mounted
                       HUD + sim per suite
@@ -476,7 +486,7 @@ in — terrain and camera, the mission wizard, staged construction, the power
 grid, the sol and the water → oxygen → food chain, weather and storms, and the
 rover fleet with queued tasks, automation rules and a garage — plus the first
 slice of **P6/T6** (points of interest, the salvage task, supply drops). The MVP
-building set from GDD §16 is complete. `npm test` is green at 43 suites / 393
+building set from GDD §16 is complete. `npm test` is green at 54 suites / 567
 checks.
 
 1. **Finish the Web Worker move** (TDD T1–T2 hardening). `WorkerSimHost` is in:

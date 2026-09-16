@@ -32,6 +32,7 @@ import './sim/build.test';
 import './sim/grid.test';
 import './sim/power-system.test';
 import './sim/production-system.test';
+import './sim/construction-system.test';
 import './sim/alerts.test';
 import './sim/weather.test';
 import './sim/weather-system.test';
@@ -69,4 +70,4 @@ import './hud/worldmap.test';
 
 // Each suite prints one line as it runs; `report` prints the total, every
 // failure, and exits non-zero if anything broke.
-report(53);
+report(54);

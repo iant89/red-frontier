@@ -17,7 +17,10 @@
  */
 
 import { World } from './World';
-import { evaluateSite, maintenanceNeed } from './rules';
+// Phase 9: `evaluateSite` is no longer called here — ConstructionSystem.verdict
+// owns that call. `rules.ts` remains the single producer of the siting strings,
+// shared with `host/mirror.ts` so the build ghost and the sim cannot disagree.
+import { maintenanceNeed } from './rules';
 import type { Deposit } from './World';
 import { clamp, mulberry32 } from '../lib/rng';
 import {
@@ -131,6 +134,7 @@ import { WeatherSystem, type WeatherHostHooks } from './systems/WeatherSystem';
 import { PowerSystem, type PowerSystemContext } from './systems/PowerSystem';
 import { ProductionSystem } from './systems/ProductionSystem';
 import { LifeSupportSystem, type LifeSupportHostHooks } from './systems/LifeSupportSystem';
+import { ConstructionSystem, type ConstructionHostHooks } from './systems/ConstructionSystem';
 
 // Phase 2 — state extraction
 import {
@@ -203,12 +207,31 @@ export class Simulation {
   /**
    * Cross-domain effects LifeSupportSystem triggers but does not own
    * (Phase 7 seam). Death ends the mission (FailureSystem, Phase 15);
-   * assisting construction completes a building (ConstructionSystem,
-   * Phase 9). Same shape as {@link weatherHooks} / {@link powerContext}.
+   * assisting construction completes a building — Phase 9 moved that
+   * implementor into ConstructionSystem, the contract is unchanged.
+   * Same shape as {@link weatherHooks} / {@link powerContext}.
    */
   private readonly lifeSupportHooks: LifeSupportHostHooks = {
     endMission: (reason) => this.endMission(reason),
-    completeBuilding: (b) => this.completeBuilding(b),
+    completeBuilding: (b) => ConstructionSystem.complete(this.state, b),
+  };
+
+  /**
+   * Cross-domain effects ConstructionSystem triggers but does not own
+   * (Phase 9 seam). A site's *worker* is a rover, so pathing, task lifecycle,
+   * wear and the flat-battery strand belong to RoverSystem (Phase 10); "is
+   * this rover stuck on cargo the silos cannot take" is a haul question for
+   * LogisticsSystem (Phase 13). Simulation implements them against the
+   * machinery that already lives here, so no second source of truth appears.
+   * Same shape as {@link weatherHooks} / {@link lifeSupportHooks}.
+   */
+  private readonly constructionHooks: ConstructionHostHooks = {
+    setTravel: (r, x, z, goal) => this.setTravel(r, x, z, goal),
+    finishTask: (r) => this.finishTask(r),
+    autoAssign: (r, task) => this.autoAssign(r, task),
+    disableRover: (r) => this.disable(r),
+    roverWorkMul: (r) => this.roverWorkMul(r),
+    canDeliverCargo: (r) => this.canDeliverAny(r),
   };
 
   constructor(params: {
@@ -801,11 +824,17 @@ export class Simulation {
       return false;
     }
     const def = ROVERS[kind];
-    if (!this.hasMaterials(def.cost)) {
-      this.event('warn', `Not enough materials for a ${def.label} — needs ${this.missingList(def.cost)}.`);
+    // Phase 9: the material ledger has one owner. Assembly *spends* mass the
+    // same way a site does, so it asks ConstructionSystem rather than keeping
+    // a second copy of "can we afford this" (roadmap §17's design rule).
+    if (!ConstructionSystem.hasMaterials(this.state, def.cost)) {
+      this.event(
+        'warn',
+        `Not enough materials for a ${def.label} — needs ${ConstructionSystem.missingList(def.cost)}.`,
+      );
       return false;
     }
-    this.consumeMaterials(def.cost);
+    ConstructionSystem.consumeMaterials(this.state, def.cost);
     b.assembly = { kind, progress: 0 };
     this.event(
       'info',
@@ -846,41 +875,16 @@ export class Simulation {
     );
   }
 
+  /**
+   * Cancel an unfinished site (refunding what was already delivered) or
+   * dismantle a standing structure.
+   *
+   * Phase 9: the rules live in ConstructionSystem — including the deliberate
+   * "refund in full even if it overfills the silo" behaviour that
+   * `SimulationAssertions` documents as a legal state.
+   */
   demolish(buildingId: number): void {
-    const idx = this.buildings.findIndex((b) => b.id === buildingId);
-    if (idx < 0) return;
-    const b = this.buildings[idx];
-    // Return whatever was already delivered to the site back to storage.
-    if (b.state !== 'online') {
-      const def = BUILDINGS[b.kind];
-      let refunded = 0;
-      for (const res of ALL_RESOURCES) {
-        const committed = def.cost[res] - b.remainingCost[res];
-        if (committed <= 0) continue;
-        /**
-         * Refund the full amount even if it overfills the silo. This material
-         * *came out* of that silo, so putting it back can never be an exploit —
-         * and quietly destroying a player's resources on cancel is far worse
-         * than a temporarily over-full store, which drains as it gets used.
-         */
-        this.storage[res] += committed;
-        refunded += committed;
-      }
-      this.event(
-        'info',
-        `${def.label} site cancelled${refunded > 1 ? ` — ${Math.round(refunded)} kg recovered` : ''}.`,
-      );
-      this.alerts.clear(`mats-${b.id}`, this.simTime, this.clock.format());
-    } else {
-      this.event('warn', `${BUILDINGS[b.kind].label} dismantled.`);
-    }
-    for (const r of this.rovers) {
-      if (r.command.type === 'construct' && r.command.buildingId === b.id) {
-        this.finishTask(r);
-      }
-    }
-    this.buildings.splice(idx, 1);
-    this.recomputeCapacities();
+    ConstructionSystem.demolish(this.state, buildingId, this.constructionHooks);
   }
 
   /**
@@ -975,6 +979,12 @@ export class Simulation {
   }
 
   // -------------------------------------------------------- placement ----
+  // Phase 9: ConstructionSystem owns the construction job; the siting rule
+  // itself stays in `rules.ts` so the mirrored view keeps running the *same*
+  // function against the same seed. These three are the sim-side surface the
+  // hosts and the build ghost call, and they are deliberately thin: the
+  // authority is the simulation's, never the UI's.
+
   /**
    * The siting rule lives in `rules.ts` so the mirrored view can run the *same*
    * function against the same seed. This is the authoritative call: it sees the
@@ -986,47 +996,12 @@ export class Simulation {
 
   /** The authoritative siting verdict used by placement previews and commands. */
   placeVerdict(kind: BuildingKind, x: number, z: number): string | null {
-    return evaluateSite(kind, x, z, {
-      ground: this.world,
-      buildings: this.buildings,
-      deposits: this.world.deposits,
-    });
+    return ConstructionSystem.verdict(this.state, kind, x, z);
   }
 
+  /** Site a building: the sim decides whether the placement is legal. */
   placeBuilding(kind: BuildingKind, x: number, z: number): Building | null {
-    const err = this.canPlace(kind, x, z);
-    if (err) {
-      this.event('warn', err);
-      return null;
-    }
-    const def = BUILDINGS[kind];
-    const b: Building = {
-      id: this.allocId(),
-      kind,
-      x,
-      z,
-      rot: 0,
-      state: 'site',
-      remainingCost: { ...def.cost },
-      needsMaterials: false,
-      progress: 0,
-      buildTime: def.buildTime,
-      workerId: null,
-      enabled: true,
-      powerSat: 1,
-      throughput: 0,
-      genKw: 0,
-      loadKw: 0,
-      idleReason: '',
-      health: BUILDING_MAX_HEALTH,
-      cleanliness: 1,
-      damaged: false,
-      assembly: null,
-      level: 1,
-    };
-    this.buildings.push(b);
-    this.event('info', `${def.label} sited — assigning a builder.`);
-    return b;
+    return ConstructionSystem.place(this.state, kind, x, z);
   }
 
   // ------------------------------------------------------- developer mode ----
@@ -1050,41 +1025,10 @@ export class Simulation {
    * bad spot returns null with the reason in the log.
    */
   devSpawnBuilding(kind: BuildingKind, x: number, z: number): Building | null {
-    const err = this.canPlace(kind, x, z);
-    if (err) {
-      this.event('warn', err);
-      return null;
-    }
-    const def = BUILDINGS[kind];
-    const b: Building = {
-      id: this.allocId(),
-      kind,
-      x,
-      z,
-      rot: 0,
-      state: 'building',
-      remainingCost: emptyAmounts(),
-      needsMaterials: false,
-      progress: 1,
-      buildTime: def.buildTime,
-      workerId: null,
-      enabled: true,
-      powerSat: 1,
-      throughput: 0,
-      genKw: 0,
-      loadKw: 0,
-      idleReason: '',
-      health: BUILDING_MAX_HEALTH,
-      cleanliness: 1,
-      damaged: false,
-      assembly: null,
-      level: 1,
-    };
-    this.buildings.push(b);
-    // completeBuilding flips it online, recomputes capacities and logs the
+    // Phase 9: ConstructionSystem.devSpawn runs the same siting check, then
+    // `complete` flips it online, recomputes capacities and logs the
     // "+storage / +kW" extras exactly like an ordinary finish.
-    this.completeBuilding(b);
-    return b;
+    return ConstructionSystem.devSpawn(this.state, kind, x, z);
   }
 
   /** Survey a fresh resource deposit in at world position. */
@@ -1102,20 +1046,7 @@ export class Simulation {
    * construct task to it is released exactly like a demolition release.
    */
   devCompleteBuilding(id: number): boolean {
-    const b = this.buildingById(id);
-    if (!b || b.state === 'online') return false;
-    b.remainingCost = emptyAmounts();
-    b.needsMaterials = false;
-    this.alerts.clear(`mats-${b.id}`, this.simTime, this.clock.format());
-    for (const r of this.rovers) {
-      if (r.command.type === 'construct' && r.command.buildingId === b.id) {
-        this.finishTask(r);
-      }
-    }
-    b.workerId = null;
-    b.progress = 1;
-    this.completeBuilding(b);
-    return true;
+    return ConstructionSystem.devComplete(this.state, id, this.constructionHooks);
   }
 
   /**
@@ -1319,8 +1250,9 @@ export class Simulation {
     LifeSupportSystem.tick(this.state, this.lifeSupportHooks);
 
     // 6/7/8. logistics, jobs, movement, construction
-    this.tickSiteLogistics();
-    this.assignBuilders();
+    // Phase 9: site materials and worker choice are ConstructionSystem's
+    ConstructionSystem.tickSiteMaterials(this.state);
+    ConstructionSystem.assignBuilders(this.state, this.constructionHooks);
     this.assignMaintenance();
     this.assignRescues();
     this.assignSupplyRuns();
@@ -1614,49 +1546,10 @@ export class Simulation {
   }
 
   // -------------------------------------------------- task assignment ----
-
-  /**
-   * Materials flow from storage into construction sites on their own, without
-   * a rover standing there (TDD §7's "Materials Reserved" stage).
-   *
-   * Decoupling delivery from assembly is what makes the build queue feel alive:
-   * a site quietly accumulates the regolith it needs while a rover is still off
-   * fetching iron, and a builder is only ever dispatched to a site that is
-   * fully stocked. Without this split the builder ping-pongs — dispatched,
-   * partially stocked, stalled, released, dispatched again.
-   *
-   * Older sites are served first so the queue drains in the order the player
-   * placed it, rather than starving the first thing they asked for.
-   */
-  private tickSiteLogistics(): void {
-    for (const b of this.buildings) {
-      if (b.state === 'online') continue;
-      if (remainingCostTotal(b) <= 0) {
-        b.needsMaterials = false;
-        continue;
-      }
-      const took = this.commitAvailableMaterials(b);
-      if (took > 0 && b.state === 'site') {
-        this.event('info', `Materials delivered to the ${BUILDINGS[b.kind].label} site.`);
-      }
-      const left = remainingCostTotal(b);
-      b.needsMaterials = left > 0;
-      if (left > 0) {
-        this.alerts.raise(
-          `mats-${b.id}`,
-          'warn',
-          `${BUILDINGS[b.kind].label} awaiting materials`,
-          `Still needs ${this.missingList(b.remainingCost)}.`,
-          this.simTime,
-          this.clock.format(),
-          b.id,
-        );
-      } else {
-        this.alerts.clear(`mats-${b.id}`, this.simTime, this.clock.format());
-        this.event('ok', `${BUILDINGS[b.kind].label} site fully stocked — ready to assemble.`);
-      }
-    }
-  }
+  // Phase 9: site materials (`tickSiteLogistics`) and worker choice
+  // (`assignBuilders`) now live in systems/ConstructionSystem.ts — Simulation
+  // passes the state plus the cross-domain hooks. What stays here is the haul
+  // side of the question, which LogisticsSystem (Phase 13) owns.
 
   /** True if any of this rover's cargo would currently fit in storage. */
   private canDeliverAny(r: Rover): boolean {
@@ -1664,53 +1557,6 @@ export class Simulation {
       if (r.cargo[res] > 0.01 && this.storageRoom(res) > 0.01) return true;
     }
     return false;
-  }
-
-  private assignBuilders(): void {
-    const sites = this.buildings.filter((b) => b.state !== 'online');
-    for (const b of sites) {
-      if (b.workerId !== null) {
-        // Release a worker that wandered off (recharging, reassigned, etc).
-        const w = this.roverById(b.workerId);
-        if (
-          !w ||
-          w.phase === 'disabled' ||
-          !(w.command.type === 'construct' && w.command.buildingId === b.id)
-        ) {
-          b.workerId = null;
-        } else {
-          continue;
-        }
-      }
-      // Only fully-stocked sites get a builder; delivery is someone else's job.
-      if (remainingCostTotal(b) > 0) continue;
-
-      const capable = this.rovers
-        .filter(
-          (r) =>
-            r.phase !== 'disabled' &&
-            !r.recharge &&
-            // Construction outranks an automatic supply run, never a player order.
-            (r.command.type === 'idle' || r.autoTask) &&
-            /**
-             * Don't pull a rover off a delivery it can still complete — but a
-             * rover sitting on cargo the silos have no room for is *stuck*, not
-             * busy, and must stay eligible for work. Otherwise a full silo
-             * quietly disqualifies the whole fleet and construction deadlocks.
-             */
-            (cargoMass(r) <= 0.01 || !this.canDeliverAny(r)) &&
-            BUILDINGS[b.kind].buildableBy.includes(r.kind),
-        )
-        .sort(
-          (a, c) =>
-            Math.hypot(a.x - b.x, a.z - b.z) - Math.hypot(c.x - b.x, c.z - b.z) ||
-            a.id - c.id,
-        );
-      const worker = capable[0];
-      if (!worker) continue;
-      this.autoAssign(worker, { type: 'construct', buildingId: b.id });
-      b.workerId = worker.id;
-    }
   }
 
   /**
@@ -1978,7 +1824,8 @@ export class Simulation {
           this.finishTask(r);
           break;
         }
-        this.doBuild(r, b);
+        // Phase 9: walk-to-site, assemble, complete — ConstructionSystem
+        ConstructionSystem.build(this.state, r, b, this.constructionHooks);
         break;
       }
       case 'clean':
@@ -2856,115 +2703,13 @@ export class Simulation {
   }
 
   // ------------------------------------------------------ construction ----
-  private doBuild(r: Rover, b: Building): void {
-    const dist = Math.hypot(b.x - r.x, b.z - r.z);
-    const siteReach = BUILDINGS[b.kind].radius + 4;
-    const hours = SIM_TICK * HOURS_PER_SEC;
-    if (dist > siteReach) {
-      r.gid = b.id;
-      if (r.goal !== 'toSite' || r.phase === 'idle') {
-        this.setTravel(r, b.x, b.z, 'toSite');
-      }
-      return;
-    }
-    r.gid = b.id;
-    r.goal = 'build';
-    r.phase = 'working';
-    r.statusText = 'Building';
-
-    const def = BUILDINGS[b.kind];
-
-    // Materials are delivered by tickSiteLogistics; a builder only assembles.
-    if (remainingCostTotal(b) > 0) {
-      if (b.workerId === r.id) b.workerId = null;
-      this.finishTask(r);
-      return;
-    }
-    if (b.state === 'site') {
-      b.state = 'building';
-      this.event('info', `${r.label} began assembling the ${def.label}.`);
-    }
-
-    // A workshop within range lends tools and speeds the job up.
-    let mul = 1;
-    for (const w of this.buildings) {
-      if (w.kind !== 'workshop' || w.state !== 'online' || !w.enabled) continue;
-      if (Math.hypot(w.x - b.x, w.z - b.z) < 70) {
-        mul = 1.35;
-        break;
-      }
-    }
-
-    const work =
-      ROVERS[r.kind].buildPower *
-      mul *
-      this.weather.workMultiplierAt(r.x, r.z) *
-      this.roverWorkMul(r);
-    const before = b.progress;
-    b.progress = Math.min(1, b.progress + (work * SIM_TICK) / b.buildTime);
-    r.battery = Math.max(0, r.battery - ROVERS[r.kind].workPowerKw * hours * 0.6);
-    r.condition = Math.max(0, r.condition - ROVER_WEAR_WORK_S * 0.7 * SIM_TICK);
-    if (r.battery <= 0) this.disable(r);
-    if (before < 1 && b.progress >= 1) {
-      this.completeBuilding(b);
-      this.finishTask(r);
-    }
-  }
-
-  private completeBuilding(b: Building): void {
-    if (b.state === 'online') return;
-    b.state = 'online';
-    b.progress = 1;
-    b.workerId = null;
-    this.recomputeCapacities();
-    const def = BUILDINGS[b.kind];
-    const extras: string[] = [];
-    if (def.storagePerResourceKg) extras.push(`+${def.storagePerResourceKg} kg per silo`);
-    if (def.batteryKWh) extras.push(`grid +${def.batteryKWh} kWh`);
-    if (def.powerProduceKw) extras.push(`+${def.powerProduceKw} kW peak`);
-    this.event('ok', `${def.label} is online${extras.length ? ` — ${extras.join(', ')}` : ''}.`);
-  }
-
-  /**
-   * Pour whatever is available in storage into a site's remaining cost.
-   * Returns the mass committed this tick.
-   */
-  private commitAvailableMaterials(b: Building): number {
-    let took = 0;
-    for (const res of ALL_RESOURCES) {
-      const need = b.remainingCost[res];
-      if (need <= 0) continue;
-      const give = Math.min(need, this.storage[res]);
-      if (give <= 0) continue;
-      this.storage[res] -= give;
-      b.remainingCost[res] = Math.max(0, need - give);
-      took += give;
-    }
-    return took;
-  }
-
-  private hasMaterials(amounts: ResourceAmounts): boolean {
-    for (const res of ALL_RESOURCES) {
-      if (amounts[res] > 0 && this.storage[res] < amounts[res]) return false;
-    }
-    return true;
-  }
-
-  private consumeMaterials(amounts: ResourceAmounts): void {
-    for (const res of ALL_RESOURCES) {
-      this.storage[res] = Math.max(0, this.storage[res] - amounts[res]);
-    }
-  }
-
-  private missingList(amounts: ResourceAmounts): string {
-    const parts: string[] = [];
-    for (const res of ALL_RESOURCES) {
-      if (amounts[res] > 0.01) {
-        parts.push(`${Math.ceil(amounts[res])} kg ${RESOURCES[res].label}`);
-      }
-    }
-    return parts.join(', ') || 'materials';
-  }
+  // Phase 9: siting, site materials, worker choice, build progress,
+  // completion, cancellation and the material ledger live in
+  // systems/ConstructionSystem.ts — Simulation passes the state plus the
+  // cross-domain hooks (`constructionHooks`). The public surface the hosts and
+  // the build ghost call (`canPlace`, `placeVerdict`, `placeBuilding`,
+  // `demolish`) stays here as a thin delegate, because the siting authority
+  // must remain the simulation's.
 
   // ------------------------------------------------------------ alerts ----
 
