@@ -14,7 +14,10 @@ import {
   POI_MIN_DIST_FROM_SPAWN,
   POI_MIN_SEPARATION,
   DROP_BURY_SOLS,
+  SOL_SECONDS,
 } from '../../src/sim/config';
+import { ROVERS } from '../../src/sim/defs';
+import type { Rover } from '../../src/sim/Simulation';
 import {
   isPickedClean,
   salvageTotalKg,
@@ -38,9 +41,24 @@ function parkAt(sim: Simulation, roverId: number, x: number, z: number) {
   r.x = x;
   r.z = z;
   r.y = sim.world.heightAt(x, z);
-  r.battery = 999;
+  r.battery = ROVERS[r.kind].maxBatteryKWh;
   r.recharge = false;
   return r;
+}
+
+/**
+ * Advance time with the rover's battery topped up between steps — the salvage
+ * tests' subject is the salvage task, not the energy model, and a full pack
+ * does not last the whole run. Topping up between steps keeps the state
+ * physical at every instant (invariant checks pass) while removing energy as
+ * a variable, exactly like the old `battery = 999` did — except honestly.
+ */
+function runPowered(sim: Simulation, sols: number, r: Rover): void {
+  const ticks = Math.round(20 * SOL_SECONDS * sols);
+  for (let i = 0; i < ticks; i++) {
+    sim.step(1 / 20);
+    r.battery = ROVERS[r.kind].maxBatteryKWh;
+  }
 }
 
 /** Force the next Earth cargo mission to land almost immediately. */
@@ -176,7 +194,7 @@ test('a salvage order fills the hold from the site, then keeps going until it is
   assert.equal(sim.issueSalvage(r.id, site.id), true);
   assert.equal(r.command.type, 'salvage');
 
-  run(sim, 0.5);
+  runPowered(sim, 0.5, r);
   const taken = Object.values(r.cargo).reduce((a, b) => a + b, 0);
   assert.ok(taken > 0, 'the rover should have cut something free');
   assert.ok(salvageTotalKg(site) < before, 'the site should be lighter');
@@ -193,7 +211,7 @@ test('a stripped site hands over its cells, then refuses further orders', () => 
   const r = parkAt(sim, sim.rovers[0].id, drop.x, drop.z);
   assert.equal(sim.issueSalvage(r.id, drop.id), true);
   // A drop is small enough for one hold on any rover, so this strips it.
-  run(sim, 1.5);
+  runPowered(sim, 1.5, r);
 
   assert.ok(isPickedClean(drop), 'the site should be empty');
   if (cells > 0.5) {

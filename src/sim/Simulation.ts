@@ -144,6 +144,7 @@ import {
   type FluidPools,
 } from './lifesupport';
 import { AlertBus, type Severity } from './alerts';
+import { assertInvariants, invariantChecksEnabled } from './debug/SimulationAssertions';
 
 // --------------------------------------------------------------- types ----
 
@@ -1618,6 +1619,12 @@ export class Simulation {
       this.ticksRun++;
       ticks++;
     }
+
+    // Refactor roadmap Phase 1: invariant assertions run in tests only — the
+    // switch is process-wide and stays off in the game and the worker, so
+    // this costs nothing in production (see sim/debug/SimulationAssertions).
+    if (invariantChecksEnabled()) assertInvariants(this, `step at t=${this.simTime.toFixed(2)}s`);
+
     return ticks;
   }
 
