@@ -51,12 +51,10 @@ import {
   REPAIR_RESTART_HEALTH,
   ROVER_REPAIR_RATE,
   ROVER_CLEAN_RATE,
-  PANEL_DIRT_PER_SOL,
   AUTO_CLEAN_THRESHOLD,
   STORM_SHELTER_INTENSITY,
   STORM_EVA_INTENSITY,
   STORM_WORK_MUL,
-  CLEANLINESS_FLOOR,
   ROVER_CONDITION_SLOW,
   ROVER_CONDITION_ALERT,
   ROVER_WEAR_WORK_S,
@@ -81,14 +79,6 @@ import {
   DROP_FIRST_SOL_MAX,
   DROP_GAP_SOL_MIN,
   DROP_GAP_SOL_MAX,
-  LIGHTNING_ANCHOR_CHANCE,
-  LIGHTNING_STRIKE_RADIUS,
-  LIGHTNING_CORE_RADIUS,
-  LIGHTNING_AIM_JITTER,
-  LIGHTNING_DAMAGE_K,
-  LIGHTNING_ROVER_CONDITION,
-  LIGHTNING_ROVER_BATTERY_FRAC,
-  LIGHTNING_COLONIST_DAMAGE,
 } from './config';
 import type { PowerTier } from './config';
 import type {
@@ -131,8 +121,8 @@ import {
 import type { Poi, PoiKind } from './pois';
 import { SolClock } from './clock';
 import type { SunState } from './clock';
-import { Weather, stormLabel } from './weather';
-import type { StormKind, StormKindReal } from './weather';
+import { stormLabel } from './weather';
+import type { Weather, StormKind, StormKindReal } from './weather';
 import { resolvePower, idlePower, type PowerDemand, type PowerResult } from './power';
 import {
   makePools,
@@ -153,6 +143,7 @@ import { decodeSave } from './persistence/SaveCodec';
 import { coerceTask } from './persistence/SaveValidator';
 import type { SaveState } from './persistence/SaveSchema';
 import { ClockSystem } from './systems/ClockSystem';
+import { WeatherSystem, type WeatherHostHooks } from './systems/WeatherSystem';
 
 // Phase 2 — state extraction
 import {
@@ -197,6 +188,18 @@ function lerpAngle(a: number, b: number, t: number): number {
 
 export class Simulation {
   readonly state: ColonyState;
+
+  /**
+   * Cross-domain side effects WeatherSystem triggers but does not own
+   * (Phase 5 seam). Implemented against the machinery that already lives
+   * here so no second source of truth appears; RoverSystem (Phase 10) and
+   * FailureSystem (Phase 15) will absorb the implementor, not the contract.
+   */
+  private readonly weatherHooks: WeatherHostHooks = {
+    tripDamaged: (b, cause) => this.tripDamaged(b, cause),
+    disableRover: (r) => this.disable(r),
+    endMission: (reason) => this.endMission(reason),
+  };
 
   constructor(params: {
     seed: number;
@@ -1298,10 +1301,11 @@ export class Simulation {
    * weather scheduler and history windows stay coherent after the jump.
    *
    * Phase 4: clock part delegated to ClockSystem.setTime.
+   * Phase 5: weather re-anchor delegated to WeatherSystem.afterTimeJump.
    */
   devSetTime(sol: number, frac: number): void {
     ClockSystem.setTime(this.state, sol, frac);
-    this.weather.time = this.simTime;
+    WeatherSystem.afterTimeJump(this.state);
     this.lastHistoryAt = -Infinity;
     this.lastFlows = {
       water: { produced: 0, consumed: 0 },
@@ -1345,7 +1349,8 @@ export class Simulation {
     }
 
     // 2. weather (TDD §4's tick order puts it right after the clock)
-    this.tickWeather();
+    // Phase 5: delegated to WeatherSystem
+    WeatherSystem.tick(this.state, this.weatherHooks);
 
     // 2b. the world past the base: what the fleet has found, and what Earth sent
     this.tickExploration();
@@ -1380,239 +1385,17 @@ export class Simulation {
   }
 
   // ------------------------------------------------------------ weather ----
-
-  /**
-   * Advance the weather, then let it work on the colony: solar panels gather
-   * dust, wind chews on exposed structures, and storms interrupt work.
-   */
-  private tickWeather(): void {
-    const wx = this.weather;
-    wx.tick(SIM_TICK, this.simTime, this.clock.sol);
-    this.dustTransmission = wx.solarTransmission;
-
-    // ---- forecast announcements ------------------------------------------
-    const fc = wx.forecast();
-    if (fc) {
-      const mins = Math.max(1, Math.round((fc.arrivesIn / 60)));
-      this.alerts.raise(
-        'storm-inbound',
-        fc.kind === 'severe' || fc.kind === 'planetary' ? 'crit' : 'warn',
-        `${stormLabel(fc.kind)} forecast`,
-        `Winds arrive in about ${mins} min. Charge batteries, shelter the crews, clean the arrays.`,
-        this.simTime,
-        this.clock.format(),
-      );
-    }
-
-    // ---- storm arrival / passing ------------------------------------------
-    if (wx.current() && !this.stormAnnounced) {
-      this.stormAnnounced = true;
-      this.alerts.clear('storm-inbound', this.simTime, this.clock.format());
-      const active = wx.current()!;
-      const sev: Severity =
-        active.kind === 'severe' || active.kind === 'planetary'
-          ? 'crit'
-          : active.kind === 'devil'
-            ? 'info'
-            : 'warn';
-      this.event(
-        sev,
-        `${stormLabel(active.kind)} on site — solar output falling, crews recalled.`,
-      );
-    }
-    if (!wx.current() && this.stormAnnounced) {
-      this.stormAnnounced = false;
-      this.event('ok', 'The storm has passed. Dust is settling; solar recovers as the air clears.');
-    }
-
-    // ---- dust settles on the panels ---------------------------------------
-    // Ambient dust grinds in slowly; a storm sandblasts the array. Each panel
-    // accretes the dust in the air *where it stands*, not the colony's average
-    // — an array caught in the gust front dirties faster than one in the lee.
-    const sols = SIM_TICK * SOLS_PER_SEC;
-    for (const b of this.buildings) {
-      if (b.state !== 'online') continue;
-      const def = BUILDINGS[b.kind];
-      if (def.generation !== 'solar') continue;
-      if (b.cleanliness > CLEANLINESS_FLOOR) {
-        const dirt = wx.localDust(b.x, b.z) * PANEL_DIRT_PER_SOL * sols;
-        b.cleanliness = Math.max(CLEANLINESS_FLOOR, b.cleanliness - dirt);
-      }
-    }
-
-    // ---- wind damage --------------------------------------------------------
-    // The damage a structure takes is its *local* weather, so two arrays on
-    // opposite sides of the yard can age differently through the same storm.
-    for (const b of this.buildings) {
-      if (b.state !== 'online' || b.damaged) continue;
-      const rate = wx.damageRateAt(b.x, b.z);
-      if (rate <= 0) continue;
-      const def = BUILDINGS[b.kind];
-      const before = b.health;
-      b.health = Math.max(0, b.health - rate * def.exposure * SIM_TICK);
-      if (b.health <= DAMAGED_HEALTH && before > DAMAGED_HEALTH) {
-        this.tripDamaged(b);
-      }
-    }
-
-    // ---- lightning ----------------------------------------------------------
-    // Static from the dust: strike chance rises with the storm. Runs last in
-    // the weather block so a bolt that trips a structure does it before the
-    // power resolve sees the building.
-    this.tickLightning();
-  }
-
-  // --------------------------------------------------------- lightning ----
-
-  /**
-   * Roll the lightning hazard once this tick and, if the sky fires, resolve
-   * a strike. The chance is a Poisson arrival from {@link Weather.lightningHazard},
-   * drawn from the weather's own seeded stream so a replayed storm strikes the
-   * same bolts at the same instants.
-   */
-  private tickLightning(): void {
-    const hazard = this.weather.lightningHazard();
-    if (hazard <= 0) return;
-    const p = 1 - Math.exp(-hazard * SIM_TICK);
-    if (this.weather.lightningRoll() >= p) return;
-    this.resolveLightningStrike();
-  }
-
-  /**
-   * The entities a bolt would rather hit than empty regolith: exposed
-   * structures (weighted by exposure × vulnerability), rovers out in the
-   * open, and a colonist on EVA. Each carries a weight for the weighted pick.
-   */
-  private lightningAnchors(): Array<{ x: number; z: number; w: number }> {
-    const out: Array<{ x: number; z: number; w: number }> = [];
-    for (const b of this.buildings) {
-      if (b.state !== 'online' || b.damaged) continue;
-      const def = BUILDINGS[b.kind];
-      out.push({ x: b.x, z: b.z, w: def.exposure * lightningVulnerability(def) });
-    }
-    for (const r of this.rovers) {
-      if (r.phase === 'disabled') continue;
-      out.push({ x: r.x, z: r.z, w: 1 });
-    }
-    const c = this.colonist;
-    if (!c.dead && !c.inside) out.push({ x: c.x, z: c.z, w: 0.8 });
-    return out;
-  }
-
-  /**
-   * Resolve one lightning strike: pick a landing spot (mostly a random point,
-   * sometimes aimed at an exposed entity), damage whatever is under it, flash
-   * the renderer via {@link Weather.lastStrike}, and write the log line.
-   *
-   * `aim === 'exact'` is the developer-panel path: it drops the bolt dead on
-   * the most exposed thing standing, with no jitter and no RNG, so a test (or
-   * a dev) can reproduce a hit at will.
-   */
-  private resolveLightningStrike(aim: 'roll' | 'exact' = 'roll'): void {
-    const wx = this.weather;
-    const half = this.world.half;
-    const anchors = this.lightningAnchors();
-
-    let x = 0;
-    let z = 0;
-    let aimed = false;
-
-    if (aim === 'exact' && anchors.length > 0) {
-      const target = anchors.slice().sort((a, b) => b.w - a.w || a.x - b.x || a.z - b.z)[0];
-      x = target.x;
-      z = target.z;
-      aimed = true;
-    } else if (anchors.length > 0 && wx.lightningRoll() < LIGHTNING_ANCHOR_CHANCE) {
-      const total = anchors.reduce((s, a) => s + a.w, 0);
-      let r = wx.lightningRoll() * total;
-      let chosen = anchors[anchors.length - 1];
-      for (const a of anchors) {
-        r -= a.w;
-        if (r <= 0) {
-          chosen = a;
-          break;
-        }
-      }
-      x = chosen.x + (wx.lightningRoll() * 2 - 1) * LIGHTNING_AIM_JITTER;
-      z = chosen.z + (wx.lightningRoll() * 2 - 1) * LIGHTNING_AIM_JITTER;
-      aimed = true;
-    } else {
-      x = (wx.lightningRoll() * 2 - 1) * half;
-      z = (wx.lightningRoll() * 2 - 1) * half;
-    }
-
-    // ---- damage ------------------------------------------------------------
-    let hurtBuildings = 0;
-    let tripped = false;
-    for (const b of this.buildings) {
-      if (b.state !== 'online') continue;
-      const def = BUILDINGS[b.kind];
-      const d = Math.hypot(b.x - x, b.z - z);
-      const reach = LIGHTNING_STRIKE_RADIUS + def.radius;
-      if (d > reach) continue;
-      const falloff = 1 - d / reach;
-      const damage = LIGHTNING_DAMAGE_K * def.exposure * lightningVulnerability(def) * falloff * wx.damageMul;
-      if (damage <= 0.01) continue;
-      const before = b.health;
-      b.health = Math.max(0, b.health - damage);
-      hurtBuildings++;
-      if (b.health <= DAMAGED_HEALTH && before > DAMAGED_HEALTH) {
-        this.tripDamaged(b, 'lightning');
-        tripped = true;
-      }
-    }
-
-    let hurtRovers = 0;
-    for (const r of this.rovers) {
-      if (r.phase === 'disabled') continue;
-      const d = Math.hypot(r.x - x, r.z - z);
-      if (d > LIGHTNING_STRIKE_RADIUS) continue;
-      const falloff = 1 - d / LIGHTNING_STRIKE_RADIUS;
-      r.condition = Math.max(0, r.condition - LIGHTNING_ROVER_CONDITION * falloff);
-      hurtRovers++;
-      // A near-direct hit can flash a chunk of the pack away; a flat battery
-      // strands the rover exactly like the ride home would.
-      if (d <= LIGHTNING_CORE_RADIUS) {
-        r.battery = Math.max(0, r.battery - ROVERS[r.kind].maxBatteryKWh * LIGHTNING_ROVER_BATTERY_FRAC);
-        if (r.battery <= 0) this.disable(r);
-      }
-    }
-
-    let hurtColonist = false;
-    const c = this.colonist;
-    if (!c.dead && !c.inside) {
-      const d = Math.hypot(c.x - x, c.z - z);
-      if (d <= LIGHTNING_STRIKE_RADIUS) {
-        const falloff = 1 - d / LIGHTNING_STRIKE_RADIUS;
-        c.health = Math.max(0, c.health - LIGHTNING_COLONIST_DAMAGE * falloff);
-        hurtColonist = true;
-        if (c.health <= 0) {
-          c.dead = true;
-          this.endMission(`${c.name} was struck by lightning on EVA.`);
-        }
-      }
-    }
-
-    wx.lastStrike = { x, z, t: this.simTime };
-
-    // ---- log ---------------------------------------------------------------
-    const at = aimed ? 'near the colony' : `${Math.round(x)}, ${Math.round(z)}`;
-    if (hurtColonist || tripped) {
-      this.event(
-        'crit',
-        `⚡ Lightning struck at ${at} — ${tripped ? 'a structure is down' : `${c.name} took the hit`}.`,
-      );
-    } else if (hurtBuildings > 0 || hurtRovers > 0) {
-      this.event('warn', `⚡ Lightning struck at ${at} — ${hurtBuildings + hurtRovers} machine${hurtBuildings + hurtRovers === 1 ? '' : 's'} singed.`);
-    } else {
-      this.event('info', `⚡ Lightning struck the regolith at ${at}.`);
-    }
-  }
+  // Phase 5: the weather tick, its colony effects (panel dust, wind damage)
+  // and the lightning resolver live in systems/WeatherSystem.ts — Simulation
+  // passes the state plus the cross-domain hooks. Weather *queries* (shelter,
+  // EVA limits, work rates) stay inline at their call sites until the phases
+  // that own them extract those systems.
 
   /** Test/cheat hook (TDD §22): drop a bolt on the most exposed target now. */
   devForceLightningStrike(): void {
-    this.resolveLightningStrike('exact');
+    WeatherSystem.resolveLightningStrike(this.state, this.weatherHooks, 'exact');
   }
+
 
   /** Storm damage has tripped a building offline until it is repaired. */
   // -------------------------------------------------------- exploration ----
@@ -4035,14 +3818,8 @@ export class Simulation {
       ticksRun: (data as { ticksRun?: number }).ticksRun,
       clock: data.clock as { sol?: number; frac?: number },
     });
-    this.weather = new Weather(this.seed ^ 0x77e711e);
-    this.weather.time = this.simTime;
-    if (data.weather) this.weather.restore(data.weather);
-    if (!Number.isFinite((data.weather as { lightningMul?: unknown })?.lightningMul as number)) {
-      this.weather.lightningMul = (DIFFICULTIES[this.difficulty] ?? DIFFICULTIES.pioneer).lightningMul;
-    }
-    this.dustTransmission = this.weather.solarTransmission;
-    this.stormAnnounced = !!this.weather.current();
+    // Phase 5: weather rebuild + derived flags delegated to WeatherSystem
+    WeatherSystem.restore(this.state, data.weather);
     this.storage = { ...emptyAmounts(), ...(data.storage ?? {}) };
     this.gameOver = data.gameOver ?? null;
 

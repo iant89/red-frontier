@@ -20,7 +20,8 @@
 
 import { World } from '../World';
 import { SolClock } from '../clock';
-import { Weather } from '../weather';
+import { createWeatherState } from './WeatherState';
+import type { Weather } from '../weather';
 import { AlertBus } from '../alerts';
 import { mulberry32 } from '../../lib/rng';
 import {
@@ -44,7 +45,7 @@ import {
 } from '../defs';
 import type { ResourceAmounts, FluidId, RoverKind, BuildingKind } from '../defs';
 import { ALL_RESOURCES, ALL_FLUIDS } from '../defs';
-import { DIFFICULTIES, DEFAULT_WORLD_OPTIONS, stormMulFor, richnessMulFor, suppliesMulFor } from '../difficulty';
+import { DIFFICULTIES, DEFAULT_WORLD_OPTIONS, richnessMulFor, suppliesMulFor } from '../difficulty';
 import type { DifficultyId, WorldOptions } from '../difficulty';
 import { idlePower, type PowerResult } from '../power';
 import { makePools, makeColonist, type Colonist, type FluidPools } from '../lifesupport';
@@ -124,10 +125,7 @@ export function createColonyState(params: ColonyStateParams): ColonyState {
     richness: richnessMulFor(worldOptions.richness),
   });
 
-  const weather = new Weather(seed ^ 0x77e711e);
-  weather.frequencyMul = diff.stormMul * stormMulFor(worldOptions.stormLevel);
-  weather.damageMul = diff.damageMul;
-  weather.lightningMul = diff.lightningMul;
+  const weather = createWeatherState(seed, difficulty, worldOptions);
 
   const clock = new SolClock();
   const alerts = new AlertBus();
