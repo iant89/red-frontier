@@ -319,6 +319,74 @@ Persistent notes for future coding sessions.
   sim.worker 222.1 kB, all four browser smokes green on both transports.
   Recorded in the roadmap's "Phase 6 — Recorded" block.
 
+## Refactor Phase 7 (LifeSupportSystem) — moved, not redesigned
+
+- `src/sim/systems/LifeSupportSystem.ts` owns the survival pipeline that
+  was `Simulation.tickLifeSupport` + `tickColonistMovement` +
+  `orderColonist` + `shelters`/`nearestShelter` + the fluid/colonist
+  restore block, moved verbatim. `sim/lifesupport.ts`
+  (`applyColonistNeeds`, `makeColonist`) is **untouched** — the system is
+  the named owner around the existing pure resolver.
+- **`LifeSupportHostHooks` is the third instance of the host-hooks
+  pattern** (`endMission` / `completeBuilding`): death is FailureSystem
+  (Phase 15), assist-complete is ConstructionSystem (Phase 9). Simulation
+  implements both against its existing private methods. The system does
+  **not** write `gameOver` or flip a building `online` itself — the
+  recorder tests pin that.
+- **Power is an input the fluid draw ignores.** A brownout still
+  consumes; the pod's scrubbers are a tier-0 *load* on the grid, not a
+  gate on breathing. Pinned by the power-loss test. Do not "fix" this
+  inside an extraction.
+- **Colonist locomotion came along this pass** (`tickColonist`) because
+  suit-critical abort, storm recall and assist-complete are survival
+  overrides on the same order the player issued. Splitting motion back
+  into Simulation would leave two writers of `colonist.order`.
+- **EVA log minutes use the literal `24.66`**, not `SOL_HOURS` (24.6597).
+  Golden Rule 1 kept that rounding.
+- Alerts that *report* life-support state (low O₂, colonist health) stay
+  in `evaluateAlerts` until Phase 16. The system only emits the one-off
+  EVA / refusal / death log lines the old methods did.
+- Behavior preservation: same **pre/post hash baseline** recipe as
+  Phases 5–6 (nine checkpoints: sol 1, EVA out/back, no-O₂, production
+  chain, storm EVA, live vs restored mid-EVA, suit-critical abort) —
+  byte-identical. Live vs restored hashes still differ (restore resumes
+  at rest) — that is the StateHash contract, not a regression.
+- Gate on completion (2026-09-16): 52 suites / 526 checks green
+  (`tests/sim/life-support-system.test.ts` +15), typecheck green, build
+  `index.js` 997.8 kB (290 gz) / `sim.worker` 222.7 kB. Recorded in the
+  roadmap's "Phase 7 — Recorded" block.
+
+## Refactor Phase 8 (ProductionSystem) — moved, not redesigned
+
+- `src/sim/systems/ProductionSystem.ts` owns the three answers PowerSystem
+  asks about a process (`desiredThroughput` / `processBlockReason` /
+  `runProcess`), moved verbatim from Simulation. `BuildingDef.process` in
+  `sim/defs.ts` is **untouched** — processes were already declarative; this
+  phase names the owner.
+- **`PowerSystemContext` did not change.** Simulation only wires
+  ProductionSystem into it. Power still speaks first on a brownout
+  (`processBlockReason` is not consulted when satisfaction < 0.99) — that
+  ordering stays load-bearing; the production suite pins the domain half.
+- **`tickGarages` stays in Simulation** — service/assembly consume
+  `powerSat` rather than converting mass. Do not drag it into
+  ProductionSystem "to finish the phase".
+- Ice's display name is `Water Ice` (`RESOURCES.ice.label`). Idle copy
+  reads `Out of Water Ice`, not `Out of Ice`.
+- Greenhouses crawl at 15% in the dark (`0.15 + 0.85 × light`) rather than
+  stopping; `processBlockReason` still says `Waiting for daylight` below
+  irradiance 0.02. Do not "fix" that inside an extraction.
+- Direct-drive tests (`ProductionSystem.runProcess(state, b, rate, hours)`
+  and `PowerSystem.tick(state, liveCtx)`) are the cheap way to assert
+  plate-rate arithmetic. A full `sim.step` also runs life support, which
+  drinks oxygen and will miss an exact O₂ delta.
+- Behavior preservation: same **pre/post hash baseline** recipe as Phases
+  5–7 (ten checkpoints: extract, chain, food, no-ice, tanks-full, brownout,
+  upgrade, live vs restored, night-crop) — byte-identical.
+- Gate on completion (2026-09-16): 53 suites / 538 checks green
+  (`tests/sim/production-system.test.ts` +12), typecheck green, build
+  `index.js` 997.8 kB (290 gz) / `sim.worker` 222.7 kB. Recorded in the
+  roadmap's "Phase 8 — Recorded" block.
+
 ## Refactor Phase 1 (invariants) — the loud-state era
 
 - `src/sim/debug/SimulationAssertions.ts` is the Phase 1 deliverable: pure
