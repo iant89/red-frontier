@@ -270,6 +270,44 @@ all pass.
 
 No architectural refactoring should begin until this baseline is green.
 
+## Recorded baseline (Phase 0 complete — 2026-09-16)
+
+Measured on `origin/main` after PR #38 (`e1482d3`), Node 22.22.3, 2 CPU workers.
+
+| Gate | Result |
+| --- | --- |
+| `npm run typecheck` | green — 6.0 s |
+| `npm run build` | green — 7.0 s (vite 2.76 s, 58 modules) |
+| `npm test` (43 suites / 393 checks) | green — 107.2 s wall clock, 2 workers |
+| `npm run test:check` | green — all suites linked, all declare `@covers` |
+| `mobile-smoke` (worker, the default) | green — 21 checks |
+| `mobile-smoke` (`?worker=0`, in-process) | green — 21 checks |
+| `worker-smoke` on both transports | green — 19 checks each |
+| Bundle | `index.js` 989 kB (288 kB gz) · `sim.worker.js` 214 kB · `index.css` 53.7 kB |
+| Worker message size | not instrumented yet — see the note below |
+
+**The baseline was not green as found.** 12 of 42 suites (every `hud/*` suite)
+failed to even construct a HUD: `WorldMapOverlay`'s constructor threw when
+`getContext('2d')` answered `null`, and `tests/fixtures/hud.ts` answered `null`
+for every canvas. `HUD.buildChrome()` constructs the overlay unconditionally, so
+one unavailable 2D backend deleted the entire HUD — and every assertion built on
+it — from the suite. `pages.yml` never runs `npm test`, so CI could not see it.
+Fixed as part of Phase 0: the overlay now holds its context optionally and
+skips painting when there is none (the same contract `HUD.buildMinimap` already
+kept), the fixture provides a recording 2D stub, and `tests/hud/worldmap.test.ts`
+pins both halves plus the painting that `null` used to hide.
+
+**Baseline invariants to re-measure after every phase:** the table above, plus
+`simulation.step()` cost during `sim/soak` and the `sim.worker` payload sizes.
+
+**Known gap carried forward:** the jsdom stub counts 2D calls; it cannot verify
+*pixels*, so a wrong `MapTransform` still passes. Anything that needs to assert
+what the map looks like belongs in the browser smokes (Phase 0's
+`mobile-smoke`), not in `hud/*`. `scripts/run-tests.mjs` has no worker-message
+instrumentation, so Phase 0's "record baseline worker message size if
+instrumentation already exists" is deferred to Phase 23, where that
+instrumentation is actually specified.
+
 
 # 5. Phase 1 — Establish Simulation Invariants
 
