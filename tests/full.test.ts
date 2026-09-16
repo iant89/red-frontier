@@ -31,6 +31,7 @@ import './sim/build.test';
 import './sim/grid.test';
 import './sim/alerts.test';
 import './sim/weather.test';
+import './sim/weather-system.test';
 import './sim/storms.test';
 import './sim/rovers.test';
 import './sim/proximity.test';
