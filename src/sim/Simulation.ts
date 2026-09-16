@@ -152,6 +152,7 @@ import { getProfiler, profilerEnabled } from './debug/Profiler';
 import { decodeSave } from './persistence/SaveCodec';
 import { coerceTask } from './persistence/SaveValidator';
 import type { SaveState } from './persistence/SaveSchema';
+import { ClockSystem } from './systems/ClockSystem';
 
 // Phase 2 — state extraction
 import {
@@ -1295,15 +1296,12 @@ export class Simulation {
    * Jump the mission calendar: set the sol and the time-of-day fraction
    * (0 = midnight, 0.25 = sunrise, 0.5 = noon). simTime is re-synced so the
    * weather scheduler and history windows stay coherent after the jump.
+   *
+   * Phase 4: clock part delegated to ClockSystem.setTime.
    */
   devSetTime(sol: number, frac: number): void {
-    const target = Math.max(0, Math.floor(sol));
-    const f = clamp(frac, 0, 0.9999);
-    this.clock.restore({ sol: target, frac: f });
-    this.simTime = Math.max(0, (target + f - START_SOL_FRAC) * SOL_SECONDS);
+    ClockSystem.setTime(this.state, sol, frac);
     this.weather.time = this.simTime;
-    // History windows are wall-clock comparisons — let them re-anchor at the
-    // new time rather than starving until simTime catches back up.
     this.lastHistoryAt = -Infinity;
     this.lastFlows = {
       water: { produced: 0, consumed: 0 },
@@ -1317,27 +1315,13 @@ export class Simulation {
 
   /** Advance simulation by `frameDt` game seconds (fixed substeps applied). */
   step(frameDt: number): number {
-    if (frameDt <= 0 || !Number.isFinite(frameDt)) return 0;
-    this.remainder += frameDt;
-
-    // The epsilon absorbs representation error so that a delivery which is
-    // mathematically a whole number of ticks always yields that many ticks.
-    let owed = Math.floor(this.remainder / SIM_TICK + 1e-9);
-
-    // Bound catch-up so a backgrounded tab can't produce a multi-second freeze.
-    const maxTicks = 400;
-    if (owed > maxTicks) {
-      owed = maxTicks;
-      this.remainder = 0; // drop the backlog rather than fast-forwarding time
-    } else {
-      this.remainder -= owed * SIM_TICK;
-    }
+    // Phase 4: fixed-step accumulation delegated to ClockSystem
+    const owed = ClockSystem.consume(this.state, frameDt);
 
     let ticks = 0;
     const t0 = profilerEnabled() ? performance.now() : 0;
     while (ticks < owed) {
       this.tick();
-      this.ticksRun++;
       ticks++;
     }
 
@@ -1346,9 +1330,6 @@ export class Simulation {
       getProfiler().recordStep(ticks, dt);
     }
 
-    // Refactor roadmap Phase 1: invariant assertions run in tests only — the
-    // switch is process-wide and stays off in the game and the worker, so
-    // this costs nothing in production (see sim/debug/SimulationAssertions).
     if (invariantChecksEnabled()) assertInvariants(this, `step at t=${this.simTime.toFixed(2)}s`);
 
     return ticks;
@@ -1357,10 +1338,8 @@ export class Simulation {
   private tick(): void {
     if (this.gameOver) return;
 
-    this.simTime += SIM_TICK;
-
-    // 1. clock & sun
-    const newSol = this.clock.advance(SIM_TICK);
+    // 1. clock & sun — Phase 4: delegated to ClockSystem
+    const newSol = ClockSystem.tick(this.state);
     if (newSol) {
       this.event('info', `A new sol begins. Sol ${this.clock.sol + 1}.`);
     }
@@ -4050,10 +4029,12 @@ export class Simulation {
       : 'pioneer';
     this.worldOptions = { ...DEFAULT_WORLD_OPTIONS, ...(data.worldOptions ?? {}) };
     this.consumptionMul = (DIFFICULTIES[this.difficulty] ?? DIFFICULTIES.pioneer).consumptionMul;
-    this.simTime = data.simTime || 0;
-    this.ticksRun = (data as { ticksRun?: number }).ticksRun ?? Math.floor(this.simTime / SIM_TICK + 1e-9);
-    this.remainder = 0;
-    this.clock.restore(data.clock as { sol?: number; frac?: number });
+    // Phase 4: clock/time restore delegated to ClockSystem
+    ClockSystem.restore(this.state, {
+      simTime: data.simTime,
+      ticksRun: (data as { ticksRun?: number }).ticksRun,
+      clock: data.clock as { sol?: number; frac?: number },
+    });
     this.weather = new Weather(this.seed ^ 0x77e711e);
     this.weather.time = this.simTime;
     if (data.weather) this.weather.restore(data.weather);
