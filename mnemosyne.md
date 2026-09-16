@@ -215,6 +215,28 @@ Persistent notes for future coding sessions.
   is Phase 2 — ColonyState, then Phase 3 — Persistence as first major extraction.
   Recorded in roadmap §58 "Recorded (Milestone 1 complete)".
 
+## Rover task handlers — check order is load-bearing (salvage ping-pong)
+
+- **"Am I done/full?" checks must run before "am I there yet?" checks** in a
+  rover task handler. `doSalvage` had the full-hold check *after* the distance
+  check; a loaded rover trying to leave the site was turned straight back
+  (goal `toSalvage`↔`toDepot` every tick — the status glitched between
+  "Heading to the site" and "Hauling to storage"), or, inside the 8 m reach,
+  the at-site branch clobbered goal/phase to `salvage` before `beginUnload`
+  re-pathed — defeating `setTravel`'s keep-in-flight guard, so the rover
+  re-pathed every tick and **froze on the reach ring without moving**.
+  `doMine` already had the right order; match it in any new task handler.
+- **`setTravel`'s keep-in-flight guard is only as good as the caller**: it
+  keeps a path only while `goal` stays the same between ticks. Anything that
+  flips goal/phase between travel issuances (task branches, status writes)
+  makes every tick a fresh A* path — and with one-waypoint-per-tick
+  advancement the rover spends its whole tick stepping onto the cell centre it
+  already occupies. Symptom: `phase === 'moving'`, position frozen.
+- Full-silo salvage parks at the depot (`routePaused`, like a stuck haul
+  route) retrying `tryUnload` as consumption frees room; the out-and-back
+  loop resumes on its own. Pinned by the "full hold hauls home" test in
+  `tests/sim/pois.test.ts`.
+
 ## Refactor Phase 5 (WeatherSystem) — and the snapshot-aliasing trap
 
 - `src/sim/systems/WeatherSystem.ts` owns the weather behavior that used to

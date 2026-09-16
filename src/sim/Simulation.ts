@@ -2962,6 +2962,32 @@ export class Simulation {
     const def = ROVERS[r.kind];
     const hours = SIM_TICK * HOURS_PER_SEC;
     const reach = 8;
+
+    /**
+     * A full hold turns for home and *keeps* its depot heading. This check
+     * must run before the distance check below — the exact order `doMine`
+     * uses. The at-site branch used to sit in front of it and clobbered
+     * goal/phase back to `salvage` every tick before re-calling beginUnload,
+     * which re-pathed from scratch each tick (the rover never got past the
+     * first A* waypoint and froze just outside the reach ring); and once a
+     * loaded rover crossed the ring, the far branch turned it straight back
+     * to the site — the "hauling to storage ↔ heading to the site"
+     * ping-pong.
+     */
+    if (def.capacityKg - cargoMass(r) <= 0.01) {
+      if (this.nearDepot(r.x, r.z)) {
+        // Full silos park the rover at the depot — retrying as consumption
+        // frees room — with the same "Route paused" read a stuck haul
+        // route gives, instead of twiddling depot paths every tick.
+        r.routePaused = !this.canDeliverAny(r);
+        this.tryUnload(r);
+      } else {
+        this.beginUnload(r);
+      }
+      return;
+    }
+    r.routePaused = false;
+
     const dist = Math.hypot(p.x - r.x, p.z - r.z);
     if (dist > reach) {
       r.gid = p.id;
@@ -2974,10 +3000,6 @@ export class Simulation {
     r.statusText = p.kind === 'supplyDrop' ? 'Recovering cargo' : 'Salvaging';
 
     const room = def.capacityKg - cargoMass(r);
-    if (room <= 0.01) {
-      this.beginUnload(r);
-      return;
-    }
     const rate = salvageRateKgS(p.kind) * this.weather.workMultiplierAt(r.x, r.z) * this.roverWorkMul(r);
     const { takenKg, perResource } = takeSalvage(p, room, rate, SIM_TICK);
     for (const res of ALL_RESOURCES) {
