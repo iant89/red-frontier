@@ -154,6 +154,31 @@ Persistent notes for future coding sessions.
   puts the stage's top closer to the directional light than the old near plane,
   which clipped its shadow.
 
+## Milestone 1 — deterministic state hash (StateHash)
+
+- `src/sim/debug/StateHash.ts`: `hashSimulation(sim)` → `rf1-<14hex>-<14hex>`
+  (two cyrb53 lanes over canonical-JSON — keys sorted, entity arrays sorted
+  by id). **A 53-bit hash needs 14 hex digits** — padStart(13) was a real
+  bug caught by the format test; keep the `{14}` in the regex.
+- Hashes **live state, deliberately not `snapshot()`** — so a persistence bug
+  can't hide behind the tool that polices it, and Phase 3's codec rework
+  won't churn the hash. Consequence: a live sim and its just-restored twin
+  do **not** hash equal — restore resumes rovers/buildings *at rest*
+  (goal/nav/chargeSat/history reset by design). Compare restored-vs-restored,
+  or compare after both advance. `tests/sim/state-hash.test.ts` pins this.
+- Excluded on purpose (would churn without behavior change): `statusText`,
+  `idleReason`, rover `label`, colonist `name`; also unobservable: `remainder`
+  and the `dropRng` closure counter (a dropRng divergence surfaces one roll
+  later as a real `nextDropSol`/drop diff, which *is* hashed).
+- Sensitivity-test pattern: restore by **captured exact value**, never by
+  inverse arithmetic — `x + 0.1; x - 0.1` leaves float residue and the
+  back-to-baseline assert fails.
+- The hash module is imported only by tests: it tree-shakes out of the app
+  bundle (build size unchanged). If you ever wire it into dev tooling,
+  remember it becomes bundle weight.
+- Milestone 1 remaining after this: perf instrumentation, save validation
+  tests, command transcript infrastructure — *then* Persistence extraction.
+
 ## Refactor Phase 1 (invariants) — the loud-state era
 
 - `src/sim/debug/SimulationAssertions.ts` is the Phase 1 deliverable: pure

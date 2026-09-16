@@ -1821,6 +1821,14 @@ Potential future uses:
 
 # 31. Phase 27 — Simulation State Hashing
 
+**Delivered early.** The tool itself was pulled forward into Milestone 1 so
+the extraction phases already have it: `src/sim/debug/StateHash.ts` exposes
+`hashSimulation(sim)` → `rf1-<14 hex>-<14 hex>` (two cyrb53 lanes over a
+canonical-JSON projection of live authoritative state). Covered by
+`tests/sim/state-hash.test.ts`. What remains for this phase is the *uses*
+described below — pinning expected hashes for canonical scenarios and wiring
+them into the transcript/replay infrastructure.
+
 Add a development/test-only deterministic state hash.
 
 Hash important simulation state:
@@ -2917,13 +2925,13 @@ The first concrete milestone should be:
 
     Milestone 1 — Safe Refactoring Foundation
 
-    [ ] Baseline repository
-    [ ] Full test suite green
-    [ ] Production build green
-    [ ] Worker mode verified
-    [ ] Local mode verified
-    [ ] Simulation invariant checker
-    [ ] Deterministic state hashing
+    [x] Baseline repository                       (Phase 0, PR #38)
+    [x] Full test suite green                     (Phase 0)
+    [x] Production build green                    (Phase 0)
+    [x] Worker mode verified                      (Phase 0)
+    [x] Local mode verified                       (Phase 0)
+    [x] Simulation invariant checker              (Phase 1, PR #40)
+    [x] Deterministic state hashing               (src/sim/debug/StateHash.ts)
     [ ] Performance instrumentation
     [ ] Save validation tests
     [ ] Command transcript test infrastructure
