@@ -50,6 +50,7 @@ import './sim/host.test';
 import './sim/worker.test';
 import './render/particles.test';
 import './render/selection.test';
+import './render/solar.test';
 import './render/descent-stage.test';
 import './app/update-check.test';
 import './ui/build-status.test';
