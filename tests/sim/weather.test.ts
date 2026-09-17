@@ -71,6 +71,18 @@ test('weather is deterministic for a given seed', () => {
 
 group('Storms travel (spatial weather)');
 
+test('radar returns carry speed and remaining life so the map can draw a track', () => {
+  const wx = new Weather(9);
+  wx.setRadar(520, true);
+  wx.debugScheduleStorm('devil', 0, 80);
+  wx.tick(1 / 20, 1 / 20, 5);
+  const cell = wx.radar.cells[0];
+  assert.ok(cell, 'a scheduled devil is inside 520 km');
+  assert.ok(cell.speedKmS > 0, 'travel speed rides on the return');
+  assert.ok(cell.remainingS > 0, 'so does the envelope horizon');
+  assert.ok(Number.isFinite(cell.heading), 'and a compass heading for the track');
+});
+
 test('a storm is a place on the map, and that place closes in', () => {
   const wx = new Weather(9);
   wx.debugScheduleStorm('regional', 0, 120);

@@ -423,7 +423,7 @@ export const BUILDINGS: Record<BuildingKind, BuildingDef> = {
     kind: 'weatherStation',
     label: 'Weather Radar Station',
     description:
-      'A steerable radar dish and atmospheric instruments. Builds a live weather map of nearby storm cells and extends the colony to an advanced forecast.',
+      'A RAXpol polarimetric radar under a green radome, a vane anemometer, and MLI-wrapped instruments. Builds a live weather map of nearby storm cells — including dust devils and their predicted tracks — and extends the colony to an advanced forecast.',
     radius: 6,
     cost: costs([
       ['regolith', 24],

@@ -52,6 +52,7 @@ import './render/particles.test';
 import './render/selection.test';
 import './render/solar.test';
 import './render/descent-stage.test';
+import './render/weather-station.test';
 import './app/update-check.test';
 import './ui/build-status.test';
 import './ui/gestures.test';
@@ -71,4 +72,4 @@ import './hud/worldmap.test';
 
 // Each suite prints one line as it runs; `report` prints the total, every
 // failure, and exits non-zero if anything broke.
-report(55);
+report(56);
