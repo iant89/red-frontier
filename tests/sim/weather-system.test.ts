@@ -31,6 +31,25 @@ function schedulerView(wx: Weather): string {
 
 group('WeatherSystem.tick — progression');
 
+test('a powered radar station exposes storm cells and advanced forecasting', () => {
+  const sim = new Simulation({ seed: 20 });
+  const station = buildOnline(sim, 'weatherStation');
+  WeatherSystem.refreshRadar(sim.state);
+  assert.equal(sim.weather.radar.available, true);
+  assert.equal(sim.weather.radar.advancedForecast, true);
+  assert.equal(sim.weather.radar.coverageKm, 520);
+
+  sim.weather.debugScheduleStorm('regional', sim.simTime, 120);
+  const contact = sim.weather.radar.cells[0];
+  assert.ok(contact, 'a nearby scheduled storm should be plotted');
+  assert.equal(contact.active, false);
+  assert.ok(contact.arrivesIn > 0);
+
+  station.powerSat = 0.1;
+  WeatherSystem.refreshRadar(sim.state);
+  assert.equal(sim.weather.radar.available, false, 'a brownout removes radar coverage');
+});
+
 test('dustTransmission mirrors the weather transmission every tick', () => {
   const sim = new Simulation({ seed: 21 });
   sim.weather.debugSuppressRolls();

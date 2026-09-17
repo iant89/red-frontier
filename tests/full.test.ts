@@ -71,4 +71,4 @@ import './hud/worldmap.test';
 
 // Each suite prints one line as it runs; `report` prints the total, every
 // failure, and exits non-zero if anything broke.
-report(54);
+report(55);

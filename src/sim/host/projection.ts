@@ -28,7 +28,7 @@ import type { Deposit } from '../World';
 import type { Poi } from '../pois';
 import type { Alert, LogEvent } from '../alerts';
 import type { SunState } from '../clock';
-import type { StormCell, StormKind, StormKindReal } from '../weather';
+import type { StormCell, StormKind, StormKindReal, WeatherRadar } from '../weather';
 import type { FluidId, ResourceAmounts } from '../defs';
 import { ALL_FLUIDS } from '../defs';
 import type { PowerTier } from '../config';
@@ -48,6 +48,7 @@ export interface WeatherPayload {
   storm: StormKind;
   stormIntensity: number;
   solarTransmission: number;
+  radar: WeatherRadar;
   lightning: { x: number; z: number; t: number } | null;
   rollsSuppressed: boolean;
   forecast: { kind: StormKind; label: string; arrivesIn: number } | null;
@@ -176,6 +177,10 @@ export function projectView(
       storm: sim.weather.storm,
       stormIntensity: sim.weather.stormIntensity,
       solarTransmission: sim.weather.solarTransmission,
+      radar: {
+        ...sim.weather.radar,
+        cells: sim.weather.radar.cells.map((cell) => ({ ...cell })),
+      },
       lightning: sim.weather.lastStrike ? { ...sim.weather.lastStrike } : null,
       rollsSuppressed: sim.weather.rollsSuppressed,
       forecast: sim.weather.forecast(),

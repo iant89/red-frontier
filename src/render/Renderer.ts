@@ -23,22 +23,6 @@ import { DescentStage } from './DescentStage';
 
 export type OverlayMode = 'none' | 'power' | 'life' | 'weather';
 
-/** The met-mast anemometer's animated parts plus its mechanical state. */
-interface Anemometer {
-  /** The whole mast assembly (hidden on every array but the colony's first). */
-  root: THREE.Object3D;
-  /** The fin-and-body assembly that yaws into the wind. */
-  vane: THREE.Object3D;
-  /** The cup wheel that spins about the vane's axis. */
-  rotor: THREE.Object3D;
-  /** Current vane yaw — lags the wind like a fin with real inertia. */
-  yaw: number;
-  /** Current rotor angular velocity (rad/s), wound up by gusts and eased down. */
-  rotorVel: number;
-  /** Accumulated rotor angle (rad). */
-  rotorAngle: number;
-}
-
 /** Sky tint the dust drags everything toward during a storm. */
 const DUST_HAZE = new THREE.Color(0x9a5f33);
 
@@ -69,36 +53,6 @@ const SELECTION_GLOW_RADIUS = SELECTION_RING_RADIUS * 1.18;
 const SELECTION_GLOW_THICKNESS = SELECTION_RING_THICKNESS * 3.2;
 /** Seconds per breath. Slow enough to read as a pulse, not a strobe. */
 const SELECTION_PULSE_PERIOD = 1.9;
-
-/**
- * Cup-anemometer spin per unit of wind (rad/s per m/s). At equilibrium a cup
- * rotor turns at ω ≈ λ·v/r — a tip-speed ratio of ~0.5 at the rotor's 0.4 m
- * cup radius works out to ≈1.2 rad/s for every m/s of wind.
- */
-const ANEMOMETER_SPIN_PER_MPS = 1.2;
-/** Storm cap: past this the rotor would strobe backward on screen, so clamp. */
-const ANEMOMETER_MAX_SPIN_RAD = 28;
-
-/**
- * Spin rate (rad/s) for the met mast's vane anemometer at a wind speed.
- * Exported so the render suite can check the curve without a GPU context.
- */
-export function anemometerSpinRate(windSpeedMps: number): number {
-  if (!Number.isFinite(windSpeedMps) || windSpeedMps <= 0) return 0;
-  return Math.min(ANEMOMETER_MAX_SPIN_RAD, windSpeedMps * ANEMOMETER_SPIN_PER_MPS);
-}
-
-/**
- * Shortest signed angular change from `from` to `to`, wrapped to (−π, π] —
- * the way a real wind vane hunts a new direction: never the long way around.
- * Exported so the render suite can check the wrapping without a GPU context.
- */
-export function shortestAngleDelta(from: number, to: number): number {
-  let d = (to - from) % (Math.PI * 2);
-  if (d > Math.PI) d -= Math.PI * 2;
-  if (d < -Math.PI) d += Math.PI * 2;
-  return d;
-}
 
 /**
  * The selection breath as a pure function of **sim** time: a 0..1 cosine, so
@@ -190,8 +144,7 @@ export class GameRenderer {
       track?: THREE.Object3D;
       /** Solar: the photodiode under the dome; it brightens with array output. */
       sensorEye?: THREE.Mesh;
-      /** Solar: the met mast's vane anemometer (shown on the first array only). */
-      anem?: Anemometer;
+
     }
   >();
   private depositMeshes = new Map<number, THREE.Group>();
@@ -703,11 +656,9 @@ export class GameRenderer {
   sync(sim: SimView): void {
     this.clockT = sim.simTime;
     // One sim-time delta for everything animated this frame (particles and
-    // instruments alike), and one wind reading for everything that weathervanes.
+    // the radar dish alike).
     this.frameDt = Math.min(0.5, Math.max(0, sim.simTime - this.lastSimT));
     this.lastSimT = sim.simTime;
-    this.wind.speed = sim.weather.windSpeed;
-    this.wind.dir = sim.weather.windDirRad;
     // Panels face the sun's azimuth and tilt with its elevation.
     const el = Math.max(0, sim.sun.elevationRad);
     this.sunTilt = {
@@ -1003,12 +954,6 @@ export class GameRenderer {
 
   private syncBuildings(buildings: SBuilding[]): void {
     const seen = new Set<number>();
-    // The colony's met mast flies on its first solar array — the oldest one
-    // still standing — so it migrates if the original is bulldozed.
-    let firstSolarId = Number.POSITIVE_INFINITY;
-    for (const b of buildings) {
-      if (b.kind === 'solar' && b.id < firstSolarId) firstSolarId = b.id;
-    }
     for (const b of buildings) {
       seen.add(b.id);
       const def = BUILDINGS[b.kind];
@@ -1034,13 +979,6 @@ export class GameRenderer {
         if (b.kind === 'solar') {
           rec.track = body.getObjectByName('solarTrack') ?? undefined;
           rec.sensorEye = (body.getObjectByName('sensorEye') as THREE.Mesh | null) ?? undefined;
-          const root = body.getObjectByName('metMast');
-          const vane = root?.getObjectByName('metVane');
-          const rotor = root?.getObjectByName('metRotor');
-          if (root && vane && rotor) {
-            root.visible = false;
-            rec.anem = { root, vane, rotor, yaw: this.wind.dir, rotorVel: 0, rotorAngle: 0 };
-          }
           // A solar array is re-seated so its swinging panel field clears the
           // dirt across its whole sweep circle, not just under the mast.
           const lift = this.solarGroundLift(b.x, b.z, padTop);
@@ -1107,8 +1045,10 @@ export class GameRenderer {
             m.emissiveIntensity =
               0.15 + 1.6 * Math.min(1, b.genKw / Math.max(1, def.powerProduceKw));
           }
-          // The first array's met mast spins and weathervanes with the wind.
-          if (rec.anem) this.syncAnemometer(rec.anem, b.id === firstSolarId);
+        }
+        if (b.kind === 'weatherStation') {
+          const dish = rec.body.getObjectByName('radarDish');
+          if (dish) dish.rotation.y = this.clockT * 0.45;
         }
         if (def.process && running && b.throughput > 0.02) {
           const pulse = 1 + Math.sin(this.clockT * 3.2) * 0.02 * b.throughput;
@@ -1130,13 +1070,10 @@ export class GameRenderer {
   private sunTilt = { y: 0, z: 0 };
   private clockT = 0;
   /**
-   * Sim seconds the current frame advanced (0 while paused). Instruments and
-   * particles alike run on the sim clock — a paused colony holds still.
+   * Sim seconds the current frame advanced (0 while paused). Weather effects
+   * and particles alike run on the sim clock — a paused colony holds still.
    */
   private frameDt = 0;
-  /** The sim's own wind reading, cached for the met mast's vane anemometer. */
-  private wind = { speed: 0, dir: 0 };
-
   /**
    * How much extra height a solar array needs at (x, z) so its panel field
    * never swings into the ground: the tracker pivots 4.2 m above its base
@@ -1159,24 +1096,6 @@ export class GameRenderer {
     // The hardest thing under the swing: the dirt, or the pad's own face.
     const floor = Math.max(maxH - centre, padTop);
     return Math.max(0, floor + 0.25 - swingLow);
-  }
-
-  /**
-   * Drive one met mast's vane anemometer from the sim's wind: the cup wheel
-   * spins at the aerodynamic equilibrium for the wind speed with a little
-   * inertia (gusts wind it up, lulls let it coast), and the vane hunts the
-   * wind direction around the short way like a fin with real drag.
-   */
-  private syncAnemometer(anem: Anemometer, live: boolean): void {
-    anem.root.visible = live;
-    if (!live) return;
-    const dt = this.frameDt;
-    const targetVel = anemometerSpinRate(this.wind.speed);
-    anem.rotorVel += (targetVel - anem.rotorVel) * Math.min(1, dt / 0.7);
-    anem.rotorAngle += anem.rotorVel * dt;
-    anem.rotor.rotation.z = anem.rotorAngle;
-    anem.yaw += shortestAngleDelta(anem.yaw, this.wind.dir) * Math.min(1, dt / 0.5);
-    anem.vane.rotation.y = anem.yaw;
   }
 
   /**
@@ -1428,8 +1347,6 @@ export class GameRenderer {
         // A mast-mounted tracker array. The static mast assembly carries a
         // rotating head: the panel field on its torque tube, and the tinted
         // dome on the tube's instrument boom with the sun sensor inside.
-        // (The colony's first array also raises a met mast with a working
-        // vane anemometer — syncBuildings shows it on one array only.)
         const steel = mat(0x8b9299, { metal: 0.65, rough: 0.4 });
 
         // --- static mast assembly -------------------------------------------
@@ -1459,8 +1376,7 @@ export class GameRenderer {
         // Everything from here up tracks the sun: syncBuildings writes its
         // rotation.y (azimuth) and rotation.x (pitch about the torque tube)
         // every frame. The pivot rides 4.2 m up the mast, so even at full
-        // pitch the far corner only dips to ~1 m off the pad — and the free
-        // air below the swing is where the met mast clamps on.
+        // pitch the far corner only dips to ~1 m off the pad.
         const head = new THREE.Group();
         head.name = 'solarTrack';
         head.position.y = 4.2;
@@ -1523,75 +1439,45 @@ export class GameRenderer {
         head.add(sensorPost, sensor, eye, dome, domeRim);
         g.add(head);
 
-        // --- met mast (first array only) -------------------------------------
-        // A small instrument pole clamped to the side of the main mast —
-        // feet on the footing, braced back to the pylon — with a vane
-        // anemometer on top. It lives *below* the tracking field's lowest
-        // swing: a freestanding mast closer than ~10 m to the axis would be
-        // beaten off by the yawing torque tube and the pitching panel
-        // corners, so the tracker mast carries it instead. The wind reading
-        // comes from the sim: the vane hunts the direction, the cup wheel
-        // spins up with the speed.
-        const metRoot = new THREE.Group();
-        metRoot.name = 'metMast';
-        metRoot.position.set(1.5, 0, 0);
-        const metBase = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.15, 0.18, 0.14, 8),
-          mat(0x6b6f75, { rough: 0.9, metal: 0.05 }),
+        break;
+      }
+      case 'weatherStation': {
+        // A compact radar hut: the dish is intentionally legible at strategic
+        // zoom and rotates in syncBuildings while the simulation is running.
+        const hut = new THREE.Mesh(
+          new THREE.BoxGeometry(7.5, 2.8, 6.2),
+          mat(0x405957, { rough: 0.55, metal: 0.35 }),
         );
-        metBase.position.y = 0.67;
-        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 2.25, 8), steel);
-        pole.position.y = 1.73;
-        const box = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.36, 0.2), mat(0x3f4348, { metal: 0.6, rough: 0.5 }));
-        box.position.y = 2.2;
-        metRoot.add(metBase, pole, box);
-        // Braces tying the instrument pole back to the mast.
-        for (const by of [1.4, 1.9]) {
-          const brace = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 1.16, 6), steel);
-          brace.rotation.z = Math.PI / 2;
-          brace.position.set(0.93, by, 0);
-          metRoot.add(brace);
-        }
-        // The vane: body tube, nose, cup wheel in front, fin behind. Built
-        // facing -Z (rotor upwind, fin downwind) so vane yaw *is* the wind
-        // direction the sim reports, matching the sim's atan2(x, z) heading.
-        const vane = new THREE.Group();
-        vane.name = 'metVane';
-        vane.position.y = 2.95;
-        const vaneBody = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.9, 8), mat(0x5a554a, { metal: 0.6, rough: 0.4 }));
-        vaneBody.rotation.x = Math.PI / 2;
-        vaneBody.position.z = 0.08;
-        const nose = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.07, 0.2, 8), steel);
-        nose.rotation.x = Math.PI / 2;
-        nose.position.z = -0.42;
-        const fin = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.34, 0.44), mat(0x9aa2a8, { metal: 0.5, rough: 0.45 }));
-        fin.position.z = 0.6;
-        vane.add(vaneBody, nose, fin);
-        const rotor = new THREE.Group();
-        rotor.name = 'metRotor';
-        rotor.position.z = -0.52;
-        const hub = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 8), steel);
-        rotor.add(hub);
-        for (let k = 0; k < 3; k++) {
-          const arm = new THREE.Group();
-          arm.rotation.z = (k * Math.PI * 2) / 3;
-          const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.4, 6), steel);
-          rod.rotation.z = Math.PI / 2;
-          rod.position.x = 0.2;
-          // Cup bowls face tangentially, all in the same sense, so the wind
-          // catches one face and spills off the next — that's what turns it.
-          const cup = new THREE.Mesh(
-            new THREE.SphereGeometry(0.095, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2),
-            mat(0xd8d2c2, { rough: 0.4, metal: 0.3 }),
-          );
-          cup.position.x = 0.4;
-          arm.add(rod, cup);
-          rotor.add(arm);
-        }
-        vane.add(rotor);
-        vane.scale.setScalar(1.25); // readable at strategic zoom
-        metRoot.add(vane);
-        g.add(metRoot);
+        hut.position.y = 1.4;
+        const mast = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.22, 0.3, 4.6, 10),
+          mat(0x879b98, { rough: 0.4, metal: 0.65 }),
+        );
+        mast.position.y = 4.1;
+        const dish = new THREE.Group();
+        dish.name = 'radarDish';
+        dish.position.y = 6.2;
+        const bowl = new THREE.Mesh(
+          new THREE.SphereGeometry(2.25, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2),
+          mat(0x6fd3b4, { rough: 0.28, metal: 0.45 }),
+        );
+        bowl.rotation.x = -Math.PI / 2;
+        const feed = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.12, 0.12, 1.9, 8),
+          mat(0xd8d2c2, { rough: 0.35, metal: 0.7 }),
+        );
+        feed.position.y = 0.75;
+        dish.add(bowl, feed);
+        const beacon = new THREE.Mesh(
+          new THREE.SphereGeometry(0.18, 10, 8),
+          new THREE.MeshStandardMaterial({
+            color: 0x6fd3b4,
+            emissive: 0x6fd3b4,
+            emissiveIntensity: 1.2,
+          }),
+        );
+        beacon.position.set(2.4, 3.2, 0);
+        g.add(hut, mast, dish, beacon);
         break;
       }
       case 'battery': {

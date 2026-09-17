@@ -417,6 +417,8 @@ export class HUD {
               <span class="wx-bar"><i id="wx-vis-bar" style="width:100%"></i></span>
             </div>
           </div>
+          <canvas id="wx-radar-map" class="wx-radar-map" width="260" height="82" aria-label="Weather radar map"></canvas>
+          <div class="wx-radar-status" id="wx-radar-status">Radar offline · build a Weather Radar Station.</div>
           <div class="wx-status" id="wx-status">Clear skies.</div>
         </div>
         <div class="vdivide"></div>
@@ -451,6 +453,7 @@ export class HUD {
         <div class="bi-cost" id="bi-cost"></div>
         <div class="bi-power" id="bi-power"></div>
         <div class="bi-process" id="bi-process"></div>
+        <div class="bi-process" id="bi-radar" style="display:none"></div>
       </div>
       <div class="panel" id="hintbar" style="display:none"></div>
       <div class="panel" id="log"><span class="lg-title hud-drag">Colony log</span><div class="log-body" id="log-body"></div></div>
@@ -1182,7 +1185,10 @@ export class HUD {
             : def.batteryKWh
               ? `${def.batteryKWh} kWh`
               : '';
-      btn.title = `${def.label} — ${def.description}\n\nCost: ${costTxt}${power ? `\nPower: ${power}` : ''}${def.process ? `\nProcess: ${def.process.summary}` : ''}`;
+      const radar = def.weatherRadarRangeKm
+        ? `\nRadar: ${def.weatherRadarRangeKm} km${def.advancedForecast ? ' · advanced forecast' : ''}`
+        : '';
+      btn.title = `${def.label} — ${def.description}\n\nCost: ${costTxt}${power ? `\nPower: ${power}` : ''}${def.process ? `\nProcess: ${def.process.summary}` : ''}${radar}`;
       btn.innerHTML = `
         <span class="ic">${iconFor(k)}</span>
         <span class="bl">${def.label}</span>
@@ -1253,6 +1259,11 @@ export class HUD {
     const pr = this.el('bi-process');
     pr.style.display = def.process ? '' : 'none';
     if (def.process) pr.innerHTML = `<span class="k">Process</span> ${def.process.summary}`;
+    const radar = this.el('bi-radar');
+    radar.style.display = def.weatherRadarRangeKm ? '' : 'none';
+    if (def.weatherRadarRangeKm) {
+      radar.innerHTML = `<span class="k">Weather</span> ${def.weatherRadarRangeKm} km radar${def.advancedForecast ? ' · advanced forecasting' : ''}`;
+    }
     this.el('build-info').style.display = 'block';
   }
 
@@ -1390,6 +1401,7 @@ export class HUD {
     this.el('wx-arrow').style.transform = `rotate(${(wx.windDirRad * 180) / Math.PI}deg)`;
     this.el('wx-dust-bar').style.width = `${Math.round(wx.dust * 100)}%`;
     this.el('wx-vis-bar').style.width = `${Math.round(wx.visibility * 100)}%`;
+    this.drawWeatherRadar(sim);
 
     const wxStatus = this.el('wx-status');
     const fc = wx.forecast();
@@ -1405,7 +1417,8 @@ export class HUD {
       const where = threat
         ? ` ${Math.round(threat.distKm)} km ${compassPoint(threat.bearingRad)}, tracking in —`
         : '';
-      wxStatus.textContent = `${fc.label} forecast${where} here in ~${fmtDuration(
+      const outlook = wx.radar.advancedForecast ? 'Advanced radar forecast' : `${fc.label} forecast`;
+      wxStatus.textContent = `${outlook}${where} here in ~${fmtDuration(
         fc.arrivesIn / SOL_SECONDS,
       )}. Charge batteries, shelter the crews.`;
       wxStatus.className = 'wx-status warn';
@@ -1460,6 +1473,103 @@ export class HUD {
     const online = sim.buildings.filter((b) => b.state === 'online').length;
     const sites = sim.buildings.length - online;
     this.el('vitals-sub').textContent = `${online} online${sites ? ` · ${sites} building` : ''}`;
+  }
+
+  /**
+   * Draw the station's planetary radar display. The sim owns the storm cells;
+   * this canvas only turns the projected returns into a compact scope, so the
+   * worker and local transports render exactly the same map.
+   */
+  private drawWeatherRadar(sim: SimView): void {
+    const canvas = this.el('wx-radar-map') as HTMLCanvasElement;
+    const ctx = canvas.getContext('2d');
+    const status = this.el('wx-radar-status');
+    const radar = sim.weather.radar;
+    if (!radar.available) {
+      status.textContent = 'Radar offline · build a Weather Radar Station.';
+    } else {
+      const mode = radar.advancedForecast ? 'advanced forecast' : 'weather map';
+      status.textContent = `Radar ${Math.round(radar.coverageKm)} km · ${radar.cells.length} contact${radar.cells.length === 1 ? '' : 's'} · ${mode}`;
+    }
+    if (!ctx) return;
+
+    const w = canvas.width;
+    const h = canvas.height;
+    const cx = w / 2;
+    const cy = h / 2;
+    const radius = Math.min(w, h) * 0.39;
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = radar.available ? 'rgba(8, 31, 28, 0.92)' : 'rgba(26, 18, 16, 0.72)';
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.strokeStyle = radar.available ? 'rgba(111, 211, 180, 0.22)' : 'rgba(255, 255, 255, 0.08)';
+    ctx.lineWidth = 1;
+    for (const scale of [1, 0.66, 0.33]) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius * scale, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.moveTo(cx - radius, cy);
+    ctx.lineTo(cx + radius, cy);
+    ctx.moveTo(cx, cy - radius);
+    ctx.lineTo(cx, cy + radius);
+    ctx.stroke();
+
+    if (!radar.available) {
+      ctx.fillStyle = 'rgba(216, 176, 136, 0.7)';
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('NO RADAR LOCK', cx, cy + 3);
+      return;
+    }
+
+    const range = Math.max(1, radar.coverageKm);
+    const toScope = (xKm: number, zKm: number) => ({
+      x: cx + (xKm / range) * radius,
+      y: cy - (zKm / range) * radius,
+    });
+    for (const cell of radar.cells) {
+      const p = toScope(cell.xKm, cell.zKm);
+      const r = Math.max(2, (cell.radiusKm / range) * radius);
+      const color =
+        cell.kind === 'planetary'
+          ? '#f0907e'
+          : cell.kind === 'severe'
+            ? '#f0c078'
+            : cell.kind === 'regional'
+              ? '#9fd8ae'
+              : '#8fb8d8';
+      ctx.globalAlpha = cell.active ? 0.22 : 0.1;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 0.9;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = cell.active ? 1.5 : 1;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, Math.max(2.5, cell.active ? 3.5 : 2.5), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // A slow sweep makes the scope read as an instrument even between returns.
+    const sweep = (sim.simTime * 0.55) % (Math.PI * 2);
+    ctx.strokeStyle = 'rgba(159, 216, 174, 0.5)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.sin(sweep) * radius, cy - Math.cos(sweep) * radius);
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(cx, cy, 2.5, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   /** Small generation/load sparkline. Canvas beats 120 DOM nodes here. */
@@ -2082,6 +2192,12 @@ export class HUD {
           `<div class="stat"><span class="k">Drawing</span><span class="v">${b.loadKw.toFixed(1)} kW <span class="dim">· tier ${def.tier}</span></span></div>`,
         );
       }
+      if (def.weatherRadarRangeKm) {
+        rows.push(
+          `<div class="stat"><span class="k">Weather radar</span><span class="v good">${def.weatherRadarRangeKm} km · ${def.advancedForecast ? 'advanced forecast' : 'map returns'}</span></div>`,
+          `<div class="note">${b.powerSat >= 0.5 && b.enabled && !b.damaged ? 'Live radar map is available in colony vitals.' : 'Radar offline until the station is enabled and powered.'}</div>`,
+        );
+      }
       if (def.process) {
         const pct = Math.round(b.throughput * 100);
         rows.push(
@@ -2403,6 +2519,8 @@ function iconFor(k: BuildingKind): string {
       return '🛻';
     case 'rtg':
       return '☢';
+    case 'weatherStation':
+      return '📡';
   }
 }
 

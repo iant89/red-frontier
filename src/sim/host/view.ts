@@ -28,7 +28,7 @@ import type { Simulation } from '../Simulation';
 import type { World } from '../World';
 import type { AlertBus } from '../alerts';
 import type { SolClock } from '../clock';
-import type { StormCell, StormKind, StormKindReal, Weather } from '../weather';
+import type { StormCell, StormKind, StormKindReal, Weather, WeatherRadar } from '../weather';
 import type { DifficultyId, WorldOptions } from '../difficulty';
 
 /**
@@ -77,6 +77,8 @@ export interface WeatherView {
   readonly storm: StormKind;
   readonly stormIntensity: number;
   readonly solarTransmission: number;
+  /** Weather radar returns and advanced-forecast capability. */
+  readonly radar: WeatherRadar;
   /** The most recent lightning strike, for the renderer's flash. */
   readonly lightning: { x: number; z: number; t: number } | null;
   /** False while the developer panel has the sky flying by hand. */

@@ -13,7 +13,8 @@ hardware), **rover logistics** — queueable task orders, repeating haul routes,
 per-rover automation rules, deposit reservations that spread the fleet across
 seams, a Rover Garage that fast-charges, services drivetrains and assembles new
 rovers, and the wear & jump-start recovery loop that keeps the machines on the
-road — and **a planet with somewhere to go**: seeded points of interest the map
+road — plus a dedicated Weather Radar Station that plots storm cells and
+extends the forecast — and **a planet with somewhere to go**: seeded points of interest the map
 does not show until a rover finds them, a SALVAGE task that cuts a wreck apart
 and hauls it home, and Earth cargo missions that land under a transponder and
 get buried by the dust if nobody goes out for them.
@@ -39,7 +40,7 @@ npm run test:sim        # every tests/sim suite
 npm run test:hud        # every tests/hud suite
 npm run test:unit       # the fast formula-level suites
 npm test -- power       # any suite whose name/desc matches "power"
-npm run test:list       # all 54 suites and what each covers
+npm run test:list       # all 55 suites and what each covers
 ```
 
 One URL flag is worth knowing while developing:
@@ -145,7 +146,10 @@ a finite oxygen reserve, so the sim refuses walks it knows they cannot survive
 (and refuses all of them in a storm).
 
 When the forecast turns ugly: charge the batteries, shelter the crews, clean
-the arrays — and remember the RTG does not care what the sky is doing.
+the arrays — and remember the RTG does not care what the sky is doing. A
+powered **Weather Radar Station** adds a live planetary radar scope and gives
+new storms a longer advanced-forecast lead, so the warning is something you
+can build into your logistics plan.
 
 ### Developer mode
 
@@ -398,7 +402,7 @@ historically slowest suites first across the available CPU workers.
 ```
 tests/
   harness.ts          test()/group()/finish(), the per-suite report, the roll-up
-  full.test.ts        optional serial run: imports all 54 suites, prints the total
+  full.test.ts        optional serial run: imports all 55 suites, prints the total
   fixtures/sim.ts     shared sim setup (place a building, run N sols, find a seam)
   fixtures/hud.ts     jsdom bootstrap, a recording 2D canvas stub, one mounted
                       HUD + sim per suite
@@ -474,8 +478,8 @@ What is covered, by TDD §21's categories:
   collapse and dismiss gestures, the alert history, autopause, the supply-drop
   edge markers and their deadlines.
 
-`npm test` runs all 366 checks in isolated parallel child processes, with the
-longest suites launched first; on a two-worker machine it takes about 80 seconds.
+`npm test` runs all 570 checks in isolated parallel child processes, with the
+longest suites launched first; on a two-worker machine it takes about two minutes.
 `npm run test:serial` keeps the linked single-process run available for debugging.
 The renderer needs a GPU and is covered separately by the mobile smoke test.
 
@@ -486,7 +490,7 @@ in — terrain and camera, the mission wizard, staged construction, the power
 grid, the sol and the water → oxygen → food chain, weather and storms, and the
 rover fleet with queued tasks, automation rules and a garage — plus the first
 slice of **P6/T6** (points of interest, the salvage task, supply drops). The MVP
-building set from GDD §16 is complete. `npm test` is green at 54 suites / 567
+building set from GDD §16 is complete. `npm test` is green at 55 suites / 570
 checks.
 
 1. **Finish the Web Worker move** (TDD T1–T2 hardening). `WorkerSimHost` is in:
@@ -529,9 +533,9 @@ checks.
    - transferables for the terrain and `OffscreenCanvas` for the renderer
      (TDD §16 P2/P3), each needing its own guard. Neither is in the tree yet.
 2. **GDD §16 P5 — refining, manufacturing, utility networks, maintenance.** The
-   slice the roadmap puts next. None of it is implemented: `defs.ts` defines ten
+   slice the roadmap puts next. None of it is implemented: `defs.ts` defines eleven
    blueprints (habitat, solar, battery, rtg, warehouse, extractor, oxygenator,
-   greenhouse, workshop, garage), so GDD §04's table still has no **Refinery**,
+   greenhouse, workshop, garage, weather radar station), so GDD §04's table still has no **Refinery**,
    **Laboratory**, **Repair Bay** or **Nuclear Reactor**; ore the rovers haul is
    stockpiled rather than processed (the only `process` definitions are the
    extractor, oxygenator and greenhouse), there is no `sim/utilities/` module

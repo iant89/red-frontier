@@ -52,6 +52,7 @@ const BUILDING_COLOR: Record<string, string> = {
   greenhouse: '#7fb46a',
   garage: '#e07b3a',
   rtg: '#d9553f',
+  weatherStation: '#6fd3b4',
 };
 
 const ROVER_COLOR: Record<string, string> = {

@@ -254,7 +254,8 @@ export type BuildingKind =
   | 'oxygenator'
   | 'greenhouse'
   | 'garage'
-  | 'rtg';
+  | 'rtg'
+  | 'weatherStation';
 
 /**
  * A continuous conversion run by an online, powered building.
@@ -298,6 +299,10 @@ export interface BuildingDef {
   tier: PowerTier;
   /** Continuous conversion, if any. */
   process?: ProcessDef;
+  /** Maximum radius in kilometres covered by an online weather radar. */
+  weatherRadarRangeKm?: number;
+  /** Whether this building turns a basic outlook into an advanced forecast. */
+  advancedForecast?: boolean;
   /** A sealed volume the colonist can live in. */
   pressurized?: boolean;
   /** Recharges rover batteries when they park nearby. */
@@ -413,6 +418,31 @@ export const BUILDINGS: Record<BuildingKind, BuildingDef> = {
     exposure: 0.15,
     buildableBy: ['utility', 'mining'],
     order: 9,
+  },
+  weatherStation: {
+    kind: 'weatherStation',
+    label: 'Weather Radar Station',
+    description:
+      'A steerable radar dish and atmospheric instruments. Builds a live weather map of nearby storm cells and extends the colony to an advanced forecast.',
+    radius: 6,
+    cost: costs([
+      ['regolith', 24],
+      ['iron', 36],
+      ['silicon', 28],
+      ['aluminum', 18],
+    ]),
+    buildTime: 44,
+    powerDrawKw: 10,
+    idlePowerKw: 2,
+    powerProduceKw: 0,
+    batteryKWh: 0,
+    storagePerResourceKg: 0,
+    tier: 2,
+    weatherRadarRangeKm: 520,
+    advancedForecast: true,
+    exposure: 0.3,
+    buildableBy: ['utility', 'mining'],
+    order: 10,
   },
   warehouse: {
     kind: 'warehouse',
