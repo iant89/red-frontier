@@ -23,6 +23,22 @@ import { DescentStage } from './DescentStage';
 
 export type OverlayMode = 'none' | 'power' | 'life' | 'weather';
 
+/** The met-mast anemometer's animated parts plus its mechanical state. */
+interface Anemometer {
+  /** The whole mast assembly (hidden on every array but the colony's first). */
+  root: THREE.Object3D;
+  /** The fin-and-body assembly that yaws into the wind. */
+  vane: THREE.Object3D;
+  /** The cup wheel that spins about the vane's axis. */
+  rotor: THREE.Object3D;
+  /** Current vane yaw — lags the wind like a fin with real inertia. */
+  yaw: number;
+  /** Current rotor angular velocity (rad/s), wound up by gusts and eased down. */
+  rotorVel: number;
+  /** Accumulated rotor angle (rad). */
+  rotorAngle: number;
+}
+
 /** Sky tint the dust drags everything toward during a storm. */
 const DUST_HAZE = new THREE.Color(0x9a5f33);
 
@@ -53,6 +69,36 @@ const SELECTION_GLOW_RADIUS = SELECTION_RING_RADIUS * 1.18;
 const SELECTION_GLOW_THICKNESS = SELECTION_RING_THICKNESS * 3.2;
 /** Seconds per breath. Slow enough to read as a pulse, not a strobe. */
 const SELECTION_PULSE_PERIOD = 1.9;
+
+/**
+ * Cup-anemometer spin per unit of wind (rad/s per m/s). At equilibrium a cup
+ * rotor turns at ω ≈ λ·v/r — a tip-speed ratio of ~0.5 at the rotor's 0.4 m
+ * cup radius works out to ≈1.2 rad/s for every m/s of wind.
+ */
+const ANEMOMETER_SPIN_PER_MPS = 1.2;
+/** Storm cap: past this the rotor would strobe backward on screen, so clamp. */
+const ANEMOMETER_MAX_SPIN_RAD = 28;
+
+/**
+ * Spin rate (rad/s) for the met mast's vane anemometer at a wind speed.
+ * Exported so the render suite can check the curve without a GPU context.
+ */
+export function anemometerSpinRate(windSpeedMps: number): number {
+  if (!Number.isFinite(windSpeedMps) || windSpeedMps <= 0) return 0;
+  return Math.min(ANEMOMETER_MAX_SPIN_RAD, windSpeedMps * ANEMOMETER_SPIN_PER_MPS);
+}
+
+/**
+ * Shortest signed angular change from `from` to `to`, wrapped to (−π, π] —
+ * the way a real wind vane hunts a new direction: never the long way around.
+ * Exported so the render suite can check the wrapping without a GPU context.
+ */
+export function shortestAngleDelta(from: number, to: number): number {
+  let d = (to - from) % (Math.PI * 2);
+  if (d > Math.PI) d -= Math.PI * 2;
+  if (d < -Math.PI) d += Math.PI * 2;
+  return d;
+}
 
 /**
  * The selection breath as a pure function of **sim** time: a 0..1 cosine, so
@@ -132,7 +178,21 @@ export class GameRenderer {
   private lightningZ = 0;
   private buildingMeshes = new Map<
     number,
-    { group: THREE.Group; body: THREE.Object3D; pad: THREE.Mesh; construction: THREE.Object3D; damageRing: THREE.Mesh }
+    {
+      group: THREE.Group;
+      body: THREE.Object3D;
+      pad: THREE.Mesh;
+      construction: THREE.Object3D;
+      damageRing: THREE.Mesh;
+      /** Local Y of the pad's top face — the body, frame and rings ride on it. */
+      padTop: number;
+      /** Solar: the sun-tracking head the array and its sensor dome hang off. */
+      track?: THREE.Object3D;
+      /** Solar: the photodiode under the dome; it brightens with array output. */
+      sensorEye?: THREE.Mesh;
+      /** Solar: the met mast's vane anemometer (shown on the first array only). */
+      anem?: Anemometer;
+    }
   >();
   private depositMeshes = new Map<number, THREE.Group>();
   /** Points of interest and landed drops (GDD §06/§10), keyed by site id. */
@@ -141,6 +201,11 @@ export class GameRenderer {
   selectionRing: THREE.Mesh;
   /** Soft additive halo drawn under the selection ring; pulses on sim time. */
   private selectionGlow: THREE.Mesh;
+  /** What the selection ring was last conformed to — hysteresis so resting
+   * selections don't re-sample the terrain every frame. NaN forces a conform. */
+  private selConform = { x: NaN, z: NaN, radius: NaN, floor: NaN };
+  /** The halo swell baked into the glow ring at its last conform. */
+  private selPulseScale = 1;
   ghostGroup: THREE.Group;
   private ghostBody: THREE.Mesh;
 
@@ -193,13 +258,13 @@ export class GameRenderer {
     this.scene.add(this.poiRoot);
     this.scene.add(this.overlayRoot);
 
-    this.selectionRing = this.makeRing(0xffffff, SELECTION_RING_RADIUS, SELECTION_RING_THICKNESS);
+    this.selectionRing = this.makeGroundRing(0xffffff, SELECTION_RING_RADIUS, SELECTION_RING_THICKNESS);
     this.selectionRing.visible = false;
     this.scene.add(this.selectionRing);
 
-    // The halo renders additively so it lifts off dark rock, and sits a hair
-    // lower than the core ring so the two never z-fight with each other.
-    this.selectionGlow = this.makeRing(0xffffff, SELECTION_GLOW_RADIUS, SELECTION_GLOW_THICKNESS);
+    // The halo renders additively so it lifts off dark rock, and hugs the
+    // same ground as the core ring at a hair's lower clearance.
+    this.selectionGlow = this.makeGroundRing(0xffffff, SELECTION_GLOW_RADIUS, SELECTION_GLOW_THICKNESS);
     const glowMat = this.selectionGlow.material as THREE.MeshBasicMaterial;
     glowMat.blending = THREE.AdditiveBlending;
     glowMat.opacity = 0.3;
@@ -349,8 +414,6 @@ export class GameRenderer {
    * while paused, because weather is sim state, not a screen effect.
    */
   private syncWeatherFx(sim: SimView): void {
-    const dt = Math.min(0.5, Math.max(0, sim.simTime - this.lastSimT));
-    this.lastSimT = sim.simTime;
     this.weatherFx.sync(
       {
         time: sim.simTime,
@@ -373,7 +436,7 @@ export class GameRenderer {
         },
       },
       this.camera,
-      dt,
+      this.frameDt,
     );
   }
 
@@ -571,9 +634,80 @@ export class GameRenderer {
     return g;
   }
 
+  /**
+   * A ring built to be re-seated on the terrain (selection markers). The flat
+   * orientation is baked into the geometry rather than the mesh transform and
+   * every vertex's unscaled XZ is kept on userData, so conformGroundRing can
+   * rewrite each vertex's Y from the ground beneath it — a flat ring set at
+   * the centre height loses its uphill half to the slope and floats its
+   * downhill half in the air.
+   */
+  private makeGroundRing(color: number, radius: number, thickness = 0.35): THREE.Mesh {
+    const geo = new THREE.RingGeometry(radius - thickness / 2, radius + thickness / 2, 48);
+    geo.rotateX(-Math.PI / 2);
+    const mesh = new THREE.Mesh(
+      geo,
+      new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.9,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
+    );
+    const pos = geo.attributes.position as THREE.BufferAttribute;
+    const baseXZ = new Float32Array(pos.count * 2);
+    for (let i = 0; i < pos.count; i++) {
+      baseXZ[i * 2] = pos.getX(i);
+      baseXZ[i * 2 + 1] = pos.getZ(i);
+    }
+    mesh.userData.baseXZ = baseXZ;
+    mesh.userData.geomRadius = radius;
+    // After conformance the vertices no longer match the build-time bounds —
+    // the ring is tiny and only drawn when wanted, so skip frustum culling.
+    mesh.frustumCulled = false;
+    return mesh;
+  }
+
+  /**
+   * Re-shape a ground ring onto the world: every vertex keeps its (scaled)
+   * XZ offset from the marked point but takes the terrain height there — or
+   * `floor`, where a building's pad covers the dirt — plus a small
+   * clearance. The mesh transform stays identity, so scale can't interact
+   * with the rotation (issue #9) and the ring is a full circle on any slope.
+   */
+  private conformGroundRing(
+    mesh: THREE.Mesh,
+    x: number,
+    z: number,
+    radius: number,
+    clearance: number,
+    floor = -Infinity,
+    xzScale = 1,
+  ): void {
+    const attr = mesh.geometry.attributes.position as THREE.BufferAttribute;
+    const arr = attr.array as Float32Array;
+    const base = mesh.userData.baseXZ as Float32Array;
+    const s = (radius / (mesh.userData.geomRadius as number)) * xzScale;
+    for (let i = 0; i < attr.count; i++) {
+      const bx = base[i * 2] * s;
+      const bz = base[i * 2 + 1] * s;
+      arr[i * 3] = bx;
+      arr[i * 3 + 1] = Math.max(this.world.heightAt(x + bx, z + bz), floor) + clearance;
+      arr[i * 3 + 2] = bz;
+    }
+    attr.needsUpdate = true;
+  }
+
   // ---------------- entity syncing ----------------
   sync(sim: SimView): void {
     this.clockT = sim.simTime;
+    // One sim-time delta for everything animated this frame (particles and
+    // instruments alike), and one wind reading for everything that weathervanes.
+    this.frameDt = Math.min(0.5, Math.max(0, sim.simTime - this.lastSimT));
+    this.lastSimT = sim.simTime;
+    this.wind.speed = sim.weather.windSpeed;
+    this.wind.dir = sim.weather.windDirRad;
     // Panels face the sun's azimuth and tilt with its elevation.
     const el = Math.max(0, sim.sun.elevationRad);
     this.sunTilt = {
@@ -869,28 +1003,66 @@ export class GameRenderer {
 
   private syncBuildings(buildings: SBuilding[]): void {
     const seen = new Set<number>();
+    // The colony's met mast flies on its first solar array — the oldest one
+    // still standing — so it migrates if the original is bulldozed.
+    let firstSolarId = Number.POSITIVE_INFINITY;
+    for (const b of buildings) {
+      if (b.kind === 'solar' && b.id < firstSolarId) firstSolarId = b.id;
+    }
     for (const b of buildings) {
       seen.add(b.id);
+      const def = BUILDINGS[b.kind];
       let rec = this.buildingMeshes.get(b.id);
       if (!rec) {
+        const groundY = this.world.heightAt(b.x, b.z);
         const group = new THREE.Group();
+        const pad = this.makePadMesh(def.radius, b.x, b.z);
+        const padTop = pad.userData.topY as number;
         const body = this.makeBuildingBody(b.kind, b.id);
-        const pad = this.makePadMesh(BUILDINGS[b.kind].radius);
-        const construction = this.makeConstructionMesh(BUILDINGS[b.kind].radius);
-        const damageRing = this.makeRing(0xd9553f, BUILDINGS[b.kind].radius * 1.05, 0.5);
-        damageRing.position.y = 0.55;
+        // Whatever stood on the old flat pad now rides the measured top.
+        body.position.y = padTop;
+        const construction = this.makeConstructionMesh(def.radius);
+        construction.position.y = padTop;
+        const damageRing = this.makeRing(0xd9553f, def.radius * 1.05, 0.5);
+        damageRing.position.y = padTop + 0.45;
         damageRing.visible = false;
         group.add(pad);
         group.add(body);
         group.add(construction);
         group.add(damageRing);
         this.buildingRoot.add(group);
-        rec = { group, body, pad, construction, damageRing };
+        rec = { group, body, pad, construction, damageRing, padTop };
+        if (b.kind === 'solar') {
+          rec.track = body.getObjectByName('solarTrack') ?? undefined;
+          rec.sensorEye = (body.getObjectByName('sensorEye') as THREE.Mesh | null) ?? undefined;
+          const root = body.getObjectByName('metMast');
+          const vane = root?.getObjectByName('metVane');
+          const rotor = root?.getObjectByName('metRotor');
+          if (root && vane && rotor) {
+            root.visible = false;
+            rec.anem = { root, vane, rotor, yaw: this.wind.dir, rotorVel: 0, rotorAngle: 0 };
+          }
+          // A solar array is re-seated so its swinging panel field clears the
+          // dirt across its whole sweep circle, not just under the mast.
+          const lift = this.solarGroundLift(b.x, b.z, padTop);
+          if (lift > 0) {
+            body.position.y = padTop + lift;
+            construction.position.y = padTop + lift;
+            damageRing.position.y = padTop + lift + 0.45;
+          }
+          if (root) {
+            // The met mast stands on open dirt beside the pad — re-seat its
+            // base exactly on the ground under it (the body rides the pad),
+            // with the pole's buried end covering the fine detail around it.
+            root.position.y =
+              this.world.heightAt(b.x + root.position.x, b.z + root.position.z) -
+              (groundY + body.position.y);
+          }
+        }
         this.buildingMeshes.set(b.id, rec);
       }
       const y = this.world.heightAt(b.x, b.z);
       rec.group.position.set(b.x, y, b.z);
-      const def = BUILDINGS[b.kind];
       const prog =
         b.state === 'online' ? 1 : b.state === 'building' ? Math.max(0.05, b.progress) : 0.05;
       // buildings all rest on pad; scale body up from ground as it is built
@@ -924,10 +1096,28 @@ export class GameRenderer {
         }
 
         if (b.kind === 'solar') {
-          // Tilt the array toward the sun; park it flat after dark.
+          // The tracker head pivots on its mast toward the sun and parks flat
+          // after dark; the mast and met gear stay put. The head pitches
+          // about its torque tube (order YXZ: azimuth first, then roll), not
+          // about the ground — the old whole-body pitch drove the far side of
+          // the field metres into the dirt at low sun.
           const tilt = this.sunTilt;
-          rec.body.rotation.z = tilt.z;
-          rec.body.rotation.y = tilt.y;
+          if (rec.track) {
+            rec.track.rotation.order = 'YXZ';
+            rec.track.rotation.y = tilt.y;
+            rec.track.rotation.x = tilt.z;
+          } else {
+            rec.body.rotation.z = tilt.z;
+            rec.body.rotation.y = tilt.y;
+          }
+          // The photodiode under the dome brightens with what it reports.
+          if (rec.sensorEye) {
+            const m = rec.sensorEye.material as THREE.MeshStandardMaterial;
+            m.emissiveIntensity =
+              0.15 + 1.6 * Math.min(1, b.genKw / Math.max(1, def.powerProduceKw));
+          }
+          // The first array's met mast spins and weathervanes with the wind.
+          if (rec.anem) this.syncAnemometer(rec.anem, b.id === firstSolarId);
         }
         if (def.process && running && b.throughput > 0.02) {
           const pulse = 1 + Math.sin(this.clockT * 3.2) * 0.02 * b.throughput;
@@ -948,6 +1138,55 @@ export class GameRenderer {
   /** Cached per-frame values used while syncing buildings. */
   private sunTilt = { y: 0, z: 0 };
   private clockT = 0;
+  /**
+   * Sim seconds the current frame advanced (0 while paused). Instruments and
+   * particles alike run on the sim clock — a paused colony holds still.
+   */
+  private frameDt = 0;
+  /** The sim's own wind reading, cached for the met mast's vane anemometer. */
+  private wind = { speed: 0, dir: 0 };
+
+  /**
+   * How much extra height a solar array needs at (x, z) so its panel field
+   * never swings into the ground: the tracker pivots about the torque tube,
+   * so at full pitch a panel corner dips ~3.4 m below the head. Measure the
+   * ground across the sweep circle and lift the mast until the lowest
+   * possible swing stays clear of it. Flat sites get a small constant lift so
+   * the grazing corner also clears the pad's own top face.
+   */
+  private solarGroundLift(x: number, z: number, padTop: number): number {
+    let maxH = this.world.heightAt(x, z);
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const h = this.world.heightAt(x + Math.cos(a) * 4.5, z + Math.sin(a) * 4.5);
+      if (h > maxH) maxH = h;
+    }
+    const centre = this.world.heightAt(x, z);
+    // The lowest the panel field can ever swing, group-local: pivot (2.9)
+    // minus the deepest corner dip (~3.4 at full pitch).
+    const swingLow = padTop + 2.9 - 3.4;
+    // The hardest thing under the swing: the dirt, or the pad's own face.
+    const floor = Math.max(maxH - centre, padTop);
+    return Math.max(0, floor + 0.25 - swingLow);
+  }
+
+  /**
+   * Drive one met mast's vane anemometer from the sim's wind: the cup wheel
+   * spins at the aerodynamic equilibrium for the wind speed with a little
+   * inertia (gusts wind it up, lulls let it coast), and the vane hunts the
+   * wind direction around the short way like a fin with real drag.
+   */
+  private syncAnemometer(anem: Anemometer, live: boolean): void {
+    anem.root.visible = live;
+    if (!live) return;
+    const dt = this.frameDt;
+    const targetVel = anemometerSpinRate(this.wind.speed);
+    anem.rotorVel += (targetVel - anem.rotorVel) * Math.min(1, dt / 0.7);
+    anem.rotorAngle += anem.rotorVel * dt;
+    anem.rotor.rotation.z = anem.rotorAngle;
+    anem.yaw += shortestAngleDelta(anem.yaw, this.wind.dir) * Math.min(1, dt / 0.5);
+    anem.vane.rotation.y = anem.yaw;
+  }
 
   /**
    * Scale a mesh tree's emissive/colour to convey "powered" vs "dark".
@@ -1107,13 +1346,45 @@ export class GameRenderer {
     return g;
   }
 
-  private makePadMesh(radius: number): THREE.Mesh {
+  /**
+   * The slab a building stands on. Placement allows real slopes, and the old
+   * flat cylinder drowned its uphill half there and floated the downhill
+   * half — so the pad is measured against the ground where the building
+   * actually sits: the top face clears the *highest* dirt under the
+   * footprint and the skirt runs deep past the *lowest*, so the whole thing
+   * reads as a poured foundation and never half-disappears into the hill.
+   *
+   * The pad is built for one spot (buildings never move), in group-local Y
+   * measured from the ground at the centre. The top face's local height is
+   * left on `userData.topY` for the body, frame and rings to ride on.
+   */
+  private makePadMesh(radius: number, x: number, z: number): THREE.Mesh {
+    const rTop = radius * 1.3;
+    const rBottom = radius * 1.55;
+    // Rim, mid-ring and centre. Fine terrain detail under the slab stays
+    // within ±0.3 m, so these samples bracket the extremes within margins.
+    let maxH = -Infinity;
+    let minH = Infinity;
+    for (const r of [rTop, rTop * 0.55]) {
+      for (let i = 0; i < 16; i++) {
+        const a = (i / 16) * Math.PI * 2;
+        const h = this.world.heightAt(x + Math.cos(a) * r, z + Math.sin(a) * r);
+        if (h > maxH) maxH = h;
+        if (h < minH) minH = h;
+      }
+    }
+    const centre = this.world.heightAt(x, z);
+    if (centre > maxH) maxH = centre;
+    if (centre < minH) minH = centre;
+    const top = maxH - centre + 0.5;
+    const bottom = minH - centre - 2.5;
     const pad = new THREE.Mesh(
-      new THREE.CylinderGeometry(radius * 1.25, radius * 1.35, 0.35, 28),
+      new THREE.CylinderGeometry(rTop, rBottom, top - bottom, 28),
       new THREE.MeshStandardMaterial({ color: 0x4a4a52, roughness: 0.9 }),
     );
-    pad.position.y = -0.05;
+    pad.position.y = (top + bottom) / 2;
     pad.receiveShadow = true;
+    pad.userData.topY = top;
     return pad;
   }
 
@@ -1163,18 +1434,162 @@ export class GameRenderer {
         break;
       }
       case 'solar': {
-        const posts = new THREE.Group();
+        // A mast-mounted tracker array. The static mast assembly carries a
+        // rotating head: the panel field on its torque tube, and the tinted
+        // dome on the tube's instrument boom with the sun sensor inside.
+        // (The colony's first array also raises a met mast with a working
+        // vane anemometer — syncBuildings shows it on one array only.)
+        const steel = mat(0x8b9299, { metal: 0.65, rough: 0.4 });
+
+        // --- static mast assembly -------------------------------------------
+        const footing = new THREE.Mesh(
+          new THREE.CylinderGeometry(1.6, 1.95, 0.6, 8),
+          mat(0x6b6f75, { rough: 0.9, metal: 0.05 }),
+        );
+        footing.position.y = 0.3;
+        const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.5, 2.4, 12), steel);
+        mast.position.y = 1.5;
+        g.add(footing, mast);
+        // Outrigger struts from the footing up into the mast.
+        for (const a of [Math.PI / 4, (3 * Math.PI) / 4, (5 * Math.PI) / 4, (7 * Math.PI) / 4]) {
+          const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 1.7, 6), steel);
+          strut.position.set(Math.cos(a) * 0.95, 1.05, Math.sin(a) * 0.95);
+          strut.rotation.set(-Math.sin(a) * 0.55, 0, Math.cos(a) * 0.55);
+          g.add(strut);
+        }
+        const gimbal = new THREE.Mesh(
+          new THREE.BoxGeometry(1.05, 0.66, 1.05),
+          mat(0x3f4348, { metal: 0.65, rough: 0.5 }),
+        );
+        gimbal.position.y = 2.82;
+        g.add(gimbal);
+
+        // --- tracking head ----------------------------------------------------
+        // Everything from here up tracks the sun: syncBuildings writes its
+        // rotation.y (azimuth) and rotation.x (pitch about the torque tube)
+        // every frame. The pivot is the gimbal, so the field swings ±3 m at
+        // worst instead of burying a whole side the way a ground pivot did.
+        const head = new THREE.Group();
+        head.name = 'solarTrack';
+        head.position.y = 2.9;
+        const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 20.6, 10), steel);
+        tube.rotation.z = Math.PI / 2;
+        tube.position.y = 0.08;
+        head.add(tube);
+        for (const rz of [-3, 0, 3]) {
+          const rail = new THREE.Mesh(new THREE.BoxGeometry(17.6, 0.12, 0.22), steel);
+          rail.position.set(0, 0.4, rz);
+          head.add(rail);
+        }
+        const panelMat = mat(0x2a4fae, { rough: 0.25, metal: 0.4 });
         for (let i = -2; i <= 2; i++) {
           for (let j = -1; j <= 1; j++) {
-            const p = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.18, 2.1), mat(0x2a4fae, { rough: 0.25, metal: 0.4 }));
-            p.position.set(i * 4, 1.5, j * 3);
+            const p = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.18, 2.1), panelMat);
+            p.position.set(i * 4, 0.56 + j * 0.2, j * 3);
             p.rotation.x = -0.5;
-            p.position.y = 1.5 + (j * 0.2);
-            p.castShadow = true;
-            posts.add(p);
+            head.add(p);
           }
         }
-        g.add(posts);
+        // The sun-sensor dome on the tube's +X boom: a short post, the sensor
+        // cylinder with its photodiode eye, and a tinted glass dome over it.
+        // Riding the moving tube keeps the dome's sensor coplanar with the
+        // array, the way real tracker sun sensors are mounted.
+        const sensorPost = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.09, 0.8, 8), mat(0x3f4348, { metal: 0.6 }));
+        sensorPost.position.set(10.1, 0.48, 0);
+        const sensor = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.11, 0.11, 0.18, 10),
+          mat(0x23282c, { metal: 0.5, rough: 0.35 }),
+        );
+        sensor.position.set(10.1, 0.94, 0);
+        const eye = new THREE.Mesh(
+          new THREE.SphereGeometry(0.05, 8, 8),
+          new THREE.MeshStandardMaterial({
+            color: 0x443311,
+            emissive: 0xffc65a,
+            emissiveIntensity: 0.5,
+            roughness: 0.3,
+          }),
+        );
+        eye.name = 'sensorEye';
+        eye.position.set(10.1, 1.08, 0);
+        const dome = new THREE.Mesh(
+          new THREE.SphereGeometry(0.32, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2),
+          new THREE.MeshStandardMaterial({
+            color: 0x35617a,
+            roughness: 0.08,
+            metalness: 0.15,
+            transparent: true,
+            opacity: 0.5,
+          }),
+        );
+        // Glazing shouldn't throw a hard shadow onto the panels.
+        dome.userData.noCastShadow = true;
+        dome.position.set(10.1, 0.98, 0);
+        const domeRim = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.035, 6, 20), steel);
+        domeRim.rotation.x = Math.PI / 2;
+        domeRim.position.set(10.1, 0.98, 0);
+        head.add(sensorPost, sensor, eye, dome, domeRim);
+        g.add(head);
+
+        // --- met mast (first array only) -------------------------------------
+        // A small mast off the side of the array with a vane anemometer on
+        // top: the wind reading comes from the sim, the vane hunts the wind
+        // direction and the cup wheel spins up with the wind speed.
+        const metRoot = new THREE.Group();
+        metRoot.name = 'metMast';
+        metRoot.position.set(1.8, 0, -10.7);
+        const metBase = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.4, 0.52, 0.5, 8),
+          mat(0x6b6f75, { rough: 0.9, metal: 0.05 }),
+        );
+        metBase.position.y = 0.15;
+        // The pole runs 1.5 m below its base so sloped ground never reveals a
+        // floating end — syncBuildings re-seats the root on the dirt under it.
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.12, 5.2, 8), steel);
+        pole.position.y = 1.1;
+        const box = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.42, 0.22), mat(0x3f4348, { metal: 0.6, rough: 0.5 }));
+        box.position.y = 2.1;
+        metRoot.add(metBase, pole, box);
+        // The vane: body tube, nose, cup wheel in front, fin behind. Built
+        // facing -Z (rotor upwind, fin downwind) so vane yaw *is* the wind
+        // direction the sim reports, matching the sim's atan2(x, z) heading.
+        const vane = new THREE.Group();
+        vane.name = 'metVane';
+        vane.position.y = 3.85;
+        const vaneBody = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.9, 8), mat(0x5a554a, { metal: 0.6, rough: 0.4 }));
+        vaneBody.rotation.x = Math.PI / 2;
+        vaneBody.position.z = 0.08;
+        const nose = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.07, 0.2, 8), steel);
+        nose.rotation.x = Math.PI / 2;
+        nose.position.z = -0.42;
+        const fin = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.34, 0.44), mat(0x9aa2a8, { metal: 0.5, rough: 0.45 }));
+        fin.position.z = 0.6;
+        vane.add(vaneBody, nose, fin);
+        const rotor = new THREE.Group();
+        rotor.name = 'metRotor';
+        rotor.position.z = -0.52;
+        const hub = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 8), steel);
+        rotor.add(hub);
+        for (let k = 0; k < 3; k++) {
+          const arm = new THREE.Group();
+          arm.rotation.z = (k * Math.PI * 2) / 3;
+          const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.4, 6), steel);
+          rod.rotation.z = Math.PI / 2;
+          rod.position.x = 0.2;
+          // Cup bowls face tangentially, all in the same sense, so the wind
+          // catches one face and spills off the next — that's what turns it.
+          const cup = new THREE.Mesh(
+            new THREE.SphereGeometry(0.095, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2),
+            mat(0xd8d2c2, { rough: 0.4, metal: 0.3 }),
+          );
+          cup.position.x = 0.4;
+          arm.add(rod, cup);
+          rotor.add(arm);
+        }
+        vane.add(rotor);
+        vane.scale.setScalar(1.25); // readable at strategic zoom
+        metRoot.add(vane);
+        g.add(metRoot);
         break;
       }
       case 'battery': {
@@ -1381,7 +1796,8 @@ export class GameRenderer {
     g.castShadow = true;
     g.traverse((o) => {
       if (o instanceof THREE.Mesh) {
-        o.castShadow = true;
+        // Glazing (marked noCastShadow) stays out of the shadow map.
+        o.castShadow = !o.userData.noCastShadow;
         o.receiveShadow = true;
       }
     });
@@ -1527,20 +1943,56 @@ export class GameRenderer {
     if (!entity) {
       this.selectionRing.visible = false;
       this.selectionGlow.visible = false;
+      // NaN centre forces a re-conform the next time something is selected.
+      this.selConform.x = NaN;
       return;
     }
-    const y = this.world.heightAt(entity.x, entity.z);
-    this.selectionRing.position.set(entity.x, y + 0.2, entity.z);
-    // Scale uniformly: the ring geometry lives in its own XY plane and is laid
-    // flat with rotation.x = -PI/2, and three.js composes T * R * S, so a
-    // non-uniform scale here is applied in the mesh's own axes *before* the
-    // rotation — scaling X but not Y produced an ellipse (issue #9).
-    this.selectionRing.scale.setScalar(entity.radius / SELECTION_RING_RADIUS);
+    // Where the marker circles a building, its floor is the pad's top face,
+    // not the dirt the pad covers — otherwise the slab (which now rises
+    // above sloped ground) swallows the ring.
+    let floor = -Infinity;
+    for (const [, rec] of this.buildingMeshes) {
+      const p = rec.group.position;
+      if (Math.abs(p.x - entity.x) < 0.5 && Math.abs(p.z - entity.z) < 0.5) {
+        floor = p.y + rec.padTop;
+        break;
+      }
+    }
+    // The ring re-seats on the terrain whenever the selection moves a notch;
+    // a parked selection skips the height sampling.
+    const c = this.selConform;
+    const moved =
+      !this.selectionRing.visible ||
+      c.floor !== floor ||
+      Math.abs(entity.x - c.x) > 0.05 ||
+      Math.abs(entity.z - c.z) > 0.05 ||
+      Math.abs(entity.radius - c.radius) > 0.01;
+    if (moved) {
+      this.conformGroundRing(this.selectionRing, entity.x, entity.z, entity.radius, 0.24, floor);
+      c.x = entity.x;
+      c.z = entity.z;
+      c.radius = entity.radius;
+      c.floor = floor;
+    }
+    // The halo breathes (issue #10), and the swell is baked into its ring, so
+    // it re-conforms as the pulse moves. While paused the pulse holds still
+    // and the cache skips the work entirely.
+    const pulseScale = 1 + 0.06 * selectionPulse(this.clockT);
+    if (moved || !this.selectionGlow.visible || Math.abs(pulseScale - this.selPulseScale) > 1e-4) {
+      this.conformGroundRing(
+        this.selectionGlow,
+        entity.x,
+        entity.z,
+        entity.radius,
+        0.22,
+        floor,
+        pulseScale,
+      );
+      this.selPulseScale = pulseScale;
+    }
+    this.selectionRing.position.set(entity.x, 0, entity.z);
+    this.selectionGlow.position.set(entity.x, 0, entity.z);
     this.selectionRing.visible = true;
-
-    // The halo tracks the ring exactly, one notch closer to the ground.
-    this.selectionGlow.position.set(entity.x, y + 0.18, entity.z);
-    this.selectionGlow.scale.setScalar(entity.radius / SELECTION_RING_RADIUS);
     this.selectionGlow.visible = true;
     this.syncSelectionPulse();
   }
@@ -1548,7 +2000,8 @@ export class GameRenderer {
   /**
    * Breathe the selection halo (issue #10). Driven by `clockT` — the same sim
    * clock the damaged-building ring uses — so the pulse freezes with the
-   * colony instead of running on wall time.
+   * colony instead of running on wall time. Geometry (the halo's swell) is
+   * handled by setSelection's conform cache; this is opacities only.
    */
   private syncSelectionPulse(): void {
     if (!this.selectionRing.visible) return;
@@ -1556,9 +2009,6 @@ export class GameRenderer {
     const op = selectionPulseOpacity(pulse);
     (this.selectionRing.material as THREE.MeshBasicMaterial).opacity = op.ring;
     (this.selectionGlow.material as THREE.MeshBasicMaterial).opacity = op.glow;
-    // Derived from the ring's scale, never from the glow's own, so the slight
-    // breathing swell can't accumulate frame over frame.
-    this.selectionGlow.scale.setScalar(this.selectionRing.scale.x * (1 + 0.06 * pulse));
   }
 
   /**
