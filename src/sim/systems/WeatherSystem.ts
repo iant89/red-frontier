@@ -13,6 +13,7 @@
  *   - shelter-related effects are *queried* from the Weather model by the
  *     rover/EVA code; this system owns the sky, not the decisions
  *   - save/restore wiring and clock-jump re-anchoring for weather state
+ *   - powered weather-radar capability and the projected storm map
  *
  * Weather consumes: ColonyState (state.weather, state.simTime, state.clock)
  * and its own RNG streams inside the Weather model. Those streams are never
@@ -74,6 +75,24 @@ export interface WeatherHostHooks {
 
 export class WeatherSystem {
   /**
+   * Derive the colony's observation capability from its buildings. A station
+   * must be online, enabled, undamaged and receiving power; the radar and its
+   * advanced forecast are therefore real infrastructure, not a free HUD flag.
+   */
+  static refreshRadar(state: ColonyState): void {
+    let rangeKm = 0;
+    let advanced = false;
+    for (const b of state.buildings) {
+      if (b.state !== 'online' || !b.enabled || b.damaged || b.powerSat < 0.5) continue;
+      const def = BUILDINGS[b.kind];
+      if (!def.weatherRadarRangeKm) continue;
+      rangeKm = Math.max(rangeKm, def.weatherRadarRangeKm);
+      advanced ||= !!def.advancedForecast;
+    }
+    state.weather.setRadar(rangeKm, advanced);
+  }
+
+  /**
    * Advance the weather, then let it work on the colony: solar panels gather
    * dust, wind chews on exposed structures, and storms interrupt work.
    *
@@ -81,6 +100,9 @@ export class WeatherSystem {
    * so `state.simTime` is already the new tick's time.
    */
   static tick(state: ColonyState, hooks: WeatherHostHooks): void {
+    // Equipment state is derived before the scheduler rolls: a live station
+    // gives the next storm its longer advanced-forecast lead immediately.
+    WeatherSystem.refreshRadar(state);
     const wx = state.weather;
     wx.tick(SIM_TICK, state.simTime, state.clock.sol);
     state.dustTransmission = wx.solarTransmission;

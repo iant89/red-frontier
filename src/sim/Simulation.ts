@@ -869,6 +869,9 @@ export class Simulation {
     if (b.enabled === enabled) return;
     b.enabled = enabled;
     this.recomputeCapacities();
+    // Observation equipment is a derived weather capability; update it now so
+    // a paused colony never shows a stale radar map after load-shedding.
+    WeatherSystem.refreshRadar(this.state);
     this.event(
       enabled ? 'ok' : 'info',
       `${BUILDINGS[b.kind].label} ${enabled ? 'switched on' : 'switched off'}.`,
@@ -885,6 +888,7 @@ export class Simulation {
    */
   demolish(buildingId: number): void {
     ConstructionSystem.demolish(this.state, buildingId, this.constructionHooks);
+    WeatherSystem.refreshRadar(this.state);
   }
 
   /**
@@ -1028,7 +1032,9 @@ export class Simulation {
     // Phase 9: ConstructionSystem.devSpawn runs the same siting check, then
     // `complete` flips it online, recomputes capacities and logs the
     // "+storage / +kW" extras exactly like an ordinary finish.
-    return ConstructionSystem.devSpawn(this.state, kind, x, z);
+    const b = ConstructionSystem.devSpawn(this.state, kind, x, z);
+    WeatherSystem.refreshRadar(this.state);
+    return b;
   }
 
   /** Survey a fresh resource deposit in at world position. */
@@ -1046,7 +1052,9 @@ export class Simulation {
    * construct task to it is released exactly like a demolition release.
    */
   devCompleteBuilding(id: number): boolean {
-    return ConstructionSystem.devComplete(this.state, id, this.constructionHooks);
+    const ok = ConstructionSystem.devComplete(this.state, id, this.constructionHooks);
+    WeatherSystem.refreshRadar(this.state);
+    return ok;
   }
 
   /**
@@ -3300,6 +3308,9 @@ export class Simulation {
 
     // Phase 6: grid rebuild delegated to PowerSystem
     PowerSystem.restore(this.state, data.storedKWh);
+    // Radar capability is derived, not saved; restore it before the first view
+    // so a resumed colony immediately shows its weather map.
+    WeatherSystem.refreshRadar(this.state);
 
     this.alerts.reset();
     if (data.alerts) this.alerts.restore(data.alerts);

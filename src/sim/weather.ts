@@ -114,6 +114,29 @@ export interface WeatherReading {
   solarTransmission: number;
 }
 
+/** A storm return plotted by the colony's radar display. */
+export interface WeatherRadarCell {
+  kind: StormKindReal;
+  label: string;
+  /** Centre position relative to the colony, kilometres east and north. */
+  xKm: number;
+  zKm: number;
+  radiusKm: number;
+  heading: number;
+  /** 0 while scheduled, otherwise the cell's current envelope intensity. */
+  intensity: number;
+  active: boolean;
+  /** Seconds until the leading edge reaches the colony, when it is closing. */
+  arrivesIn: number;
+}
+
+export interface WeatherRadar {
+  available: boolean;
+  coverageKm: number;
+  advancedForecast: boolean;
+  cells: WeatherRadarCell[];
+}
+
 /** Per-class storm parameters, keyed off the GDD §7 severity table. */
 const STORM_PROFILE: Record<
   Exclude<StormKind, 'calm'>,
@@ -237,6 +260,14 @@ export class Weather {
   /** Fraction of peak irradiance the ambient dust lets through. */
   solarTransmission = 1;
 
+  // ---- colony observation equipment ---------------------------------------
+  /** Radar radius in kilometres; zero means the colony has no live radar map. */
+  radarRangeKm = 0;
+  /** True when radar is powered and the station can resolve an advanced outlook. */
+  advancedForecast = false;
+  /** Multiplier applied when a new storm is placed on the forecast board. */
+  private forecastLeadMul = 1;
+
   // ---- scheduler state -----------------------------------------------------
   private noise: Noise2D;
   private gust: Noise2D;
@@ -268,6 +299,27 @@ export class Weather {
     this.lightningRngState = (this.seed ^ 0x11a71b3) >>> 0;
     this.nextRollAt = WEATHER_CALM_SOLS * SOL_SECONDS;
     this.windDirRad = this.rand() * Math.PI * 2;
+  }
+
+  // ----------------------------------------------------- instrumentation ----
+  /**
+   * Update the station capability before the scheduler runs. This is derived
+   * from buildings, never saved: restoring a colony and switching a station
+   * off must immediately remove its map without leaving stale equipment state.
+   */
+  setRadar(rangeKm: number, advanced: boolean): void {
+    this.radarRangeKm = Math.max(0, Number.isFinite(rangeKm) ? rangeKm : 0);
+    this.advancedForecast = this.radarRangeKm > 0 && advanced;
+    this.forecastLeadMul = this.advancedForecast ? 2.25 : 1;
+  }
+
+  get radar(): WeatherRadar {
+    return {
+      available: this.radarRangeKm > 0,
+      coverageKm: this.radarRangeKm,
+      advancedForecast: this.advancedForecast,
+      cells: this.radarMap(),
+    };
   }
 
   // -------------------------------------------------------------- rng ----
@@ -432,7 +484,9 @@ export class Weather {
    * `startAt`, and the colony sits under the footprint for the storm's life.
    */
   private schedule(kind: StormKindReal, now: number): void {
-    this.scheduled.push(this.makeCell(kind, now, STORM_PROFILE[kind].warnLead));
+    this.scheduled.push(
+      this.makeCell(kind, now, STORM_PROFILE[kind].warnLead * this.forecastLeadMul),
+    );
   }
 
   private makeCell(kind: StormKindReal, now: number, lead: number): StormCell {
@@ -485,6 +539,45 @@ export class Weather {
       label: STORM_PROFILE[next.kind].label,
       arrivesIn: Math.max(0, next.startAt - this.time),
     };
+  }
+
+  /**
+   * Returns storm returns inside the station's coverage radius. Coordinates are
+   * kilometres because this is a planetary radar, not a local wind sensor.
+   * The method is deterministic and read-only, so it is safe to project over
+   * the worker boundary.
+   */
+  radarMap(rangeKm = this.radarRangeKm): WeatherRadarCell[] {
+    if (rangeKm <= 0) return [];
+    const out: WeatherRadarCell[] = [];
+    const add = (cell: StormCell, active: boolean): void => {
+      const dist = Math.hypot(cell.x, cell.z);
+      if (dist > rangeKm + cell.radiusKm) return;
+      const env = active ? stormIntensityAt(cell, this.time) : 0;
+      const closing =
+        dist > 0
+          ? -(Math.sin(cell.heading) * cell.x + Math.cos(cell.heading) * cell.z) / dist
+          : 0;
+      const arrivesIn = active
+        ? closing > 0.2
+          ? Math.max(0, (dist - cell.radiusKm * 0.9) / Math.max(1e-9, cell.speedKmS * closing))
+          : 0
+        : Math.max(0, cell.startAt - this.time);
+      out.push({
+        kind: cell.kind,
+        label: STORM_PROFILE[cell.kind].label,
+        xKm: cell.x,
+        zKm: cell.z,
+        radiusKm: cell.radiusKm,
+        heading: cell.heading,
+        intensity: env,
+        active,
+        arrivesIn,
+      });
+    };
+    for (const cell of this.scheduled) add(cell, false);
+    for (const cell of this.active) add(cell, true);
+    return out.sort((a, b) => a.arrivesIn - b.arrivesIn || a.kind.localeCompare(b.kind));
   }
 
   /** Storm system currently over the site, if any (HUD countdowns). */
