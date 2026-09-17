@@ -752,12 +752,25 @@ export class Game {
           this.selected = { type: 'rover', id: pick.id };
         }
       } else if (pick.type === 'building') {
-        // With a rover selected, tapping a battered or buried structure sends
-        // the rover to service it — the same grammar as deposit → mine.
+        // With a rover selected, tapping a construction site sends the rover to
+        // build it, while tapping a battered or dusty structure sends it to
+        // service — the same grammar as deposit → mine. Buildable check keeps
+        // the wrong chassis from being dispatched to a site it cannot work.
         const rv =
           this.selected?.type === 'rover' ? this.sim.roverById(this.selected.id) : undefined;
+        const b = this.sim.buildingById(pick.id);
+        const isSite = b !== undefined && b.state !== 'online';
+        const canBuild =
+          isSite && rv !== undefined && BUILDINGS[b!.kind].buildableBy.includes(rv.kind);
         const job = this.sim.needsMaintenance(pick.id);
-        if (rv && job) {
+        if (rv && canBuild) {
+          this.order({
+            type: 'rover/construct',
+            roverId: rv.id,
+            buildingId: pick.id,
+            queue: this.shiftHeld,
+          });
+        } else if (rv && job) {
           this.order(
             job === 'repair'
               ? { type: 'rover/repair', roverId: rv.id, buildingId: pick.id, queue: this.shiftHeld }
@@ -1076,7 +1089,20 @@ export class Game {
       case 'toggle':
         if (this.selected.type === 'building') {
           const b = this.sim.buildingById(this.selected.id);
-          if (b) this.order({ type: 'building/toggle', buildingId: b.id, enabled: !b.enabled });
+          if (b) {
+            const next = !b.enabled;
+            this.order({ type: 'building/toggle', buildingId: b.id, enabled: next });
+            // Worker host: the view is a mirror that stays stale until the
+            // next `view` message arrives. Flip it optimistically so the
+            // `syncUI(true)` that follows this switch reads the intended
+            // state and the power button feels instant. The local host has
+            // already mutated the live sim, so the guard keeps us from
+            // flipping it back.
+            const viewB = this.sim.buildingById(b.id);
+            if (viewB && viewB.enabled !== next) {
+              (viewB as { enabled: boolean }).enabled = next;
+            }
+          }
         }
         break;
       case 'demolish':
