@@ -1014,7 +1014,6 @@ export class GameRenderer {
       const def = BUILDINGS[b.kind];
       let rec = this.buildingMeshes.get(b.id);
       if (!rec) {
-        const groundY = this.world.heightAt(b.x, b.z);
         const group = new THREE.Group();
         const pad = this.makePadMesh(def.radius, b.x, b.z);
         const padTop = pad.userData.topY as number;
@@ -1049,14 +1048,6 @@ export class GameRenderer {
             body.position.y = padTop + lift;
             construction.position.y = padTop + lift;
             damageRing.position.y = padTop + lift + 0.45;
-          }
-          if (root) {
-            // The met mast stands on open dirt beside the pad — re-seat its
-            // base exactly on the ground under it (the body rides the pad),
-            // with the pole's buried end covering the fine detail around it.
-            root.position.y =
-              this.world.heightAt(b.x + root.position.x, b.z + root.position.z) -
-              (groundY + body.position.y);
           }
         }
         this.buildingMeshes.set(b.id, rec);
@@ -1148,11 +1139,11 @@ export class GameRenderer {
 
   /**
    * How much extra height a solar array needs at (x, z) so its panel field
-   * never swings into the ground: the tracker pivots about the torque tube,
-   * so at full pitch a panel corner dips ~3.4 m below the head. Measure the
-   * ground across the sweep circle and lift the mast until the lowest
-   * possible swing stays clear of it. Flat sites get a small constant lift so
-   * the grazing corner also clears the pad's own top face.
+   * never swings into the ground: the tracker pivots 4.2 m above its base
+   * about the torque tube, so at full pitch a panel corner dips ~3.4 m below
+   * the head. Measure the ground across the sweep circle and lift the mast
+   * until the lowest possible swing stays clear of it — flat sites rarely
+   * need anything, steep ones get a taller mast over their uphill side.
    */
   private solarGroundLift(x: number, z: number, padTop: number): number {
     let maxH = this.world.heightAt(x, z);
@@ -1162,9 +1153,9 @@ export class GameRenderer {
       if (h > maxH) maxH = h;
     }
     const centre = this.world.heightAt(x, z);
-    // The lowest the panel field can ever swing, group-local: pivot (2.9)
+    // The lowest the panel field can ever swing, group-local: pivot (4.2)
     // minus the deepest corner dip (~3.4 at full pitch).
-    const swingLow = padTop + 2.9 - 3.4;
+    const swingLow = padTop + 4.2 - 3.4;
     // The hardest thing under the swing: the dirt, or the pad's own face.
     const floor = Math.max(maxH - centre, padTop);
     return Math.max(0, floor + 0.25 - swingLow);
@@ -1447,8 +1438,8 @@ export class GameRenderer {
           mat(0x6b6f75, { rough: 0.9, metal: 0.05 }),
         );
         footing.position.y = 0.3;
-        const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.5, 2.4, 12), steel);
-        mast.position.y = 1.5;
+        const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.5, 3.3, 12), steel);
+        mast.position.y = 2.25;
         g.add(footing, mast);
         // Outrigger struts from the footing up into the mast.
         for (const a of [Math.PI / 4, (3 * Math.PI) / 4, (5 * Math.PI) / 4, (7 * Math.PI) / 4]) {
@@ -1461,17 +1452,18 @@ export class GameRenderer {
           new THREE.BoxGeometry(1.05, 0.66, 1.05),
           mat(0x3f4348, { metal: 0.65, rough: 0.5 }),
         );
-        gimbal.position.y = 2.82;
+        gimbal.position.y = 4.0;
         g.add(gimbal);
 
         // --- tracking head ----------------------------------------------------
         // Everything from here up tracks the sun: syncBuildings writes its
         // rotation.y (azimuth) and rotation.x (pitch about the torque tube)
-        // every frame. The pivot is the gimbal, so the field swings ±3 m at
-        // worst instead of burying a whole side the way a ground pivot did.
+        // every frame. The pivot rides 4.2 m up the mast, so even at full
+        // pitch the far corner only dips to ~1 m off the pad — and the free
+        // air below the swing is where the met mast clamps on.
         const head = new THREE.Group();
         head.name = 'solarTrack';
-        head.position.y = 2.9;
+        head.position.y = 4.2;
         const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 20.6, 10), steel);
         tube.rotation.z = Math.PI / 2;
         tube.position.y = 0.08;
@@ -1532,30 +1524,40 @@ export class GameRenderer {
         g.add(head);
 
         // --- met mast (first array only) -------------------------------------
-        // A small mast off the side of the array with a vane anemometer on
-        // top: the wind reading comes from the sim, the vane hunts the wind
-        // direction and the cup wheel spins up with the wind speed.
+        // A small instrument pole clamped to the side of the main mast —
+        // feet on the footing, braced back to the pylon — with a vane
+        // anemometer on top. It lives *below* the tracking field's lowest
+        // swing: a freestanding mast closer than ~10 m to the axis would be
+        // beaten off by the yawing torque tube and the pitching panel
+        // corners, so the tracker mast carries it instead. The wind reading
+        // comes from the sim: the vane hunts the direction, the cup wheel
+        // spins up with the speed.
         const metRoot = new THREE.Group();
         metRoot.name = 'metMast';
-        metRoot.position.set(1.8, 0, -10.7);
+        metRoot.position.set(1.5, 0, 0);
         const metBase = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.4, 0.52, 0.5, 8),
+          new THREE.CylinderGeometry(0.15, 0.18, 0.14, 8),
           mat(0x6b6f75, { rough: 0.9, metal: 0.05 }),
         );
-        metBase.position.y = 0.15;
-        // The pole runs 1.5 m below its base so sloped ground never reveals a
-        // floating end — syncBuildings re-seats the root on the dirt under it.
-        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.12, 5.2, 8), steel);
-        pole.position.y = 1.1;
-        const box = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.42, 0.22), mat(0x3f4348, { metal: 0.6, rough: 0.5 }));
-        box.position.y = 2.1;
+        metBase.position.y = 0.67;
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 2.25, 8), steel);
+        pole.position.y = 1.73;
+        const box = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.36, 0.2), mat(0x3f4348, { metal: 0.6, rough: 0.5 }));
+        box.position.y = 2.2;
         metRoot.add(metBase, pole, box);
+        // Braces tying the instrument pole back to the mast.
+        for (const by of [1.4, 1.9]) {
+          const brace = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 1.16, 6), steel);
+          brace.rotation.z = Math.PI / 2;
+          brace.position.set(0.93, by, 0);
+          metRoot.add(brace);
+        }
         // The vane: body tube, nose, cup wheel in front, fin behind. Built
         // facing -Z (rotor upwind, fin downwind) so vane yaw *is* the wind
         // direction the sim reports, matching the sim's atan2(x, z) heading.
         const vane = new THREE.Group();
         vane.name = 'metVane';
-        vane.position.y = 3.85;
+        vane.position.y = 2.95;
         const vaneBody = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.9, 8), mat(0x5a554a, { metal: 0.6, rough: 0.4 }));
         vaneBody.rotation.x = Math.PI / 2;
         vaneBody.position.z = 0.08;
