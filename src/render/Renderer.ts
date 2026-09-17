@@ -20,6 +20,7 @@ import {
 } from './marsTerrain';
 import { WeatherFX } from './WeatherFX';
 import { DescentStage } from './DescentStage';
+import { buildWeatherStation, syncWeatherStation } from './WeatherStation';
 
 export type OverlayMode = 'none' | 'power' | 'life' | 'weather';
 
@@ -659,6 +660,8 @@ export class GameRenderer {
     // the radar dish alike).
     this.frameDt = Math.min(0.5, Math.max(0, sim.simTime - this.lastSimT));
     this.lastSimT = sim.simTime;
+    this.wxWind.speed = sim.weather.windSpeed;
+    this.wxWind.dir = sim.weather.windDirRad;
     // Panels face the sun's azimuth and tilt with its elevation.
     const el = Math.max(0, sim.sun.elevationRad);
     this.sunTilt = {
@@ -1047,8 +1050,13 @@ export class GameRenderer {
           }
         }
         if (b.kind === 'weatherStation') {
-          const dish = rec.body.getObjectByName('radarDish');
-          if (dish) dish.rotation.y = this.clockT * 0.45;
+          syncWeatherStation(rec.body, {
+            time: this.clockT,
+            powered: running,
+            windSpeed: this.wxWind.speed,
+            windDirRad: this.wxWind.dir,
+            damaged: b.damaged,
+          });
         }
         if (def.process && running && b.throughput > 0.02) {
           const pulse = 1 + Math.sin(this.clockT * 3.2) * 0.02 * b.throughput;
@@ -1069,6 +1077,8 @@ export class GameRenderer {
   /** Cached per-frame values used while syncing buildings. */
   private sunTilt = { y: 0, z: 0 };
   private clockT = 0;
+  /** Colony wind, sampled once per frame so the anemometer can track it. */
+  private wxWind = { speed: 8, dir: 0.7 };
   /**
    * Sim seconds the current frame advanced (0 while paused). Weather effects
    * and particles alike run on the sim clock — a paused colony holds still.
@@ -1442,42 +1452,7 @@ export class GameRenderer {
         break;
       }
       case 'weatherStation': {
-        // A compact radar hut: the dish is intentionally legible at strategic
-        // zoom and rotates in syncBuildings while the simulation is running.
-        const hut = new THREE.Mesh(
-          new THREE.BoxGeometry(7.5, 2.8, 6.2),
-          mat(0x405957, { rough: 0.55, metal: 0.35 }),
-        );
-        hut.position.y = 1.4;
-        const mast = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.22, 0.3, 4.6, 10),
-          mat(0x879b98, { rough: 0.4, metal: 0.65 }),
-        );
-        mast.position.y = 4.1;
-        const dish = new THREE.Group();
-        dish.name = 'radarDish';
-        dish.position.y = 6.2;
-        const bowl = new THREE.Mesh(
-          new THREE.SphereGeometry(2.25, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2),
-          mat(0x6fd3b4, { rough: 0.28, metal: 0.45 }),
-        );
-        bowl.rotation.x = -Math.PI / 2;
-        const feed = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.12, 0.12, 1.9, 8),
-          mat(0xd8d2c2, { rough: 0.35, metal: 0.7 }),
-        );
-        feed.position.y = 0.75;
-        dish.add(bowl, feed);
-        const beacon = new THREE.Mesh(
-          new THREE.SphereGeometry(0.18, 10, 8),
-          new THREE.MeshStandardMaterial({
-            color: 0x6fd3b4,
-            emissive: 0x6fd3b4,
-            emissiveIntensity: 1.2,
-          }),
-        );
-        beacon.position.set(2.4, 3.2, 0);
-        g.add(hut, mast, dish, beacon);
+        g.add(buildWeatherStation(id));
         break;
       }
       case 'battery': {

@@ -123,6 +123,10 @@ export interface WeatherRadarCell {
   zKm: number;
   radiusKm: number;
   heading: number;
+  /** Travel speed, km per game second — used to draw the predicted track. */
+  speedKmS: number;
+  /** Seconds until this cell's envelope ends (the horizon of the forecast track). */
+  remainingS: number;
   /** 0 while scheduled, otherwise the cell's current envelope intensity. */
   intensity: number;
   active: boolean;
@@ -570,6 +574,8 @@ export class Weather {
         zKm: cell.z,
         radiusKm: cell.radiusKm,
         heading: cell.heading,
+        speedKmS: cell.speedKmS,
+        remainingS: Math.max(0, cell.endAt - this.time),
         intensity: env,
         active,
         arrivesIn,

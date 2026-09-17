@@ -11,11 +11,13 @@
  * never moves the game camera.
  */
 
-import type { SimView } from '../sim/host';
+import type { SimView, WeatherView } from '../sim/host';
 import { BUILDINGS, RESOURCES, ALL_RESOURCES } from '../sim/defs';
 import type { BuildingKind } from '../sim/defs';
 import { POI_KINDS } from '../sim/pois';
 import type { Rover } from '../sim/Simulation';
+import { stormLabel } from '../sim/weather';
+import type { WeatherRadarCell } from '../sim/weather';
 
 // ------------------------------------------------------------------ types --
 
@@ -104,6 +106,218 @@ export function fitTransform(
   };
 }
 
+// ---------------------------------------------------------- storms ----
+//
+// Storm cells live in kilometres (a planetary radar), while the claim map
+// is metres. Plot them at true scale: 1 km → 1000 world units. A regional
+// front then fills the whole 1.28 km claim, which is the honest read — only
+// a dust devil is small enough to show an edge. The HUD `#wx-radar-map` is
+// a separate km-scope PPI and is not this overlay.
+
+/** Storm geography → world metres. The claim itself is only ~1.28 km across. */
+export const STORM_KM_TO_M = 1000;
+
+/** How far ahead the predicted track looks, in sim seconds. */
+export const STORM_TRACK_LOOKAHEAD_S = 180;
+
+const STORM_FILL: Record<string, string> = {
+  devil: 'rgba(143, 184, 216, 0.22)',
+  regional: 'rgba(159, 216, 174, 0.20)',
+  severe: 'rgba(240, 192, 120, 0.22)',
+  planetary: 'rgba(240, 144, 126, 0.24)',
+};
+const STORM_STROKE: Record<string, string> = {
+  devil: '#8fb8d8',
+  regional: '#9fd8ae',
+  severe: '#f0c078',
+  planetary: '#f0907e',
+};
+
+/** Cell centre in world metres (east, north). */
+export function stormWorldCentre(cell: { xKm: number; zKm: number }): { x: number; z: number } {
+  return {
+    x: (Number.isFinite(cell.xKm) ? cell.xKm : 0) * STORM_KM_TO_M,
+    z: (Number.isFinite(cell.zKm) ? cell.zKm : 0) * STORM_KM_TO_M,
+  };
+}
+
+/** Footprint radius in world metres. */
+export function stormWorldRadius(cell: { radiusKm: number }): number {
+  const r = Number.isFinite(cell.radiusKm) ? cell.radiusKm : 0;
+  return Math.max(0, r) * STORM_KM_TO_M;
+}
+
+/**
+ * Predicted track in world metres: heading × speedKmS × t, for
+ * t in `[0, min(remainingS, lookahead)]`. Heading is the sim's compass
+ * (`atan2(x, z)`): 0 = north (+Z), turning east (+X).
+ */
+export function stormTrackPoints(
+  cell: {
+    xKm: number;
+    zKm: number;
+    heading: number;
+    speedKmS: number;
+    remainingS: number;
+  },
+  lookaheadS = STORM_TRACK_LOOKAHEAD_S,
+  steps = 8,
+): Array<{ x: number; z: number }> {
+  const remaining = Number.isFinite(cell.remainingS) ? Math.max(0, cell.remainingS) : 0;
+  const horizon = Math.max(0, Math.min(remaining, lookaheadS));
+  const speed = Number.isFinite(cell.speedKmS) ? cell.speedKmS : 0;
+  const heading = Number.isFinite(cell.heading) ? cell.heading : 0;
+  const x0 = Number.isFinite(cell.xKm) ? cell.xKm : 0;
+  const z0 = Number.isFinite(cell.zKm) ? cell.zKm : 0;
+  const n = Math.max(1, steps);
+  const pts: Array<{ x: number; z: number }> = [];
+  for (let i = 0; i <= n; i++) {
+    const t = (horizon * i) / n;
+    pts.push({
+      x: (x0 + Math.sin(heading) * speed * t) * STORM_KM_TO_M,
+      z: (z0 + Math.cos(heading) * speed * t) * STORM_KM_TO_M,
+    });
+  }
+  return pts;
+}
+
+/**
+ * What the claim map should plot. A live radar dish is the authority; without
+ * one the colony still knows the system overhead (`current`) and the one it
+ * can see coming (`threat`) — never invent cells the sim did not report.
+ */
+export function stormCellsForMap(weather: WeatherView): WeatherRadarCell[] {
+  if (weather.radar.available) return weather.radar.cells;
+  const out: WeatherRadarCell[] = [];
+  const cur = weather.current();
+  if (cur) {
+    out.push({
+      kind: cur.kind,
+      label: stormLabel(cur.kind),
+      xKm: cur.x,
+      zKm: cur.z,
+      radiusKm: cur.radiusKm,
+      heading: cur.heading,
+      speedKmS: cur.speedKmS,
+      remainingS: Math.max(0, cur.endAt - weather.time),
+      intensity: weather.stormIntensity,
+      active: true,
+      arrivesIn: 0,
+    });
+  }
+  const threat = weather.threat();
+  if (threat) {
+    out.push({
+      kind: threat.kind,
+      label: threat.label,
+      xKm: Math.sin(threat.bearingRad) * threat.distKm,
+      zKm: Math.cos(threat.bearingRad) * threat.distKm,
+      radiusKm: threat.radiusKm,
+      heading: threat.bearingRad + Math.PI,
+      speedKmS: 0,
+      remainingS: Math.max(0, threat.arrivesIn),
+      intensity: 0,
+      active: false,
+      arrivesIn: threat.arrivesIn,
+    });
+  }
+  return out;
+}
+
+/**
+ * Cheap signature of the storm overlay, so the minimap's paint-loop key
+ * notices a cell that has moved (or a devil that has spun up) instead of
+ * freezing the sky on the first frame.
+ */
+export function stormOverlayKey(weather: WeatherView): string {
+  const cells = stormCellsForMap(weather);
+  if (cells.length === 0) return '';
+  return cells
+    .map(
+      (c) =>
+        `${c.kind}:${Math.round(c.xKm * 4)}:${Math.round(c.zKm * 4)}:${Math.round(c.heading * 8)}:${Math.round(c.remainingS / 4)}`,
+    )
+    .join(';');
+}
+
+/**
+ * Fill + clip the storm footprints to the claim, then stroke the predicted
+ * track. A canvas without a 2D context never reaches here — callers guard
+ * `getContext` the same way the rest of the map does.
+ */
+export function drawStormOverlay(
+  ctx: CanvasRenderingContext2D,
+  canvasW: number,
+  canvasH: number,
+  tr: MapTransform,
+  worldHalf: number,
+  cells: WeatherRadarCell[],
+): void {
+  if (cells.length === 0) return;
+
+  const tl = worldToCanvas(-worldHalf, worldHalf, tr, canvasW, canvasH);
+  const br = worldToCanvas(worldHalf, -worldHalf, tr, canvasW, canvasH);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
+  ctx.clip();
+
+  for (const cell of cells) {
+    const centre = stormWorldCentre(cell);
+    const p = worldToCanvas(centre.x, centre.z, tr, canvasW, canvasH);
+    const r = Math.max(1.5, stormWorldRadius(cell) * tr.scale);
+    ctx.fillStyle = STORM_FILL[cell.kind] ?? STORM_FILL.regional;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = STORM_STROKE[cell.kind] ?? STORM_STROKE.regional;
+    ctx.lineWidth = cell.active ? 1.6 : 1;
+    ctx.globalAlpha = cell.active ? 0.85 : 0.5;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+
+  for (const cell of cells) {
+    const colour = STORM_STROKE[cell.kind] ?? STORM_STROKE.regional;
+    const centre = stormWorldCentre(cell);
+    const p = worldToCanvas(centre.x, centre.z, tr, canvasW, canvasH);
+    const pts = stormTrackPoints(cell);
+    const moved =
+      pts.length >= 2 &&
+      Math.hypot(pts[pts.length - 1].x - pts[0].x, pts[pts.length - 1].z - pts[0].z) > 1;
+    if (moved) {
+      ctx.strokeStyle = colour;
+      ctx.lineWidth = 1.4;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath();
+      pts.forEach((pt, i) => {
+        const q = worldToCanvas(pt.x, pt.z, tr, canvasW, canvasH);
+        if (i === 0) ctx.moveTo(q.x, q.y);
+        else ctx.lineTo(q.x, q.y);
+      });
+      ctx.stroke();
+      ctx.setLineDash([]);
+      const tip = worldToCanvas(pts[pts.length - 1].x, pts[pts.length - 1].z, tr, canvasW, canvasH);
+      ctx.fillStyle = colour;
+      ctx.beginPath();
+      ctx.arc(tip.x, tip.y, 2.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Heading tick at the centre so a parked cell still reads a bearing.
+    const tick = 8;
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+    ctx.lineTo(p.x + Math.sin(cell.heading) * tick, p.y - Math.cos(cell.heading) * tick);
+    ctx.stroke();
+  }
+}
+
 // ---------------------------------------------------------------- renderer --
 
 export class MapRenderer {
@@ -168,6 +382,17 @@ export class MapRenderer {
       ctx.strokeRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
       ctx.setLineDash([]);
     }
+
+    // Storm cells at true km→m scale, clipped to the claim. Under markers so
+    // a planetary event never hides a rover.
+    drawStormOverlay(
+      ctx,
+      canvasW,
+      canvasH,
+      tr,
+      view.world.half,
+      stormCellsForMap(view.weather),
+    );
 
     // spawn / landing pad area
     {
@@ -428,6 +653,7 @@ export class WorldMapOverlay {
             <span class="wm-leg"><i style="background:#e07b3a"></i>POI</span>
             <span class="wm-leg"><i style="background:#4aa3e0"></i>Deposit</span>
             <span class="wm-leg"><i style="background:#fff"></i>Colonist</span>
+            <span class="wm-leg"><i style="background:#f0c078;border-radius:50%"></i>Storm</span>
             <span class="wm-leg"><i style="border:1px dashed #e07b3a"></i>Bounds</span>
           </div>
           <div class="worldmap-hint">Drag to pan · Wheel/pinch to zoom · Click entity to select · Esc to close</div>

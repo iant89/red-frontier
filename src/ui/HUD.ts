@@ -37,7 +37,7 @@ import type { PowerTier } from '../sim/config';
 import type { Alert, Severity } from '../sim/alerts';
 import { isPickedClean, POI_KINDS, salvageTotalKg } from '../sim/pois';
 import type { Poi } from '../sim/pois';
-import { MapRenderer, WorldMapOverlay, fitTransform, type MapTransform } from './WorldMap';
+import { MapRenderer, WorldMapOverlay, fitTransform, stormOverlayKey, type MapTransform } from './WorldMap';
 
 export type OverlayMode = 'none' | 'power' | 'life' | 'weather';
 
@@ -672,8 +672,9 @@ export class HUD {
     if (!canvas || !ctx) return;
     const w = canvas.width;
     const h = canvas.height;
-    // cheap change detection: rovers/buildings/pois counts + camera rounded
-    const key = `${sim.world.half}|${sim.rovers.length}|${sim.buildings.length}|${sim.world.pois.length}|${Math.round((camera?.x ?? 0)/5)}|${Math.round((camera?.z ?? 0)/5)}|${selected?.type ?? ''}${selected?.id ?? ''}|${Math.round(sim.colonist.x/3)}|${Math.round(sim.colonist.z/3)}`;
+    // cheap change detection: rovers/buildings/pois counts + camera rounded +
+    // storm cells, so a travelling front actually animates on the minimap.
+    const key = `${sim.world.half}|${sim.rovers.length}|${sim.buildings.length}|${sim.world.pois.length}|${Math.round((camera?.x ?? 0)/5)}|${Math.round((camera?.z ?? 0)/5)}|${selected?.type ?? ''}${selected?.id ?? ''}|${Math.round(sim.colonist.x/3)}|${Math.round(sim.colonist.z/3)}|${stormOverlayKey(sim.weather)}`;
     if (key === this.lastMinimapKey) return;
     this.lastMinimapKey = key;
 
@@ -1555,6 +1556,13 @@ export class HUD {
       ctx.beginPath();
       ctx.arc(p.x, p.y, Math.max(2.5, cell.active ? 3.5 : 2.5), 0, Math.PI * 2);
       ctx.fill();
+      // Heading tick — the predicted track lives on the world map; this km
+      // PPI only needs to say which way the cell is travelling.
+      const tick = Math.max(6, r * 0.35);
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(p.x + Math.sin(cell.heading) * tick, p.y - Math.cos(cell.heading) * tick);
+      ctx.stroke();
     }
     ctx.globalAlpha = 1;
 

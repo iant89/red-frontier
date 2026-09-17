@@ -44,6 +44,8 @@ test('a powered radar station exposes storm cells and advanced forecasting', () 
   assert.ok(contact, 'a nearby scheduled storm should be plotted');
   assert.equal(contact.active, false);
   assert.ok(contact.arrivesIn > 0);
+  assert.ok(contact.speedKmS > 0, 'track speed is part of the projected return');
+  assert.ok(contact.remainingS > 0, 'so is the envelope remaining');
 
   station.powerSat = 0.1;
   WeatherSystem.refreshRadar(sim.state);

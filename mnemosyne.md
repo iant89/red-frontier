@@ -154,6 +154,33 @@ Persistent notes for future coding sessions.
   puts the stage's top closer to the directional light than the old near plane,
   which clipped its shadow.
 
+## Weather Radar Station (presentation + claim-map overlay)
+
+- Mesh lives in `src/render/WeatherStation.ts` (`buildWeatherStation` /
+  `syncWeatherStation`), same pattern as `DescentStage`: presentation only,
+  sim owns radar range / forecast / wind. Named parts: `radarDish` (azimuth),
+  `raxpolElev` (nod), `anemometerCups`, `windVane`, `ledPower`/`ledScan`/
+  `ledFault`/`ledBeacon`. Animation is a pure function of sim time — pause
+  freezes cups, dish and LEDs like every other light in the scene.
+- **Radome contract:** `RADOME_COLOR = 0x6fd3b4`, `RADOME_SIDE = THREE.FrontSide`
+  (opaque outside, backface-culled inside). MLI (white quilted beta-cloth +
+  gold kapton) wraps the hut and pedestal only — never the radome, dish or cups.
+- Storm cells on the **claim map** (`src/ui/WorldMap.ts`) plot at true scale:
+  `STORM_KM_TO_M = 1000`. The world is 1.28 km across; a 90 km regional cell
+  fills the claim, which is the honest read. HUD `#wx-radar-map` stays a
+  separate km-scope PPI (heading ticks only; predicted track is the world map).
+- Track math: `(xKm + sin(h)*speedKmS*t)*1000` for
+  `t ∈ [0, min(remainingS, STORM_TRACK_LOOKAHEAD_S)]`. Radar available →
+  `weather.radar.cells` even if empty; otherwise `current()` (full track) +
+  `threat()` (footprint only, `speedKmS: 0`). Fill is clipped to the claim;
+  the dashed track strokes outside the clip.
+- `WeatherRadarCell` carries `speedKmS` + `remainingS` (filled in
+  `radarMap()`). The host projection `{ ...cell }` already forwards new
+  fields — do not list them by hand. Minimap paint key includes
+  `stormOverlayKey` so a travelling front actually animates.
+- GPU-free tests in `tests/render/weather-station.test.ts`. Do not import
+  Three into sim; WorldMap stays 2D canvas.
+
 ## Milestone 1 — deterministic state hash (StateHash)
 
 - `src/sim/debug/StateHash.ts`: `hashSimulation(sim)` → `rf1-<14hex>-<14hex>`
