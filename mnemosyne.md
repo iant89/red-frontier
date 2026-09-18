@@ -24,6 +24,50 @@ Persistent notes for future coding sessions.
   covers the poller unit-level (fake fetcher, no DOM).
 
 
+## Pause menu + save hand-off (the "Save failed" bug)
+
+- Root cause of the old "Save failed — the colony could not be read" on every
+  ☰ click: the old menu button fired the save and disposed the host on the
+  very next line, so on the (default) worker transport the in-flight snapshot
+  request was rejected as "the colony has shut down". **The fix is ordering,
+  not retries:** `Game.leaveToMenu()` only runs from the save's `onDone`
+  callback — after the write has settled one way or the other — and a failed
+  hand-off save lands on the save-failed prompt instead of a toast.
+- The ☰ button now opens `src/ui/PauseMenu.ts`: the sim pauses
+  (`hud.setSpeed(0)`, restored on close; while open the menu owns the keyboard
+  and only Esc is honored). Tabs: actions (Resume / Save game / Return to main
+  menu), settings (game, graphical, interface — applied live through
+  `Game.pauseSettings()`), expedition (live stats from `Game.buildColonyStats()`).
+- Save UX contract (HUD): `#save-progress` is the full-screen frost
+  (z-120, above the pause menu's z-100) with a centered card and staged
+  progress — user-initiated saves only; `#save-flash` is transient (1.8 s);
+  `#save-error` is the save-failed prompt (Retry / Save as new file / Keep
+  playing, plus "Return to menu without saving" in menu context only).
+  `Game.saveContext: 'auto' | 'manual' | 'menu' | 'update'` decides phrasing
+  and visibility: the prompt shows when `!quiet || (visible && context
+  !== 'update')`; a hidden-tab autosave failure is console + toast, never a
+  prompt.
+- **Headless reload gotchas (learned the hard way in `scripts/pause-smoke.mjs`):**
+  after `location.reload()`, a long-lived in-page poller (Playwright
+  `waitForFunction`, in *any* polling mode) does not reliably re-arm in the
+  sparticuz Chromium build, while a fresh `page.evaluate` from Node always
+  sees the current document. Poll for the reload from the Node side — the
+  smoke sets `window.rfNav` before the quit click, then polls
+  `!('rfNav' in window)` every 250 ms. Also: the "Saved" flash is up ~1.8 s
+  total; catch it with a timer-polling wait armed *before* the save settles,
+  never by reading it after the progress frost lifts.
+- Tests: `tests/app/pause-save.test.ts` (Game-level) +
+  `tests/hud/pause-menu.test.ts`. jsdom notes: a standalone suite that
+  constructs `new Game()` must `process.exit` itself at the end (the frame
+  loop's chained rAF keeps Node alive), and `globalThis.fetch` must be stubbed
+  to reject (MainMenu's GitHub badge fetch hangs the runner in a blackholed
+  sandbox).
+- **Debt (roadmap Phase 19):** the save/pause-menu logic is deliberately still
+  in `Game.ts`. `save` / `onSaveFailure` / `returnToMenu` / `leaveToMenu` /
+  `manualSave` / `retrySave` / `saveAsNew` / `abandonToMenu` are
+  `SaveController`'s future contents; `openPauseMenu` / `closePauseMenu` /
+  `pauseSettings` / `buildColonyStats` are `MenuController`'s.
+
 - `scripts/setup-playwright.mjs` installs the Playwright browser-test dependencies. Use it when Playwright is needed instead of searching for another setup script.
 - TypeScript is a local project dependency. Run `npm install` before expecting `tsc` or other package tools to be available.
 - Add architecture notes, recurring pitfalls, useful commands, and unfinished work here as they are discovered.

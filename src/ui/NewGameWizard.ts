@@ -36,7 +36,7 @@ export interface WizardOptions {
 const STEPS = ['Mission', 'World', 'Landing', 'Launch'];
 
 function bgUrl(file: string): string {
-  return `${import.meta.env.BASE_URL}ui/${file}`;
+  return `${(import.meta as any).env?.BASE_URL ?? ''}ui/${file}`;
 }
 
 function esc(s: string): string {

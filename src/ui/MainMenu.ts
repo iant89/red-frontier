@@ -18,7 +18,7 @@ export interface MainMenuOptions {
 }
 
 function bgUrl(file: string): string {
-  return `${import.meta.env.BASE_URL}ui/${file}`;
+  return `${(import.meta as any).env?.BASE_URL ?? ''}ui/${file}`;
 }
 
 export class MainMenu {

@@ -439,7 +439,7 @@ export class GameRenderer {
   }
 
   private loadMarsPbr(): void {
-    const base = `${import.meta.env.BASE_URL}textures/pbr`;
+    const base = `${(import.meta as any).env?.BASE_URL ?? ''}textures/pbr`;
     const loader = new THREE.TextureLoader();
     const anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
     let applied = false;
@@ -2012,6 +2012,37 @@ export class GameRenderer {
     this.camera.updateProjectionMatrix();
     // World-size → pixel projection for the particle shader (buffer height).
     this.weatherFx.setViewport(this.renderer.domElement.height || h, this.camera.fov);
+  }
+
+  /**
+   * Graphical setting: ceiling for the draw-buffer pixel ratio (the pause
+   * menu's render-resolution control). 2 = native retina, 1.5 = high,
+   * 1 = performance. Re-sizing at the current CSS dimensions applies it
+   * immediately; the CSS size itself never changes.
+   */
+  setPixelRatioCap(cap: number): void {
+    const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+    this.renderer.setPixelRatio(Math.max(0.5, Math.min(dpr, cap)));
+    const w = this.renderer.domElement.clientWidth;
+    const h = this.renderer.domElement.clientHeight;
+    if (w > 0 && h > 0) this.renderer.setSize(w, h, false);
+  }
+
+  /**
+   * Graphical setting: shadow maps on/off. Toggling the renderer flag is not
+   * enough — materials cache their shadow uniforms at compile time, so every
+   * material in the scene needs a recompile or the scene keeps sampling
+   * stale maps (or, worse, starts sampling none while still paying for them).
+   */
+  setShadows(on: boolean): void {
+    if (this.renderer.shadowMap.enabled === on) return;
+    this.renderer.shadowMap.enabled = on;
+    this.scene.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (const m of mats) if (m) m.needsUpdate = true;
+    });
   }
 
   render(): void {

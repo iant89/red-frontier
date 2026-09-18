@@ -38,8 +38,16 @@ import type { Alert, Severity } from '../sim/alerts';
 import { isPickedClean, POI_KINDS, salvageTotalKg } from '../sim/pois';
 import type { Poi } from '../sim/pois';
 import { MapRenderer, WorldMapOverlay, fitTransform, stormOverlayKey, type MapTransform } from './WorldMap';
+import { SETTINGS_KEYS } from './Settings';
 
 export type OverlayMode = 'none' | 'power' | 'life' | 'weather';
+
+/**
+ * Why a save failed. `read` = the snapshot could not be produced (the colony
+ * could not be serialised); `storage` = the snapshot was fine but the browser
+ * refused to write it (quota). The error dialog phrases each one differently.
+ */
+export type SaveErrorKind = 'read' | 'storage';
 
 export interface HUDCallbacks {
   onSpeed: (idx: number) => void;
@@ -47,7 +55,7 @@ export interface HUDCallbacks {
   onAction: (action: string, arg?: number | string) => void;
   onStart: (seedText: string, near: number) => void;
   onOverlay: (mode: OverlayMode) => void;
-  /** Save the colony and return to the main menu. */
+  /** Open the in-game pause menu (the topbar ☰ button). */
   onMenu?: () => void;
   /** Toggle the developer-mode panel. */
   onDev?: () => void;
@@ -55,6 +63,14 @@ export interface HUDCallbacks {
   onMapSelect?: (type: 'rover' | 'building' | 'colonist' | 'poi', id: number) => void;
   /** World map empty click — optional camera focus. */
   onMapFocus?: (x: number, z: number) => void;
+  /** "Retry" on the save-failed dialog — re-run the failed save. */
+  onSaveRetry?: () => void;
+  /** "Save as new file" on the save-failed dialog. */
+  onSaveAsNew?: () => void;
+  /** "Keep playing" on the save-failed dialog — just close it. */
+  onSaveDismiss?: () => void;
+  /** "Return without saving" on the save-failed dialog (menu hand-off only). */
+  onSaveAbandon?: () => void;
 }
 
 const fmtKg = (n: number) =>
@@ -367,7 +383,7 @@ export class HUD {
         <button class="btn" id="map-btn" class="btn" title="World map (M)">🗺</button>
         <button class="btn" id="dev-btn" title="Developer mode — world editor (~ backtick)">🛠</button>
         <button class="btn" id="history-btn" title="Alert history (H)">📜</button>
-        <button class="btn" id="menu-btn" title="Save and return to the main menu">☰</button>
+        <button class="btn" id="menu-btn" title="Pause menu — save, settings, expedition info">☰</button>
         <div class="toolbar" id="speeds"></div>
       </div>
 
@@ -499,6 +515,37 @@ export class HUD {
         <div class="actions"><button class="btn primary" id="end-restart">Return to start</button></div>
       </div>
 
+      <!-- Save in flight: blurs the live colony and reports each stage. The
+           world keeps ticking behind it — this is a status board, not a pause. -->
+      <div class="save-overlay" id="save-progress" style="display:none" aria-live="polite">
+        <div class="sp-card">
+          <div class="sp-kicker">Colony records</div>
+          <div class="sp-title" id="sp-title">Saving colony</div>
+          <div class="sp-steps">
+            <div class="sp-step" id="sp-step-0"><span class="sp-ic" aria-hidden="true">·</span><span>Reading colony state</span></div>
+            <div class="sp-step" id="sp-step-1"><span class="sp-ic" aria-hidden="true">·</span><span>Compressing data</span></div>
+            <div class="sp-step" id="sp-step-2"><span class="sp-ic" aria-hidden="true">·</span><span>Writing to storage</span></div>
+          </div>
+          <div class="sp-track"><div class="sp-fill" id="sp-fill"></div></div>
+          <div class="sp-meta" id="sp-meta">The sol clock keeps running while this finishes.</div>
+        </div>
+      </div>
+
+      <!-- A save failed: explain why and let the player choose the recovery. -->
+      <div class="save-overlay" id="save-error" style="display:none" role="alertdialog" aria-modal="true" aria-labelledby="se-title">
+        <div class="sp-card sp-card-err">
+          <div class="sp-kicker sp-kicker-err">Save fault</div>
+          <div class="sp-title sp-title-err" id="se-title">Save failed</div>
+          <div class="sp-reason" id="se-reason"></div>
+          <div class="se-actions">
+            <button class="btn primary" id="se-retry" title="Try writing the save again">↻ <span class="btn-t">Retry save</span></button>
+            <button class="btn" id="se-new" title="Start a fresh save file for this colony">▤ <span class="btn-t">Save as new file</span></button>
+            <button class="btn" id="se-dismiss" title="Close this and keep playing">✕ <span class="btn-t">Keep playing</span></button>
+            <button class="btn danger" id="se-abandon" style="display:none" title="Go back to the main menu; progress since the last save is lost">⏏ <span class="btn-t">Return to menu without saving</span></button>
+          </div>
+        </div>
+      </div>
+
       <div id="save-flash"></div>
     `;
     this.hudRoot = d;
@@ -520,6 +567,22 @@ export class HUD {
       e.stopPropagation();
       this.cb.onMenu?.();
     });
+    this.el('se-retry').addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.cb.onSaveRetry?.();
+    });
+    this.el('se-new').addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.cb.onSaveAsNew?.();
+    });
+    this.el('se-dismiss').addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.cb.onSaveDismiss?.();
+    });
+    this.el('se-abandon').addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.cb.onSaveAbandon?.();
+    });
     this.el('hist-close').addEventListener('pointerdown', (e) => {
       e.stopPropagation();
       this.closeAlertHistory();
@@ -530,7 +593,7 @@ export class HUD {
     });
     this.buildHistoryChips();
 
-    this.autopauseOnCrit = this.storeGet('rf-autopause') === '1';
+    this.autopauseOnCrit = this.storeGet(SETTINGS_KEYS.autopause) === '1';
     this.buildResourceChips();
     this.buildLifeBlock();
     this.buildTierRows();
@@ -952,6 +1015,34 @@ export class HUD {
     panel.style.maxHeight = '';
   }
 
+  /**
+   * "Restore default layout" (pause menu → interface settings): forgets every
+   * remembered panel geometry, snap and fold state, and re-docks the panels
+   * the way a fresh profile would.
+   */
+  resetPanelLayout(): void {
+    for (const id of ['vitals', 'inspector', 'log', 'minimap']) {
+      try {
+        this.resetPanelGeometry(this.el(id));
+      } catch {
+        /* panel absent — its stored geometry is cleared anyway */
+      }
+    }
+    this.storeSet('rf-collapse-vitals', '');
+    this.storeSet('rf-collapse-build', '');
+    this.storeSet('rf-collapse-inspector', '');
+    this.storeSet('rf-collapse-minimap', '');
+    this.setVitalsCollapsed(false);
+    this.setBuildCollapsed(false);
+    this.setInspectorCollapsed(false);
+    try {
+      this.setMinimapCollapsed(false);
+    } catch {
+      /* minimap optional in odd documents */
+    }
+    this.hint('<b>Panel layout restored</b> — panels are back at their docks.');
+  }
+
   private applyStoredGeometry(): void {
     const vw = window.innerWidth || 1024;
     const vh = window.innerHeight || 768;
@@ -989,7 +1080,12 @@ export class HUD {
       this.setPanelsHidden(!this.panelsHidden);
     });
     this.hudRoot.appendChild(b);
-    this.setPanelsHidden(this.storeGet('rf-hud-hidden') === '1', false);
+    this.setPanelsHidden(this.storeGet(SETTINGS_KEYS.hudHidden) === '1', false);
+  }
+
+  /** Whether the "clear the screen" mode is on (the pause menu reads this). */
+  get panelsHiddenState(): boolean {
+    return this.panelsHidden;
   }
 
   setPanelsHidden(on: boolean, persist = true): void {
@@ -1000,7 +1096,7 @@ export class HUD {
       b.textContent = on ? '👁' : '🗂';
       b.title = on ? 'Show HUD panels' : 'Hide HUD panels (clears the screen)';
     }
-    if (persist) this.storeSet('rf-hud-hidden', on ? '1' : '0');
+    if (persist) this.storeSet(SETTINGS_KEYS.hudHidden, on ? '1' : '0');
   }
 
   private buildResourceChips(): void {
@@ -1107,7 +1203,7 @@ export class HUD {
 
   setAutopause(on: boolean): void {
     this.autopauseOnCrit = on;
-    this.storeSet('rf-autopause', on ? '1' : '0');
+    this.storeSet(SETTINGS_KEYS.autopause, on ? '1' : '0');
     this.syncAutopauseBtn();
   }
 
@@ -2483,6 +2579,109 @@ export class HUD {
       f.style.display = 'none';
     }, 1800);
   }
+
+  // ------------------------------------------------------- save progress ----
+  /**
+   * The save in flight: a full-screen frost over the live colony with a
+   * centered progress card. `Game.save` drives it stage by stage — start,
+   * one tick per pipeline stage, then end — so the player sees where a
+   * colony-sized write is, instead of a blank flash.
+   */
+  saveProgressStart(title: string): void {
+    const ov = this.el('save-progress');
+    this.el('sp-title').textContent = title;
+    for (let i = 0; i < 3; i++) this.setSaveProgressStep(i, 'pending');
+    this.setSaveProgressStep(0, 'active');
+    this.setSaveProgressFill(6);
+    ov.classList.remove('leaving');
+    ov.style.display = 'flex';
+    this.saveProgressOpen = true;
+  }
+
+  /** Mark steps before `stage` done, `stage` active (0..2). */
+  saveProgressStage(stage: number): void {
+    if (!this.saveProgressOpen) return;
+    for (let i = 0; i < 3; i++) {
+      this.setSaveProgressStep(i, i < stage ? 'done' : i === stage ? 'active' : 'pending');
+    }
+    this.setSaveProgressFill(18 + stage * 27);
+  }
+
+  /** Finish: on success every step checks off and the frost lifts on its own. */
+  saveProgressEnd(ok: boolean): void {
+    if (!this.saveProgressOpen) return;
+    if (ok) {
+      for (let i = 0; i < 3; i++) this.setSaveProgressStep(i, 'done');
+      this.setSaveProgressFill(100);
+    }
+    const ov = this.el('save-progress');
+    ov.classList.add('leaving');
+    window.setTimeout(() => {
+      ov.style.display = 'none';
+      ov.classList.remove('leaving');
+    }, ok ? 420 : 120);
+    this.saveProgressOpen = false;
+  }
+
+  isSaveProgressOpen(): boolean {
+    return this.saveProgressOpen;
+  }
+
+  /** Force the frost down (a save was abandoned or the world went away). */
+  hideSaveProgress(): void {
+    const ov = this.el('save-progress');
+    if (ov.style.display !== 'none') ov.style.display = 'none';
+    ov.classList.remove('leaving');
+    this.saveProgressOpen = false;
+  }
+
+  private setSaveProgressStep(i: number, state: 'pending' | 'active' | 'done'): void {
+    const step = this.el(`sp-step-${i}`);
+    const ic = step.querySelector('.sp-ic') as HTMLElement;
+    step.className = `sp-step ${state}`;
+    ic.textContent = state === 'done' ? '✓' : state === 'active' ? '▸' : '·';
+  }
+
+  private setSaveProgressFill(pct: number): void {
+    this.el('sp-fill').style.width = `${Math.max(0, Math.min(100, pct))}%`;
+  }
+
+  private saveProgressOpen = false;
+
+  // -------------------------------------------------------- save error ----
+  /**
+   * The save-failed prompt. `kind` picks the wording; `canAbandon` reveals the
+   * destructive option (only when the failed save was the menu hand-off, where
+   * the player's stated intent was to leave).
+   */
+  showSaveError(kind: SaveErrorKind, canAbandon: boolean): void {
+    const ov = this.el('save-error');
+    this.el('se-title').textContent = 'Save failed';
+    this.el('se-reason').textContent =
+      kind === 'storage'
+        ? 'The snapshot was written out, but browser storage refused it — the quota for this site is full. Retry once it frees up, save to a new file, or keep playing; your last successful save is intact.'
+        : 'The colony could not be read — the save was never written. Nothing changed on disk. Retry, save to a new file, or keep playing; your last successful save is intact.';
+    this.el('se-abandon').style.display = canAbandon ? '' : 'none';
+    ov.style.display = 'flex';
+    this.saveErrorOpen = true;
+    // The progress card and the error card never share the screen.
+    this.hideSaveProgress();
+  }
+
+  /** Close the prompt. Returns true if it was open (for chaining). */
+  hideSaveError(): boolean {
+    const ov = this.el('save-error');
+    if (ov.style.display === 'none') return false;
+    ov.style.display = 'none';
+    this.saveErrorOpen = false;
+    return true;
+  }
+
+  isSaveErrorOpen(): boolean {
+    return this.saveErrorOpen;
+  }
+
+  private saveErrorOpen = false;
 
   showEnd(title: string, text: string): void {
     this.el('end-title').textContent = title;
