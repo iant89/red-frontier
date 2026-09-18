@@ -11,16 +11,6 @@ export interface FluidFlow {
   consumed: number;
 }
 
-export interface HistorySample {
-  t: number;
-  genKw: number;
-  loadKw: number;
-  storedFrac: number;
-  water: number;
-  oxygen: number;
-  food: number;
-}
-
 export function storageTotal(storage: ResourceAmounts): number {
   let t = 0;
   for (const r of ALL_RESOURCES) t += storage[r];

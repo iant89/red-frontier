@@ -48,7 +48,7 @@
  *   - **AlertBus mechanics implementation** — `alerts.ts` (same split as
  *     `weather.ts` beside WeatherSystem). This module *owns* the mapping onto
  *     the bus; the bus remains the data structure.
- *   - **History sampling** (`recordHistory`) — HistorySystem Phase 17.
+ *   - **History sampling** (`HistorySystem.tick`) — HistorySystem (Phase 17).
  *   - **HUD dismiss / snooze** — presentation; reads SimView alerts.
  *
  * Other domain systems (Weather, Construction, Exploration, …) still call

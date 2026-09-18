@@ -2459,6 +2459,81 @@ This will also provide a future foundation for:
     post-game summaries
 
 
+## Recorded (Phase 17 complete — 2026-09-18)
+
+Implemented on the shared computer (`refactor/phase-17-history-system`).
+
+**Historical records are centralized; discrete event narratives stay on AlertBus.**
+§21's distinction is now a module and a test. `src/sim/systems/HistorySystem.ts`
+owns the vitals time-series sampling that used to live as
+`Simulation.recordHistory` / `resetFlows` — same interval gate, sample shape,
+ring-buffer cap (`HISTORY_SAMPLES`) and trailing-sol flow-window roll.
+`src/sim/state/HistoryState.ts` owns the `HistorySample` type plus
+`emptyFlows` / `emptyHistoryWindows` helpers. Simulation wires
+`HistorySystem.tick` after failures→alerts, and delegates restore / time-jump
+clears to `HistorySystem.clear` / `afterTimeJump`.
+
+Domain-event → HistoryState event-log (milestones, failures, discoveries,
+construction completion, rover incidents) and replay/analytics/reports are
+**foundation only** this phase — those one-shot narratives still write
+`state.alerts` (AlertBus). Redesigning them into a parallel log would change
+save/UI and is deferred (one architectural change).
+
+**What moved, and where it came from**
+
+| Now in `HistorySystem` / `HistoryState` | Came from | Was |
+| --- | --- | --- |
+| `tick` (sample + flow roll) | `Simulation.recordHistory` + `resetFlows` | private methods on Simulation |
+| `clear` | `Simulation.restore` history wipe | inline three assignments |
+| `afterTimeJump` | `Simulation.devSetTime` history re-anchor | inline lastHistoryAt / flows / flowWindow |
+| `HistorySample` type | `state/ResourceState.ts` | sat beside fluid helpers |
+| `emptyFlows` / `emptyHistoryWindows` | *(new helpers)* | duplicated object literals |
+
+Not a redesign: every sample field, threshold and trim rule is what was already
+there. Public host queries (`netRatePerSol`, `instantRatePerSol`, `reserveSols`,
+`history` getter) stay on Simulation — they read the windows HistorySystem
+writes.
+
+**What deliberately does not live here**
+
+- **AlertBus / AlertSystem** — notifications (Phase 16).
+- **Failure checks / tripDamaged / endMission** — FailureSystem.
+- **Discrete milestone / discovery / construction / rover incident event log** —
+  still AlertBus writers in domain systems; future HistorySystem consumers.
+- **Replay / analytics / mission reports** — deferred.
+
+**Tests** — `tests/sim/history-system.test.ts`: first-tick sample, interval
+gate, ring-buffer cap, live power/pool reads, flow-window roll + trim,
+skip-path still resets flows, clear / afterTimeJump, empty helpers, main-loop
+wiring, `devSetTime` / restore seams, reserveSols still reads the window, and
+architecture guards (HistorySystem owns tick/resetFlows/clear; Simulation no
+longer has `recordHistory` / `resetFlows`; HistorySystem does not write alerts
+or own failure actions).
+
+**Gate results**
+
+| Gate | Result |
+| --- | --- |
+| `npm run typecheck` | green |
+| `npm test` | green — 66 suites / 778 checks (was 65/761), 79.9 s |
+| `npm run test:check` | green — 66 suites, all linked, all declare `@covers` |
+| `npm run build` | green — `index.js` 1,049.48 kB (304.74 kB gz), `sim.worker` 229.59 kB, 92 modules |
+| behavior A/B | **identical** — `scripts/behavior-baseline.ts` run against Phase 16 tip (`59b6814`) and against today's tree |
+| smokes | skipped on this host (Playwright not installed); unit/integration + A/B cover the extraction |
+
+The §48 checklist, item by item: the responsibility has one owner
+(`HistorySystem` for vitals sampling + flow-window roll, with discrete event
+narratives explicitly named as living on AlertBus for now); its imports are
+`state/*` and `config` — no DOM, no three.js, no `app/`, no `ui/`, no `render/`;
+behavior is intact and proven by the A/B above; the extracted behavior has its
+own focused suite; determinism and the production build are green; no
+presentation dependency leaked; and no duplicate source of truth was introduced.
+Documentation: this record, the Phase 17 entry in `mnemosyne.md`, and the
+`docs/design/TDD.md` layout/testing rows.
+
+`Simulation.ts`: 1,419 → 1,361 lines. The next phase per §51 is **Phase 18 — Refactor Simulation.ts**.
+
+
 # 22. Phase 18 — Refactor Simulation.ts
 
 At this point, `Simulation.ts` should finally become small.

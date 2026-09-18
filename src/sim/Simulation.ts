@@ -29,10 +29,7 @@ import {
   SPAWN_Z,
   HOURS_PER_SEC,
   SOLS_PER_SEC,
-  SOL_SECONDS,
   SUIT_O2_CAPACITY,
-  HISTORY_SAMPLES,
-  HISTORY_INTERVAL_S,
   SAVE_VERSION,
   BUILDING_MAX_HEALTH,
   DAMAGED_HEALTH,
@@ -97,6 +94,7 @@ import {
   type FailureSystemContext,
 } from './systems/FailureSystem';
 import { AlertSystem } from './systems/AlertSystem';
+import { HistorySystem } from './systems/HistorySystem';
 
 // Phase 2 — state extraction
 import {
@@ -119,7 +117,8 @@ import {
   remainingCostTotal,
   lightningVulnerability,
 } from './state/BuildingState';
-import type { FluidFlow, HistorySample } from './state/ResourceState';
+import type { FluidFlow } from './state/ResourceState';
+import type { HistorySample } from './state/HistoryState';
 import { batteryCapacityKWh } from './state/PowerState';
 
 // Re-export for backward compat (old import sites still work)
@@ -290,8 +289,6 @@ export class Simulation {
 
   get history(): HistorySample[] { return this.state.history; }
   set history(v: HistorySample[]) { this.state.history = v; }
-  private get lastHistoryAt(): number { return this.state.lastHistoryAt; }
-  private set lastHistoryAt(v: number) { this.state.lastHistoryAt = v; }
 
   get gameOver(): { reason: string; sol: number } | null { return this.state.gameOver; }
   set gameOver(v: { reason: string; sol: number } | null) { this.state.gameOver = v; }
@@ -856,13 +853,7 @@ export class Simulation {
   devSetTime(sol: number, frac: number): void {
     ClockSystem.setTime(this.state, sol, frac);
     WeatherSystem.afterTimeJump(this.state);
-    this.lastHistoryAt = -Infinity;
-    this.lastFlows = {
-      water: { produced: 0, consumed: 0 },
-      oxygen: { produced: 0, consumed: 0 },
-      food: { produced: 0, consumed: 0 },
-    };
-    this.flowWindow = [];
+    HistorySystem.afterTimeJump(this.state);
   }
 
   // -------------------------------------------------------- main loop ----
@@ -932,9 +923,9 @@ export class Simulation {
     }
     LifeSupportSystem.tickColonist(this.state, this.lifeSupportHooks);
 
-    // 9. failure checks, alerts, history
+    // 9. failure checks, alerts, history (Phases 15–17)
     this.evaluateAlerts();
-    this.recordHistory();
+    HistorySystem.tick(this.state);
   }
 
   // ------------------------------------------------------------ weather ----
@@ -1056,7 +1047,7 @@ export class Simulation {
 
   // ------------------------------------------------------------ alerts ----
   // Phase 15/16: FailureSystem produces domain events; AlertSystem maps them
-  // onto state.alerts. History sampling stays here until Phase 17.
+  // onto state.alerts. Phase 17: history sampling lives in HistorySystem.
 
   /** Sols of reserve left for a fluid at the trailing-sol net rate. */
   solsOfReserve(f: FluidId): number {
@@ -1069,56 +1060,9 @@ export class Simulation {
   }
 
   // ----------------------------------------------------------- history ----
-  private recordHistory(): void {
-    if (this.simTime - this.lastHistoryAt < HISTORY_INTERVAL_S) {
-      // Flows are per-tick accumulators; reset them after they've been read.
-      this.resetFlows();
-      return;
-    }
-    this.lastHistoryAt = this.simTime;
-    this.history.push({
-      t: this.simTime,
-      genKw: this.power.generationKw,
-      loadKw: this.power.servedKw,
-      storedFrac: this.power.capacityKWh > 0 ? this.power.storedKWh / this.power.capacityKWh : 0,
-      water: this.pools.amounts.water,
-      oxygen: this.pools.amounts.oxygen,
-      food: this.pools.amounts.food,
-    });
-    while (this.history.length > HISTORY_SAMPLES) this.history.shift();
-    this.resetFlows();
-  }
-
-  /**
-   * Flows accumulate within a tick and are read by the HUD as a rate. We keep
-   * the previous tick's totals around so the UI never samples a zeroed frame.
-   */
-  private resetFlows(): void {
-    this.flowWindow.push({
-      t: this.simTime,
-      f: {
-        water: { ...this.flows.water },
-        oxygen: { ...this.flows.oxygen },
-        food: { ...this.flows.food },
-      },
-    });
-    // Keep exactly one trailing sol of samples.
-    const cutoff = this.simTime - SOL_SECONDS;
-    while (this.flowWindow.length > 1 && this.flowWindow[0].t < cutoff) {
-      this.flowWindow.shift();
-    }
-
-    this.lastFlows = {
-      water: { ...this.flows.water },
-      oxygen: { ...this.flows.oxygen },
-      food: { ...this.flows.food },
-    };
-    this.flows = {
-      water: { produced: 0, consumed: 0 },
-      oxygen: { produced: 0, consumed: 0 },
-      food: { produced: 0, consumed: 0 },
-    };
-  }
+  // Phase 17: vitals sampling + flow-window roll live in HistorySystem.
+  // Public rate queries (netRatePerSol / reserveSols) stay here — they read
+  // the windows HistorySystem writes and are part of the host surface.
 
   /** Net rate of a fluid in kg/sol, averaged over the trailing sol. */
   netRatePerSol(f: FluidId): number {
@@ -1405,9 +1349,7 @@ export class Simulation {
 
     this.alerts.reset();
     if (data.alerts) this.alerts.restore(data.alerts);
-    this.history = [];
-    this.flowWindow = [];
-    this.lastHistoryAt = -Infinity;
+    HistorySystem.clear(this.state);
 
     let maxId = this.nextId;
     for (const e of [...this.rovers, ...this.buildings]) maxId = Math.max(maxId, e.id + 1);
