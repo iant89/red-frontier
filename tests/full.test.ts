@@ -63,6 +63,7 @@ import './render/solar.test';
 import './render/descent-stage.test';
 import './render/weather-station.test';
 import './app/update-check.test';
+import './app/game-controllers.test';
 import './app/pause-save.test';
 import './ui/build-status.test';
 import './ui/gestures.test';

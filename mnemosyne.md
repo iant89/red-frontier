@@ -82,11 +82,9 @@ Persistent notes for future coding sessions.
   loop's chained rAF keeps Node alive), and `globalThis.fetch` must be stubbed
   to reject (MainMenu's GitHub badge fetch hangs the runner in a blackholed
   sandbox).
-- **Debt (roadmap Phase 19):** the save/pause-menu logic is deliberately still
-  in `Game.ts`. `save` / `onSaveFailure` / `returnToMenu` / `leaveToMenu` /
-  `manualSave` / `retrySave` / `saveAsNew` / `abandonToMenu` are
-  `SaveController`'s future contents; `openPauseMenu` / `closePauseMenu` /
-  `pauseSettings` / `buildColonyStats` are `MenuController`'s.
+- **Phase 19 done:** save/pause-menu logic extracted to `SaveController` /
+  `MenuController` (see Phase 19 note below). onDone-ordered teardown and
+  `saveContext` phrasing/visibility preserved.
 
 - `scripts/setup-playwright.mjs` installs the Playwright browser-test dependencies. Use it when Playwright is needed instead of searching for another setup script.
 - TypeScript is a local project dependency. Run `npm install` before expecting `tsc` or other package tools to be available.
@@ -746,6 +744,25 @@ Persistent notes for future coding sessions.
   browser smokes green on both transports, and the A/B byte-identical against
   pre-Phase-10 `HEAD`. `Simulation.ts` 2,082 → 1,799 lines. Recorded in the
   roadmap's Phase 12 block.
+
+
+## Refactor Phase 19 (Game controllers) — composition root
+
+- **`Game.ts` is a composition root.** Controllers under `src/app/` own the
+  former Game responsibilities:
+  - `GameLoop` — rAF / frame timing / `host.step()` / render scheduling
+  - `InputController` — keyboard, pointer, touch, camera, `attachInput`
+  - `SelectionController` — selection state, tap paths, selection visual
+  - `BuildController` — build mode, ghost, placement *request* (not validity)
+  - `SaveController` — save/load hand-off/autosave UI; **onDone-ordered**
+    `returnToMenu` → save settle → `leaveToMenu` dispose
+  - `MenuController` — pause menu open/close, settings, colony stats
+  - `UpdateController` — in-play update notice save/reload/later
+- **Preserved:** `saveContext: 'auto'|'manual'|'menu'|'update'` visibility
+  rules; thin Game delegates keep `tests/app/pause-save.test.ts` working via
+  `(game as any).returnToMenu()` etc.; smoke field aliases on Game.
+- Gate on completion (2026-09-18): see roadmap Phase 19 Recorded block.
+  `Game.ts` 1,904 → 868 lines.
 
 ## Refactor Phase 18 (Simulation orchestrator) — coordinate, don't implement
 
