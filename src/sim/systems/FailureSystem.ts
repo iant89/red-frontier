@@ -207,6 +207,11 @@ export class FailureSystem {
         b.workerId = null;
       }
     }
+    state.domainEvents.push({
+      type: 'building/failed',
+      buildingId: b.id,
+      cause,
+    });
     return {
       kind: 'BuildingTripped',
       buildingId: b.id,
@@ -222,6 +227,7 @@ export class FailureSystem {
   static endMission(state: ColonyState, reason: string): FailureEvent {
     const sol = state.clock.sol + 1;
     state.gameOver = { reason, sol };
+    state.domainEvents.push({ type: 'game/over', reason, sol });
     // Notification is AlertSystem's job — Simulation applies the MissionLost
     // event after this returns.
     return { kind: 'MissionLost', reason, sol };

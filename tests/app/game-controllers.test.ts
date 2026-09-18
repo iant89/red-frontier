@@ -124,6 +124,8 @@ test('GameLoop owns rAF frame tick + resize', () => {
   const src = root('src/app/GameLoop.ts');
   assert.ok(src.includes('requestAnimationFrame'));
   assert.ok(src.includes('host.step('));
+  assert.ok(src.includes('host.drainEvents('));
+  assert.ok(src.includes('host.drainDomainEvents('), 'frame drain must clear domain queues');
   assert.ok(src.includes('resize('));
   assert.ok(gameSrc.includes('this.loopCtrl.loop('));
   assert.ok(gameSrc.includes('this.loopCtrl.resize()'));

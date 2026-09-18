@@ -27,6 +27,7 @@ import type { Simulation, HistorySample, FluidFlow, Rover, Building } from '../S
 import type { Deposit } from '../World';
 import type { Poi } from '../pois';
 import type { LogEvent } from '../alerts';
+import type { DomainEvent } from '../domainEvents';
 import type { SunState } from '../clock';
 import type { StormCell, StormKind, StormKindReal, WeatherRadar } from '../weather';
 import type { FluidId, ResourceAmounts } from '../defs';
@@ -125,6 +126,8 @@ export interface ViewPayload {
   alerts: AlertView[];
   /** Log lines produced since the previous payload. */
   events: LogEvent[];
+  /** Domain events produced since the previous payload (Phase 21). */
+  domainEvents: DomainEvent[];
   /** Per-fluid numbers the HUD shows; computed where the smoothing lives. */
   reserveSols: Record<FluidId, number>;
   netRatePerSol: Record<FluidId, number>;
@@ -181,6 +184,7 @@ export function projectView(
   transport: SimTransport,
   overlays: OverlayState,
   events: LogEvent[] = [],
+  domainEvents: ReadonlyArray<DomainEvent> = [],
 ): ViewPayload {
   const t0 = getProfiler().isEnabled() ? performance.now() : 0;
   const payload: ViewPayload = {
@@ -260,6 +264,7 @@ export function projectView(
     })),
     alerts: sim.alerts.list().map(copy),
     events,
+    domainEvents: domainEvents.map((e) => ({ ...e })) as DomainEvent[],
     reserveSols: fluidMap((f) => sim.reserveSols(f)),
     netRatePerSol: fluidMap((f) => sim.netRatePerSol(f)),
     storageCapacity: sim.storageCapacity(),

@@ -76,6 +76,10 @@ export class GameLoop {
       this.d.hud.addLog(ev.severity, ev.text, ev.stamp);
       this.d.audio.event(ev);
     }
+    // Domain events have no HUD consumer yet (Phase 21). Drain and discard each
+    // frame so LocalSimHost pending / WorkerSimHost unreadDomain cannot grow
+    // without bound across play.
+    void host.drainDomainEvents();
     // This lives outside the simulation tick. `loop()` still runs at speed 0,
     // so a paused player hears the frozen wind/storm ambience rather than a
     // dead soundscape.

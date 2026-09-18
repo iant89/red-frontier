@@ -55,6 +55,7 @@ function makeHost(failFirst = 0, delayMs = 25) {
     request: () => ({ ok: true }),
     requestPlacement: async () => ({ ok: true }),
     drainEvents: () => [],
+    drainDomainEvents: () => [],
     syncOverlays: () => {},
     requestSnapshot: () =>
       new Promise((resolve, reject) => {

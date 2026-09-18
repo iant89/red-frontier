@@ -20,6 +20,7 @@ import { runOverlays, type OverlayState } from './overlays';
 import { ColonyMirror } from './mirror';
 import { projectView } from './projection';
 import type { SimBootParams, SimLogEvent, SimSnapshot, SimView } from './view';
+import type { DomainEvent } from '../domainEvents';
 
 export class LocalSimHost implements SimHost {
   readonly transport = 'in-process' as const;
@@ -73,6 +74,10 @@ export class LocalSimHost implements SimHost {
     return this.sim.drainEvents();
   }
 
+  drainDomainEvents(): ReadonlyArray<DomainEvent> {
+    return this.sim.drainDomainEvents();
+  }
+
   syncOverlays(state: OverlayState): void {
     this.overlays = state;
     this.viewDirty = true;
@@ -122,7 +127,7 @@ export class LocalSimHost implements SimHost {
    */
   private refreshView(): void {
     if (!this.viewDirty && this.mirror) return;
-    const payload = projectView(this.sim, 'in-process', this.overlays, []);
+    const payload = projectView(this.sim, 'in-process', this.overlays, [], []);
     if (!this.mirror) {
       this.mirror = new ColonyMirror(
         {

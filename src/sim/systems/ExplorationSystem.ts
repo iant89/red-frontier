@@ -109,6 +109,11 @@ export class ExplorationSystem {
       p.discovered = true;
       const info = POI_KINDS[p.kind];
       const kg = salvageTotalKg(p);
+      state.domainEvents.push({
+        type: 'poi/discovered',
+        poiId: p.id,
+        kind: p.kind,
+      });
       state.alerts.raise(
         `poi-found-${p.id}`,
         'opportunity',

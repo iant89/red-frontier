@@ -33,6 +33,7 @@ import type { ViewPayload } from './projection';
 import type { OverlayState } from './overlays';
 import type { SimHost, SimTransport } from './SimHost';
 import type { SimBootParams, SimLogEvent, SimSnapshot, SimView } from './view';
+import type { DomainEvent } from '../domainEvents';
 import { getProfiler } from '../debug/Profiler';
 
 export interface WorkerInit {
@@ -178,6 +179,10 @@ export class WorkerSimHost implements SimHost {
    *  per advance, so this cannot lose or repeat a line. */
   drainEvents(): SimLogEvent[] {
     return this.mirror.drainUnread();
+  }
+
+  drainDomainEvents(): ReadonlyArray<DomainEvent> {
+    return this.mirror.drainDomainEvents();
   }
 
   syncOverlays(state: OverlayState): void {

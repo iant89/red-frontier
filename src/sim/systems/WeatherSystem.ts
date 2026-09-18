@@ -127,6 +127,7 @@ export class WeatherSystem {
       state.stormAnnounced = true;
       state.alerts.clear('storm-inbound', state.simTime, state.clock.format());
       const active = wx.current()!;
+      state.domainEvents.push({ type: 'storm/started', kind: active.kind });
       const sev: Severity =
         active.kind === 'severe' || active.kind === 'planetary'
           ? 'crit'
@@ -142,6 +143,7 @@ export class WeatherSystem {
     }
     if (!wx.current() && state.stormAnnounced) {
       state.stormAnnounced = false;
+      state.domainEvents.push({ type: 'storm/ended' });
       state.alerts.event(
         'ok',
         'The storm has passed. Dust is settling; solar recovers as the air clears.',

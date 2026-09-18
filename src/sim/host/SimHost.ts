@@ -21,6 +21,7 @@
 
 import type { SimAck, SimCommand } from './protocol';
 import type { SimSnapshot, SimView, SimLogEvent } from './view';
+import type { DomainEvent } from '../domainEvents';
 import type { OverlayState } from './overlays';
 
 /** How the host reaches the sim — surfaced so UI can be honest about latency. */
@@ -63,6 +64,12 @@ export interface SimHost {
    * it belongs to the host rather than the view.
    */
   drainEvents(): SimLogEvent[];
+
+  /**
+   * Structured domain events since the last drain (Phase 21). Separate from
+   * AlertBus / {@link drainEvents} HUD toasts.
+   */
+  drainDomainEvents(): ReadonlyArray<DomainEvent>;
 
   /**
    * Publish the runtime overlays to apply after every step. An overlay edits live
