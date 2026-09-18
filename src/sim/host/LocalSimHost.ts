@@ -51,7 +51,10 @@ export class LocalSimHost implements SimHost {
     // frame, so a pinned battery keeps its grip while the world runs. Identical
     // code to the worker's, which is the entire reason they are functions here.
     runOverlays(this.sim, this.overlays);
+    // Refresh in place so GameLoop's already-held `const view = host.view`
+    // sees post-step state (renderer/audio use that reference; syncUI re-gets).
     this.viewDirty = true;
+    this.refreshView();
   }
 
   send(command: SimCommand): void {
@@ -104,7 +107,11 @@ export class LocalSimHost implements SimHost {
       return { ok: false, error: decoded.error };
     }
     const ack = applyCommand(this.sim, decoded.command);
-    this.viewDirty = true;
+    if (ack.ok) {
+      // Same freshness contract as step: update the held ColonyMirror in place.
+      this.viewDirty = true;
+      this.refreshView();
+    }
     return ack;
   }
 

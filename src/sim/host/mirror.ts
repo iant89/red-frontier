@@ -74,6 +74,8 @@ export class ColonyMirror implements SimView {
   private readonly log: LogEvent[] = [];
   private unread: LogEvent[] = [];
   private payload: ViewPayload;
+  /** Rebuilt PowerResult; invalidated on apply() so frames can re-read cheaply. */
+  private powerCache: PowerResult | null = null;
 
   /**
    * The sub-views are built **once**, with getters, rather than per read. A frame
@@ -194,6 +196,7 @@ export class ColonyMirror implements SimView {
   /** Adopt the next payload. Called once per view message. */
   apply(payload: ViewPayload): void {
     this.payload = payload;
+    this.powerCache = null;
     if (payload.events.length > 0) {
       this.unread = this.unread.concat(payload.events);
       for (const ev of payload.events) {
@@ -258,10 +261,12 @@ export class ColonyMirror implements SimView {
     return this.payload.pools;
   }
   get power(): PowerResult {
+    if (this.powerCache) return this.powerCache;
     const { satisfaction, ...rest } = this.payload.power;
     // Flattened to entries for the wire so a payload stays JSON-printable; the
-    // grid model wants a Map, so it is rebuilt here rather than at every read.
-    return { ...rest, satisfaction: new Map(satisfaction) };
+    // grid model wants a Map — rebuild once per payload, not per frame read.
+    this.powerCache = { ...rest, satisfaction: new Map(satisfaction) };
+    return this.powerCache;
   }
   get storedKWh(): number {
     return this.payload.storedKWh;
