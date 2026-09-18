@@ -170,6 +170,7 @@ export class DevMode {
     // The panel displays Sol 1-based; the calendar and the protocol are 0-based.
     this.send({ type: 'dev/time', sol: sol - 1, frac });
     this.host?.drainEvents(); // a jump re-anchors the sky; don't spam the log
+    this.host?.drainDomainEvents(); // discard until a real consumer exists
     this.log('info', `⏱ Calendar jumped to Sol ${sol}, ${formatSolarTime(frac)} (developer).`);
   }
 

@@ -1,7 +1,7 @@
 /**
  * @suite sim/domain-events
  * @group unit
- * @covers src/sim/domainEvents.ts src/sim/Simulation.ts src/sim/state/ColonyState.ts src/sim/host/LocalSimHost.ts src/sim/host/WorkerSimHost.ts src/sim/host/mirror.ts src/sim/host/projection.ts src/sim/host/workerRuntime.ts src/sim/systems/WeatherSystem.ts src/sim/systems/RoverSystem.ts src/sim/systems/ConstructionSystem.ts src/sim/systems/FailureSystem.ts src/sim/systems/ExplorationSystem.ts
+ * @covers src/sim/domainEvents.ts src/sim/Simulation.ts src/sim/state/ColonyState.ts src/sim/host/LocalSimHost.ts src/sim/host/WorkerSimHost.ts src/sim/host/mirror.ts src/sim/host/projection.ts src/sim/host/workerRuntime.ts src/app/GameLoop.ts src/dev/DevMode.ts src/sim/systems/WeatherSystem.ts src/sim/systems/RoverSystem.ts src/sim/systems/ConstructionSystem.ts src/sim/systems/FailureSystem.ts src/sim/systems/ExplorationSystem.ts
  * @desc Phase 21 domain events: collector unit behaviour, transition emits,
  * AlertBus drain unchanged, Local↔Worker domain-event surface parity.
  */
@@ -174,6 +174,22 @@ test('LocalSimHost.drainDomainEvents surfaces sim events and leaves AlertBus alo
   assert.equal(host.drainEvents().length, 0);
 });
 
+test('frame-style drain (GameLoop pattern) clears pending domain queue after step', () => {
+  const sim = fresh();
+  const host = new LocalSimHost(sim);
+  host.drainDomainEvents();
+  RoverSystem.disable(sim.state, sim.rovers[0]!);
+  host.step(SIM_TICK);
+  assert.ok(sim.state.domainEvents.length >= 1, 'events accumulate until drained');
+
+  // Mirror GameLoop / DevMode.setTime: drain AlertBus + domain each frame.
+  host.drainEvents();
+  void host.drainDomainEvents();
+
+  assert.equal(sim.state.domainEvents.length, 0, 'pending domain queue empty after frame drain');
+  assert.equal(host.drainDomainEvents().length, 0);
+});
+
 interface FakePort extends HostPort {
   flush(): number;
   lastView(): ViewPayload;
@@ -260,6 +276,13 @@ test('WorkerSimHost drains domain events from the view payload (parity with Loca
   assert.ok(local.state.domainEvents.length >= 1);
   local.restore(snap);
   assert.equal(local.drainDomainEvents().length, 0, 'restore clears domain event log');
+
+  // Frame-style drain empties mirror unreadDomain (GameLoop pattern).
+  host.send({ type: 'building/place', kind: 'solar', x: 40, z: 40 });
+  port.flush();
+  host.drainEvents();
+  void host.drainDomainEvents();
+  assert.equal(host.drainDomainEvents().length, 0, 'unreadDomain empty after frame drain');
 
   host.dispose();
 });
