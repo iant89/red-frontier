@@ -2,6 +2,26 @@
 
 Persistent notes for future coding sessions.
 
+## GLB asset pipeline (rf-11)
+
+- **Pipeline only** — Leonardo da Vinci exports land under `public/models/`
+  (`rovers/`, `buildings/`, `props/`). This repo does not author/bake art.
+  Tiny fixture: `public/models/_fixtures/placeholder.glb` (~0.6 KB).
+- **API** (`src/render/`): `assetCatalog.ts` (logical id → URL),
+  `GlbLoader.ts` (GLTFLoader wrapper, injectable), `ModelRegistry.ts`
+  (`resolveUrl` / `register` / `load` / `getClone` / `getOrFallback` /
+  `preload`). `GameRenderer.models` is the live registry.
+- **Fallback**: mesh factories (`makeRoverMesh`, `makeBuildingBody`) call
+  `getClone` first; on miss they keep the existing procedural meshes.
+  Unregistered id, missing file, or failed load → procedural. With an empty
+  models tree (no preload), visuals are A/B identical to pre-pipeline.
+- **Enable assets**: drop `.glb`s at catalog paths, then
+  `await renderer.models.preload()` (or `load(id)`). Until then nothing
+  fetches. Rover GLBs should include named light nodes (`marker`, `lampL`,
+  `lampR`, `headlight`, `strobe`, `strobeLight`) for night lights; solar
+  GLBs need `solarTrack` / `sensorEye` for tracking.
+- Tests: `tests/render/glb-assets.test.ts` (linked in `full.test.ts`).
+
 ## In-play update check (TDD §23)
 
 - `vite.config.ts` writes `dist/version.json` (`{ name, commit, builtAt,
