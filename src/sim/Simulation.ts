@@ -215,9 +215,6 @@ export class Simulation {
   get consumptionMul(): number { return this.state.consumptionMul; }
   set consumptionMul(v: number) { this.state.consumptionMul = v; }
 
-  private get nextId(): number { return this.state.nextId; }
-  private set nextId(v: number) { this.state.nextId = v; }
-
   get clock(): SolClock { return this.state.clock; }
   set clock(v: SolClock) { this.state.clock = v; }
   get alerts(): AlertBus { return this.state.alerts; }
@@ -264,17 +261,6 @@ export class Simulation {
 
   get simTime(): number { return this.state.simTime; }
   set simTime(v: number) { this.state.simTime = v; }
-  private get stormAnnounced(): boolean { return this.state.stormAnnounced; }
-  private set stormAnnounced(v: boolean) { this.state.stormAnnounced = v; }
-  private get dropRng(): () => number { return this.state.dropRng; }
-  private set dropRng(v: () => number) { this.state.dropRng = v; }
-  private get ticksRun(): number { return this.state.ticksRun; }
-  private set ticksRun(v: number) { this.state.ticksRun = v; }
-  private get remainder(): number { return this.state.remainder; }
-  private set remainder(v: number) { this.state.remainder = v; }
-  private get _storageCapacity(): number { return this.state._storageCapacity; }
-  private set _storageCapacity(v: number) { this.state._storageCapacity = v; }
-
   // ------------------------------------------------------------ setup ----
 
   get nextEntityId(): number {
