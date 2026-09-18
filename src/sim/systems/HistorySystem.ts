@@ -52,8 +52,9 @@
  * ---------------------------------------------------------------------------
  *   - **AlertBus / AlertSystem** — notifications (Phase 16).
  *   - **Failure checks / tripDamaged / endMission** — FailureSystem.
- *   - **reserveSols / netRatePerSol queries** — Simulation public surface;
- *     they *read* the windows this system writes.
+ *   - **Public rate query *names*** stay on Simulation (host boundary);
+ *     the arithmetic lives here as statics Simulation thin-delegates to
+ *     (Phase 18 — coordinate, don't implement).
  *   - **Replay / analytics / mission reports** — future consumers.
  *
  * Determinism: pure reads of ColonyState + fixed HISTORY_INTERVAL_S /
@@ -69,7 +70,10 @@ import {
   HISTORY_SAMPLES,
   HISTORY_INTERVAL_S,
   SOL_SECONDS,
+  SOLS_PER_SEC,
+  SIM_TICK,
 } from '../config';
+import type { FluidId } from '../defs';
 
 export class HistorySystem {
   /**
@@ -146,5 +150,34 @@ export class HistorySystem {
     state.lastHistoryAt = -Infinity;
     state.lastFlows = emptyFlows();
     state.flowWindow = [];
+  }
+
+  /** Net rate of a fluid in kg/sol, averaged over the trailing sol. */
+  static netRatePerSol(state: ColonyState, f: FluidId): number {
+    if (state.flowWindow.length === 0) return 0;
+    const span = state.simTime - state.flowWindow[0].t;
+    if (span <= 1e-6) return 0;
+    let produced = 0;
+    let consumed = 0;
+    for (const w of state.flowWindow) {
+      produced += w.f[f].produced;
+      consumed += w.f[f].consumed;
+    }
+    return (produced - consumed) / (span * SOLS_PER_SEC);
+  }
+
+  /** Instantaneous rate for the current tick — used for live throughput read-outs. */
+  static instantRatePerSol(state: ColonyState, f: FluidId): number {
+    const sols = SIM_TICK * SOLS_PER_SEC;
+    if (sols <= 0) return 0;
+    const fl = state.lastFlows[f];
+    return (fl.produced - fl.consumed) / sols;
+  }
+
+  /** Sols of reserve left for a fluid at the trailing-sol net rate. */
+  static reserveSols(state: ColonyState, f: FluidId): number {
+    const net = HistorySystem.netRatePerSol(state, f);
+    if (net >= -1e-9) return Infinity;
+    return state.pools.amounts[f] / -net;
   }
 }

@@ -747,6 +747,29 @@ Persistent notes for future coding sessions.
   pre-Phase-10 `HEAD`. `Simulation.ts` 2,082 → 1,799 lines. Recorded in the
   roadmap's Phase 12 block.
 
+## Refactor Phase 18 (Simulation orchestrator) — coordinate, don't implement
+
+- **`Simulation.ts` is a thin orchestrator.** Create state, wire cross-system
+  hooks, process host commands as thin delegates, advance systems in the
+  existing tick order, expose lifecycle (`step` / `snapshot` / `restore`) and
+  satisfy SimView. Domain bodies that were still inline moved out:
+  - `GarageSystem` — bay service + assembly (`tickGarages` / `assembleRover`)
+  - `persistence/ColonyPersistence` — `snapshotColony` / `restoreColony`
+  - `DevBackdoors` — developer-panel mutation bodies
+  - `HistorySystem` rate statics — `netRatePerSol` / `instantRatePerSol` /
+    `reserveSols` arithmetic (public names stay on Simulation)
+- **Tick order unchanged.** Clock → Weather → Exploration → Power → Garage →
+  LifeSupport → Construction → FleetAutomation → Rover → Colonist →
+  Failure→Alert → History. Architecture guard pins the call order in source.
+- **Public host/command/view boundaries preserved.** applyCommand, SimView
+  Pick list, and restore decode path unchanged.
+- Gate on completion (2026-09-18): 67 suites / 786 checks green
+  (`tests/sim/simulation-orchestrator.test.ts` +8), typecheck and `test:check`
+  green, production build green (`index.js` 1,050.60 kB / 305.08 gz,
+  `sim.worker` 230.68 kB), behavior A/B byte-identical against Phase 17 tip
+  `6d3053e`. Smokes skipped (no Playwright on this host). `Simulation.ts`
+  1,361 → ~733 lines. Recorded in the roadmap's Phase 18 block.
+
 ## Refactor Phase 17 (HistorySystem) — historical records without simulation mechanics
 
 - **`src/sim/systems/HistorySystem.ts` owns vitals sampling.** `tick` absorbs

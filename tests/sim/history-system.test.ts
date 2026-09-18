@@ -1,7 +1,7 @@
 /**
  * @suite sim/history-system
  * @group unit
- * @covers src/sim/systems/HistorySystem.ts src/sim/state/HistoryState.ts src/sim/Simulation.ts
+ * @covers src/sim/systems/HistorySystem.ts src/sim/state/HistoryState.ts src/sim/Simulation.ts src/sim/persistence/ColonyPersistence.ts src/sim/DevBackdoors.ts
  * @desc HistorySystem extraction (Phase 17): vitals sampling gate and ring
  * buffer, inseparable flow-window roll, clear / afterTimeJump, main-loop
  * wiring, and the architecture guard that Simulation no longer owns
@@ -240,6 +240,14 @@ test('HistorySystem owns tick/resetFlows/clear; Simulation does not', () => {
     fileURLToPath(new URL('../../src/sim/Simulation.ts', import.meta.url)),
     'utf8',
   );
+  const persSrc = readFileSync(
+    fileURLToPath(new URL('../../src/sim/persistence/ColonyPersistence.ts', import.meta.url)),
+    'utf8',
+  );
+  const devSrc = readFileSync(
+    fileURLToPath(new URL('../../src/sim/DevBackdoors.ts', import.meta.url)),
+    'utf8',
+  );
   assert.ok(histSrc.includes('static tick'));
   assert.ok(histSrc.includes('static resetFlows'));
   assert.ok(histSrc.includes('static clear'));
@@ -247,8 +255,10 @@ test('HistorySystem owns tick/resetFlows/clear; Simulation does not', () => {
   assert.ok(!simSrc.includes('private recordHistory'));
   assert.ok(!simSrc.includes('private resetFlows'));
   assert.ok(simSrc.includes('HistorySystem.tick(this.state)'));
-  assert.ok(simSrc.includes('HistorySystem.clear(this.state)'));
-  assert.ok(simSrc.includes('HistorySystem.afterTimeJump(this.state)'));
+  // Phase 18: restore / time-jump call sites moved out of Simulation into
+  // ColonyPersistence / DevBackdoors — still HistorySystem.clear/afterTimeJump.
+  assert.ok(persSrc.includes('HistorySystem.clear(state)'));
+  assert.ok(devSrc.includes('HistorySystem.afterTimeJump(state)'));
   assert.ok(!/[^\w]document\./.test(histSrc));
   assert.ok(!histSrc.includes("from 'three'") && !histSrc.includes('from "three"'));
 });

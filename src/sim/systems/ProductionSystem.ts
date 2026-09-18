@@ -19,8 +19,8 @@
  * owns *when* a process runs (satisfaction × want) and *whether* the
  * domain is even asked why it is idle ("No power" wins a brownout).
  *
- * `tickGarages` (service + assembly) stays in Simulation — it consumes
- * `powerSat` rather than converting mass, and belongs to a later owner.
+ * Garage bay service + assembly lives in GarageSystem (Phase 18) — it
+ * consumes `powerSat` rather than converting mass, so it is not production.
  *
  * Determinism: no RNG, no wall clock — the same stores, same sun, same
  * tick always move the same mass.
