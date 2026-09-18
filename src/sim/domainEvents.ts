@@ -11,24 +11,6 @@
  *   { type: 'rover/disabled', roverId: 42, reason: 'battery-depleted' }
  */
 
-/** Catalog discriminants (string `type` field). */
-export type DomainEventType =
-  | 'rover/moved'
-  | 'rover/disabled'
-  | 'rover/repaired'
-  | 'building/placed'
-  | 'building/completed'
-  | 'building/failed'
-  | 'resource/produced'
-  | 'resource/consumed'
-  | 'power/shortage'
-  | 'storm/started'
-  | 'storm/ended'
-  | 'poi/discovered'
-  | 'salvage/recovered'
-  | 'colonist/critical'
-  | 'game/over';
-
 export type DomainEvent =
   | { type: 'rover/moved'; roverId: number; x: number; z: number }
   | {
@@ -79,6 +61,9 @@ export type DomainEvent =
     }
   | { type: 'colonist/critical'; colonistId: number; health: number }
   | { type: 'game/over'; reason: string; sol: number };
+
+/** Catalog discriminants — derived from the union so they cannot drift. */
+export type DomainEventType = DomainEvent['type'];
 
 /**
  * Per-tick (actually per-drain-window) collector. Systems push; hosts drain
