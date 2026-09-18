@@ -121,12 +121,6 @@ export class Game {
   private get pendingBuild(): BuildingKind | null {
     return this.buildCtrl.pendingBuild;
   }
-  private set pendingBuild(kind: BuildingKind | null) {
-    this.buildCtrl.pendingBuild = kind;
-  }
-  private get updateCheck() {
-    return this.updateCtrl.updateCheck;
-  }
   private get shiftHeld(): boolean {
     return this.inputCtrl.shiftHeld;
   }
@@ -184,7 +178,6 @@ export class Game {
       getSaveId: () => this.saveId,
       getStore: () => this.store,
       getLastSave: () => this.saveCtrl.lastSave,
-      getAutosaveSec: () => this.saveCtrl.autosaveSec,
       setAutosaveSec: (sec) => {
         this.saveCtrl.autosaveSec = sec;
       },
@@ -268,7 +261,6 @@ export class Game {
       clearArmedSpawn: () => this.setArmedSpawn(null),
       getPendingBuild: () => this.buildCtrl.pendingBuild,
       setPendingBuild: (k) => this.buildCtrl.setPendingBuild(k),
-      getSelected: () => this.selectionCtrl.selected,
       setSelected: (sel) => {
         this.selectionCtrl.selected = sel;
       },
@@ -630,14 +622,6 @@ export class Game {
     this.saveCtrl.save(quiet, onDone);
   }
 
-  private onSaveFailure(
-    kind: 'read' | 'storage',
-    quiet: boolean,
-    onDone: ((ok: boolean, stamp: string) => void) | undefined,
-  ): void {
-    this.saveCtrl.onSaveFailure(kind, quiet, onDone);
-  }
-
   private manualSave(): void {
     this.saveCtrl.manualSave();
   }
@@ -672,10 +656,6 @@ export class Game {
 
   private returnToMenu(): void {
     this.saveCtrl.returnToMenu();
-  }
-
-  private leaveToMenu(reloadMs = 700): void {
-    this.saveCtrl.leaveToMenu(reloadMs);
   }
 
   private openPauseMenu(): void {

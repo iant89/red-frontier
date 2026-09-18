@@ -54,7 +54,6 @@ export interface InputControllerDeps {
   clearArmedSpawn: () => void;
   getPendingBuild: () => BuildingKind | null;
   setPendingBuild: (kind: BuildingKind | null) => void;
-  getSelected: () => Selection;
   setSelected: (sel: Selection) => void;
   primaryTap: (x: number, y: number) => void;
   contextTap: (x: number, y: number) => void;

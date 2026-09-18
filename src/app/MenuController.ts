@@ -26,7 +26,6 @@ export interface MenuControllerDeps {
   getSaveId: () => string | null;
   getStore: () => SaveStore;
   getLastSave: () => { at: number | null; ok: boolean | null };
-  getAutosaveSec: () => number;
   setAutosaveSec: (sec: number) => void;
   /** Reset the autosave window when the interval shortens. */
   bumpLastAuto: () => void;
