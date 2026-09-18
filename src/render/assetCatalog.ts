@@ -8,27 +8,14 @@
  * ModelRegistry falls back to procedural meshes when an id is unregistered,
  * the file is missing, or load fails.
  */
+import type { BuildingKind, RoverKind } from '../sim/defs';
 
 /** Canonical logical ids the Renderer knows how to ask for. */
-export type RoverAssetId = `rover/${'mining' | 'utility' | 'cargo'}`;
-export type BuildingAssetId =
-  | `building/${
-      | 'habitat'
-      | 'solar'
-      | 'battery'
-      | 'warehouse'
-      | 'workshop'
-      | 'extractor'
-      | 'oxygenator'
-      | 'greenhouse'
-      | 'garage'
-      | 'rtg'
-      | 'weatherStation'
-    }`;
+export type RoverAssetId = `rover/${RoverKind}`;
+export type BuildingAssetId = `building/${BuildingKind}`;
 export type PropAssetId = `prop/${string}`;
-export type FixtureAssetId = 'prop/placeholder';
 
-export type AssetId = RoverAssetId | BuildingAssetId | PropAssetId | FixtureAssetId | (string & {});
+export type AssetId = RoverAssetId | BuildingAssetId | PropAssetId | (string & {});
 
 /** Default URL map. Extend via `ModelRegistry.register` for one-off overrides. */
 export const DEFAULT_ASSET_CATALOG: Readonly<Record<string, string>> = Object.freeze({
@@ -48,27 +35,12 @@ export const DEFAULT_ASSET_CATALOG: Readonly<Record<string, string>> = Object.fr
   'building/garage': '/models/buildings/garage.glb',
   'building/rtg': '/models/buildings/rtg.glb',
   'building/weatherStation': '/models/buildings/weatherStation.glb',
-  // Fixture for unit tests (always present in-repo)
-  'prop/placeholder': '/models/_fixtures/placeholder.glb',
 });
 
-export function roverAssetId(kind: 'mining' | 'utility' | 'cargo'): RoverAssetId {
+export function roverAssetId(kind: RoverKind): RoverAssetId {
   return `rover/${kind}`;
 }
 
-export function buildingAssetId(
-  kind:
-    | 'habitat'
-    | 'solar'
-    | 'battery'
-    | 'warehouse'
-    | 'workshop'
-    | 'extractor'
-    | 'oxygenator'
-    | 'greenhouse'
-    | 'garage'
-    | 'rtg'
-    | 'weatherStation',
-): BuildingAssetId {
+export function buildingAssetId(kind: BuildingKind): BuildingAssetId {
   return `building/${kind}`;
 }

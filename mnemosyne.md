@@ -7,10 +7,13 @@ Persistent notes for future coding sessions.
 - **Pipeline only** — Leonardo da Vinci exports land under `public/models/`
   (`rovers/`, `buildings/`, `props/`). This repo does not author/bake art.
   Tiny fixture: `public/models/_fixtures/placeholder.glb` (~0.6 KB).
-- **API** (`src/render/`): `assetCatalog.ts` (logical id → URL),
-  `GlbLoader.ts` (GLTFLoader wrapper, injectable), `ModelRegistry.ts`
-  (`resolveUrl` / `register` / `load` / `getClone` / `getOrFallback` /
-  `preload`). `GameRenderer.models` is the live registry.
+- **API** (`src/render/`): `assetCatalog.ts` (logical id → URL; rover/building
+  ids derived from `defs.ts` kinds), `GlbLoader.ts` (GLTFLoader wrapper,
+  injectable), `ModelRegistry.ts` (`resolveUrl` / `register` / `load` /
+  `getClone` / `preload`; `getClone` rebinds light targets; `register` URL
+  change invalidates; failed loads retry on explicit load/preload).
+  `GameRenderer.models` is the live registry. GLB mesh paths set
+  castShadow/receiveShadow (+ building pick metadata) like procedural.
 - **Fallback**: mesh factories (`makeRoverMesh`, `makeBuildingBody`) call
   `getClone` first; on miss they keep the existing procedural meshes.
   Unregistered id, missing file, or failed load → procedural. With an empty

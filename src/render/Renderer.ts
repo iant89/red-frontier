@@ -114,7 +114,7 @@ export class GameRenderer {
   /**
    * GLB asset registry (Leonardo exports under `public/models/`).
    * Call `await models.preload(…)` once assets are present; mesh factories
-   use `getClone` / `getOrFallback` and keep procedural meshes otherwise.
+   use `getClone` and keep procedural meshes otherwise.
    */
   readonly models = new ModelRegistry();
 
@@ -1345,6 +1345,15 @@ export class GameRenderer {
     const fromGlb = this.models.getClone(buildingAssetId(kind));
     if (fromGlb) {
       fromGlb.userData.fromGlb = buildingAssetId(kind);
+      fromGlb.castShadow = true;
+      fromGlb.traverse((o) => {
+        if (o instanceof THREE.Mesh) {
+          o.castShadow = !o.userData.noCastShadow;
+          o.receiveShadow = true;
+        }
+      });
+      fromGlb.userData.pickType = 'building';
+      fromGlb.userData.pickId = id;
       return fromGlb;
     }
     const g = new THREE.Group();
@@ -1691,6 +1700,11 @@ export class GameRenderer {
     if (fromGlb) {
       const g = new THREE.Group();
       g.add(fromGlb);
+      fromGlb.traverse((o) => {
+        if (o instanceof THREE.Mesh) {
+          o.castShadow = true;
+        }
+      });
       g.userData.pickable = true;
       g.userData.pickType = 'rover';
       g.userData.pickId = id;

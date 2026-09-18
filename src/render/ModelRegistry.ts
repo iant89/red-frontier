@@ -4,11 +4,10 @@
  * Usage:
  *   await registry.load('rover/cargo');
  *   const mesh = registry.getClone('rover/cargo'); // null → use procedural
- *   // or
- *   const mesh = registry.getOrFallback('rover/cargo', () => makeProcedural());
  *
- * Missing catalog entries and failed loads both yield null / fallback — the
- * Renderer’s procedural meshes stay when no Leonardo `.glb` is present.
+ * Missing catalog entries and failed loads both yield null — the Renderer's
+ * procedural meshes stay when no Leonardo `.glb` is present. Explicit
+ * `load()` / `preload()` retries after a prior failure.
  */
 import type { Object3D } from 'three';
 import { DEFAULT_ASSET_CATALOG, type AssetId } from './assetCatalog';
@@ -21,6 +20,39 @@ export interface ModelRegistryOptions {
   catalog?: Readonly<Record<string, string>>;
   /** Inject a loader (tests). Default: real GLTFLoader wrapper. */
   loader?: GlbLoaderLike;
+}
+
+/**
+ * After `Object3D.clone(true)`, SpotLight/DirectionalLight `.target` is a fresh
+ * unparented Object3D (see three's Light.copy). Rebind to the cloned former
+ * target in the tree when it was a sibling; otherwise parent the orphan.
+ */
+export function rebindLightTargets(source: Object3D, clone: Object3D): void {
+  const sourceObjs: Object3D[] = [];
+  const cloneObjs: Object3D[] = [];
+  source.traverse((o) => {
+    sourceObjs.push(o);
+  });
+  clone.traverse((o) => {
+    cloneObjs.push(o);
+  });
+  // Parallel traverse keeps corresponding indices for shared hierarchy nodes.
+  const n = Math.min(sourceObjs.length, cloneObjs.length);
+  for (let i = 0; i < n; i++) {
+    const s = sourceObjs[i]!;
+    const c = cloneObjs[i]!;
+    const srcLight = s as Object3D & { isLight?: boolean; target?: Object3D };
+    const dstLight = c as Object3D & { isLight?: boolean; target?: Object3D };
+    if (!srcLight.isLight || !srcLight.target || !dstLight.isLight || !dstLight.target) continue;
+
+    const srcIdx = sourceObjs.indexOf(srcLight.target);
+    if (srcIdx !== -1 && srcIdx < cloneObjs.length) {
+      dstLight.target = cloneObjs[srcIdx]!;
+    } else if (!dstLight.target.parent) {
+      const parent = dstLight.parent ?? clone;
+      parent.add(dstLight.target);
+    }
+  }
 }
 
 export class ModelRegistry {
@@ -44,9 +76,20 @@ export class ModelRegistry {
     return this.urls.get(id) ?? null;
   }
 
-  /** Add or replace a catalog entry (does not load). */
+  /**
+   * Add or replace a catalog entry (does not load). On URL change, drop any
+   * cached template / inflight promise and reset status to idle so the next
+   * `load()` fetches the new file.
+   */
   register(id: AssetId | string, url: string): void {
+    const prev = this.urls.get(id);
     this.urls.set(id, url);
+    if (prev !== undefined && prev !== url) {
+      this.templates.delete(id);
+      this.inflight.delete(id);
+      this.statuses.set(id, 'idle');
+      return;
+    }
     if (!this.templates.has(id) && this.statuses.get(id) !== 'loading') {
       this.statuses.set(id, 'idle');
     }
@@ -60,6 +103,7 @@ export class ModelRegistry {
   /**
    * Load and cache the template for `id`. Returns the template (not a clone),
    * or null when unregistered / load failed. Concurrent calls share one fetch.
+   * A prior `failed` status is cleared so an explicit load/preload can retry.
    */
   async load(id: AssetId | string): Promise<Object3D | null> {
     if (!this.urls.has(id)) {
@@ -67,7 +111,6 @@ export class ModelRegistry {
       return null;
     }
     if (this.templates.has(id)) return this.templates.get(id)!;
-    if (this.statuses.get(id) === 'failed') return null;
 
     const pending = this.inflight.get(id);
     if (pending) return pending;
@@ -77,6 +120,11 @@ export class ModelRegistry {
     const work = this.loader
       .load(url)
       .then((scene) => {
+        // Stale completion after register() swapped the URL — discard.
+        if (this.urls.get(id) !== url) {
+          this.inflight.delete(id);
+          return null;
+        }
         // Keep the template out of any live scene; clones are handed out.
         scene.updateMatrixWorld(true);
         this.templates.set(id, scene);
@@ -85,6 +133,10 @@ export class ModelRegistry {
         return scene;
       })
       .catch(() => {
+        if (this.urls.get(id) !== url) {
+          this.inflight.delete(id);
+          return null;
+        }
         this.statuses.set(id, 'failed');
         this.inflight.delete(id);
         return null;
@@ -96,17 +148,15 @@ export class ModelRegistry {
   /**
    * Synchronous clone of a successfully loaded template, or null.
    * Call after `await load(id)` (or `preload`) when a GLB should replace
-   * procedural geometry.
+   * procedural geometry. Rebinds SpotLight/DirectionalLight targets so
+   * clone(true) does not leave lights aiming at orphan Object3Ds.
    */
   getClone(id: AssetId | string): Object3D | null {
     const template = this.templates.get(id);
     if (!template) return null;
-    return template.clone(true);
-  }
-
-  /** Prefer a loaded GLB clone; otherwise run the procedural factory. */
-  getOrFallback(id: AssetId | string, fallback: () => Object3D): Object3D {
-    return this.getClone(id) ?? fallback();
+    const clone = template.clone(true);
+    rebindLightTargets(template, clone);
+    return clone;
   }
 
   /** Load many ids (default: every catalog entry). Failures are swallowed. */
