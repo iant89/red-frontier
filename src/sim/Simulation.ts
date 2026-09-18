@@ -96,6 +96,7 @@ import {
   type FailureHostHooks,
   type FailureSystemContext,
 } from './systems/FailureSystem';
+import { AlertSystem } from './systems/AlertSystem';
 
 // Phase 2 — state extraction
 import {
@@ -138,9 +139,15 @@ export class Simulation {
    * unchanged — only the implementor moved.
    */
   private readonly weatherHooks: WeatherHostHooks = {
-    tripDamaged: (b, cause) => FailureSystem.tripDamaged(this.state, b, cause, this.failureHooks),
+    tripDamaged: (b, cause) => {
+      const ev = FailureSystem.tripDamaged(this.state, b, cause, this.failureHooks);
+      AlertSystem.applyFailureEvents(this.state, [ev]);
+    },
     disableRover: (r) => RoverSystem.disable(this.state, r),
-    endMission: (reason) => FailureSystem.endMission(this.state, reason),
+    endMission: (reason) => {
+      const ev = FailureSystem.endMission(this.state, reason);
+      AlertSystem.applyFailureEvents(this.state, [ev]);
+    },
   };
 
   /**
@@ -161,7 +168,10 @@ export class Simulation {
    * Same shape as {@link weatherHooks} / {@link powerContext}.
    */
   private readonly lifeSupportHooks: LifeSupportHostHooks = {
-    endMission: (reason) => FailureSystem.endMission(this.state, reason),
+    endMission: (reason) => {
+      const ev = FailureSystem.endMission(this.state, reason);
+      AlertSystem.applyFailureEvents(this.state, [ev]);
+    },
     completeBuilding: (b) => ConstructionSystem.complete(this.state, b),
   };
 
@@ -1019,7 +1029,7 @@ export class Simulation {
   // and colonist/fluid restore live in systems/LifeSupportSystem.ts —
   // Simulation passes the state plus the cross-domain hooks. Failure checks
   // that *report* life-support state (low O₂, colonist health) live in
-  // FailureSystem (Phase 15); AlertSystem (Phase 16) will own notification.
+  // FailureSystem (Phase 15); AlertSystem (Phase 16) owns notification.
 
   // Phase 15: endMission lives in FailureSystem (weather / life-support hooks).
 
@@ -1045,10 +1055,8 @@ export class Simulation {
   // must remain the simulation's.
 
   // ------------------------------------------------------------ alerts ----
-  // Phase 15: failure checks + the interim alert bridge live in
-  // systems/FailureSystem.ts. AlertSystem (Phase 16) will separate
-  // notification from the domain events FailureSystem already emits.
-  // History sampling stays here until Phase 17.
+  // Phase 15/16: FailureSystem produces domain events; AlertSystem maps them
+  // onto state.alerts. History sampling stays here until Phase 17.
 
   /** Sols of reserve left for a fluid at the trailing-sol net rate. */
   solsOfReserve(f: FluidId): number {
@@ -1056,7 +1064,8 @@ export class Simulation {
   }
 
   private evaluateAlerts(): void {
-    FailureSystem.tick(this.state, this.failureContext);
+    const events = FailureSystem.tick(this.state, this.failureContext);
+    AlertSystem.applyFailureEvents(this.state, events);
   }
 
   // ----------------------------------------------------------- history ----

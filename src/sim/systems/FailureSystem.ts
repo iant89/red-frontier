@@ -1,5 +1,6 @@
 /**
  * Phase 15 — Extract FailureSystem
+ * Phase 16 — alert bridge moved to AlertSystem
  *
  * Goal per roadmap §19: centralize failures WITHOUT mixing them with alerts.
  *
@@ -7,18 +8,16 @@
  * The distinction
  * ---------------------------------------------------------------------------
  *
- *   FailureSystem
+ *   FailureSystem (this module)
  *       =  something went wrong in the colony: a building tripped offline, a
  *          rover is stranded, the grid is shedding life-support, oxygen is
  *          critical, the mission is lost. This module owns those *outcomes*
- *          and the checks that detect them.
+ *          and the checks that detect them. It emits domain events only.
  *
- *   AlertSystem (Phase 16 — not this phase)
- *       =  how the player is notified. Until that extraction, FailureSystem
- *          still drives `state.alerts.raise` / `.clear` with the same keys,
- *          severities and copy Simulation.evaluateAlerts used — a thin bridge
- *          so behavior stays identical. Domain events below are the surface
- *          AlertSystem will consume later.
+ *   AlertSystem (Phase 16)
+ *       =  how the player is notified. Simulation wires FailureEvent[] into
+ *          AlertSystem.applyFailureEvents — FailureSystem does not touch
+ *          `state.alerts`.
  *
  * ---------------------------------------------------------------------------
  * Responsibilities (roadmap §19)
@@ -39,8 +38,9 @@
  * ---------------------------------------------------------------------------
  * What deliberately does NOT live here
  * ---------------------------------------------------------------------------
- *   - **AlertBus mechanics** (dedupe, ack, history drain) — `alerts.ts` /
- *     AlertSystem Phase 16.
+ *   - **AlertBus / AlertSystem** (dedupe, ack, history drain, notification
+ *     mapping) — `alerts.ts` / AlertSystem Phase 16. This module must not
+ *     import AlertSystem or write `state.alerts`.
  *   - **Rover disable action** (`RoverSystem.disable` / `enterDisabled`) —
  *     rover domain; this system *observes* `phase === 'disabled'` and emits
  *     RoverDisabled. Weather / construction still call disable via hooks.
@@ -62,16 +62,12 @@ import { recomputeCapacitiesState } from '../state/ColonyState';
 import type { FluidId, ResourceId } from '../defs';
 import {
   ALL_FLUIDS,
-  ALL_RESOURCES,
   BUILDINGS,
-  FLUIDS,
-  RESOURCES,
 } from '../defs';
 import {
   ROVER_CONDITION_ALERT,
   SUIT_O2_CAPACITY,
 } from '../config';
-import { stormLabel } from '../weather';
 import type { StormKindReal } from '../weather';
 import type { Severity } from '../alerts';
 import { LogisticsSystem } from './LogisticsSystem';
@@ -203,12 +199,6 @@ export class FailureSystem {
   ): FailureEvent {
     b.damaged = true;
     const def = BUILDINGS[b.kind];
-    state.alerts.event(
-      'crit',
-      `${def.label} damaged by ${cause} — offline until repaired.`,
-      state.simTime,
-      state.clock.format(),
-    );
     recomputeCapacitiesState(state);
     // Any builder pointed at it can do nothing; release the crew.
     for (const r of state.rovers) {
@@ -232,34 +222,24 @@ export class FailureSystem {
   static endMission(state: ColonyState, reason: string): FailureEvent {
     const sol = state.clock.sol + 1;
     state.gameOver = { reason, sol };
-    state.alerts.raise(
-      'mission-over',
-      'crit',
-      'Mission lost',
-      reason,
-      state.simTime,
-      state.clock.format(),
-    );
+    // Notification is AlertSystem's job — Simulation applies the MissionLost
+    // event after this returns.
     return { kind: 'MissionLost', reason, sol };
   }
 
   // -------------------------------------------------------------- tick ----
 
   /**
-   * Failure checks for this tick (TDD §4 step 9). Produces domain events and
-   * bridges them onto `state.alerts` with the exact raise/clear behavior
-   * Simulation.evaluateAlerts had — AlertSystem (Phase 16) will own the
-   * bridge later.
+   * Failure checks for this tick (TDD §4 step 9). Produces domain events only —
+   * Simulation passes them to AlertSystem.applyFailureEvents for notification.
    */
   static tick(state: ColonyState, ctx: FailureSystemContext): FailureEvent[] {
-    const events = FailureSystem.evaluate(state, ctx);
-    FailureSystem.applyAlerts(state, events);
-    return events;
+    return FailureSystem.evaluate(state, ctx);
   }
 
   /**
    * Detect failure conditions. Pure over state + context — no alert writes.
-   * {@link FailureSystem.applyAlerts} is the interim notification bridge.
+   * AlertSystem (Phase 16) maps the returned events onto `state.alerts`.
    */
   static evaluate(state: ColonyState, ctx: FailureSystemContext): FailureEvent[] {
     const events: FailureEvent[] = [];
@@ -445,246 +425,4 @@ export class FailureSystem {
     return events;
   }
 
-  /**
-   * Interim bridge until AlertSystem (Phase 16): the exact raise/clear
-   * Simulation.evaluateAlerts performed, driven by {@link FailureEvent}s.
-   * Does not invent new copy or keys.
-   */
-  static applyAlerts(state: ColonyState, events: FailureEvent[]): void {
-    const t = state.simTime;
-    const stamp = state.clock.format();
-    const A = state.alerts;
-
-    for (const e of events) {
-      switch (e.kind) {
-        case 'PowerShortage': {
-          if (e.level === 'critical') {
-            A.raise(
-              'brownout-critical',
-              'crit',
-              'Grid brownout',
-              `Life-support tiers are being shed. Generation ${e.generationKw.toFixed(1)} kW vs ${e.demandKw.toFixed(1)} kW demand.`,
-              t,
-              stamp,
-            );
-          } else {
-            A.clear('brownout-critical', t, stamp, 'Critical loads are powered again.');
-            if (e.level === 'warn') {
-              A.raise(
-                'brownout',
-                'warn',
-                'Power deficit',
-                `Non-essential loads throttled. ${e.generationKw.toFixed(1)} kW generated, ${e.demandKw.toFixed(1)} kW requested.`,
-                t,
-                stamp,
-              );
-            } else {
-              A.clear('brownout', t, stamp);
-            }
-          }
-          break;
-        }
-        case 'BatteryLow': {
-          if (e.active) {
-            A.raise(
-              'battery-low',
-              'warn',
-              'Batteries nearly flat',
-              `${e.storedKWh.toFixed(0)} kWh left, draining at ${e.drainKw.toFixed(1)} kW.`,
-              t,
-              stamp,
-            );
-          } else {
-            A.clear('battery-low', t, stamp);
-          }
-          break;
-        }
-        case 'FluidReserve': {
-          const info = FLUIDS[e.fluid];
-          const key = `${e.fluid}-low`;
-          if (e.level === 'exhausted') {
-            A.raise(
-              key,
-              'crit',
-              `${info.label} exhausted`,
-              e.fluid === 'oxygen'
-                ? 'The colonist is breathing suit reserves. Restore oxygen production now.'
-                : `No ${info.label.toLowerCase()} left in the colony.`,
-              t,
-              stamp,
-            );
-          } else if (e.level === 'critical') {
-            A.raise(
-              key,
-              'crit',
-              `${info.label} critical`,
-              `${e.amount.toFixed(1)} kg left — about ${e.reserveSols.toFixed(1)} sol${e.reserveSols >= 2 ? 's' : ''} at the current rate.`,
-              t,
-              stamp,
-            );
-          } else if (e.level === 'warn') {
-            A.raise(
-              key,
-              'warn',
-              `${info.label} reserve falling`,
-              `${e.amount.toFixed(1)} kg left — about ${e.reserveSols.toFixed(1)} sols at the current rate.`,
-              t,
-              stamp,
-            );
-          } else {
-            A.clear(key, t, stamp);
-          }
-          break;
-        }
-        case 'ColonistHealth': {
-          if (e.level === 'crit') {
-            A.raise(
-              'colonist-health',
-              'crit',
-              `${e.name} is failing`,
-              `Health ${e.health.toFixed(0)}%. Restore life support immediately.`,
-              t,
-              stamp,
-              e.colonistId,
-            );
-          } else if (e.level === 'warn') {
-            A.raise(
-              'colonist-health',
-              'warn',
-              `${e.name} is unwell`,
-              `Health ${e.health.toFixed(0)}%.`,
-              t,
-              stamp,
-              e.colonistId,
-            );
-          } else {
-            A.clear('colonist-health', t, stamp, `${e.name} has recovered.`);
-          }
-          break;
-        }
-        case 'SuitOxygen': {
-          if (e.active) {
-            A.raise(
-              'suit-o2',
-              'crit',
-              'Suit oxygen low',
-              `${e.name} must reach a pressurised volume.`,
-              t,
-              stamp,
-              e.colonistId,
-            );
-          } else {
-            A.clear('suit-o2', t, stamp);
-          }
-          break;
-        }
-        case 'RoverDisabled': {
-          const key = `rover-dead-${e.roverId}`;
-          if (e.active) {
-            A.raise(
-              key,
-              'warn',
-              `${e.label} stranded`,
-              'Battery flat, out in the field — another rover can jump-start it.',
-              t,
-              stamp,
-              e.roverId,
-            );
-          } else {
-            A.clear(key, t, stamp);
-          }
-          break;
-        }
-        case 'RoverWear': {
-          const wkey = `rover-wear-${e.roverId}`;
-          if (e.active) {
-            A.raise(
-              wkey,
-              'warn',
-              `${e.label} needs service`,
-              `Drivetrain at ${Math.round(e.condition)}% — work rate reduced. Park it at a Rover Garage.`,
-              t,
-              stamp,
-              e.roverId,
-            );
-          } else {
-            A.clear(wkey, t, stamp, `${e.label} is back in shape.`);
-          }
-          break;
-        }
-        case 'StorageFull': {
-          if (e.active) {
-            A.raise(
-              'storage-full',
-              'warn',
-              e.resources.length === ALL_RESOURCES.length ? 'All silos full' : 'Silo full',
-              `${e.resources.map((r) => RESOURCES[r].label).join(', ')} at capacity — build a Warehouse to keep hauling.`,
-              t,
-              stamp,
-            );
-          } else {
-            A.clear('storage-full', t, stamp);
-          }
-          break;
-        }
-        case 'StormActive': {
-          if (e.stormKind) {
-            A.raise(
-              'storm-active',
-              e.severity,
-              stormLabel(e.stormKind),
-              `Solar −${e.dustDropPct}% from dust · visibility ${Math.round(e.visibility * 100)}% · winds ${Math.round(e.windSpeed)} m/s.`,
-              t,
-              stamp,
-            );
-          } else {
-            A.clear('storm-active', t, stamp, 'Storm passed — skies are settling.');
-          }
-          break;
-        }
-        case 'BuildingFailed': {
-          if (e.active) {
-            A.raise(
-              'building-damaged',
-              'crit',
-              e.buildingIds.length === 1
-                ? `${e.labels[0]} damaged`
-                : `${e.buildingIds.length} structures damaged`,
-              e.buildingIds.length === 1
-                ? 'Offline until a rover repairs it.'
-                : `${e.labels.join(', ')} — dispatch rovers to repair.`,
-              t,
-              stamp,
-              e.buildingIds[0],
-            );
-          } else {
-            A.clear('building-damaged', t, stamp, 'All structures repaired.');
-          }
-          break;
-        }
-        case 'PanelsDirty': {
-          if (e.active) {
-            A.raise(
-              'panels-dirty',
-              'warn',
-              'Solar arrays dusted',
-              `Output down ${Math.round((1 - e.worstCleanliness) * 100)}% on the dirtiest array${e.dirtyCount > 1 ? ` (${e.dirtyCount} arrays need cleaning)` : ''} — send a rover to clean.`,
-              t,
-              stamp,
-              e.subjectId ?? undefined,
-            );
-          } else if (e.silentClear) {
-            A.clear('panels-dirty', t, stamp);
-          } else {
-            A.clear('panels-dirty', t, stamp, 'Arrays are clean again.');
-          }
-          break;
-        }
-        case 'BuildingTripped':
-        case 'MissionLost':
-          // Raised at the action site (tripDamaged / endMission), not here.
-          break;
-      }
-    }
-  }
 }

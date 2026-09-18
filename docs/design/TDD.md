@@ -140,7 +140,10 @@ src/
                            World still owns scatter
       FailureSystem.ts     failure outcomes + checks (tripDamaged, endMission,
                            brownout / O₂ / stranded / damaged / …) as domain
-                           events; interim alert bridge until Phase 16
+                           events only — AlertSystem owns notification
+      AlertSystem.ts       failure domain events → state.alerts mapping
+                           (keys, severity, dedupe, expiration, history);
+                           HUD ack stays presentation-side (Phase 16)
     persistence/     versioned saves: schema, codec, validator, v1…v7 migrations
     debug/           invariant checks, state hash, profiler, command transcripts
     host/            the seam
@@ -173,7 +176,7 @@ docs/design/         this GDD + TDD + ROVER-STATE.md (rover state model)
 |---|---|---|
 | `sim/ecs/` | **not used** | Entities are typed objects on `Simulation` (rovers, buildings, colonist, POIs). Data-oriented enough for the current scale; a formal ECS is not required until entity counts demand it. |
 | `sim/utilities/` | **OUT** | Only power is a network; fluids are tank pools on buildings. |
-| `sim/ai/` | **`sim/systems/`** | Rover commands, task lifecycle and reservations moved to `RoverSystem` (Phase 10); its execution state (`goal`/`phase`) is runtime-only, machine-checked and documented in `docs/design/ROVER-STATE.md` (Phase 11); the *scheduler* — maintenance, rescue, supply-run auto-dispatch, behind an explicit job model (evaluators → filter → order → reserve → assign) — moved to `FleetAutomationSystem` (Phase 12); resource accounting — the storage ledger, cargo, depot transfers, site delivery and deposit reservations — moved to `LogisticsSystem` (Phase 13), with `Simulation`'s public storage surface kept as a delegate, while site crew choice stays in `ConstructionSystem`. Per-rover charging and storm recall remain in `RoverSystem`'s tick by design — the fleet-side of both lives in `FleetAutomationSystem` (dispatch pools and the storm filter). Exploration — POI discovery, supply-drop schedule/burial, and site-side salvage rewards — moved to `ExplorationSystem` (Phase 14); `World` still owns scatter, and the salvage *task* body stays in `RoverSystem`. Failures — equipment / rover / building / environmental / resource failure checks, `tripDamaged`, `endMission`, and the domain-event surface — moved to `FailureSystem` (Phase 15); AlertSystem (Phase 16) will own notification. |
+| `sim/ai/` | **`sim/systems/`** | Rover commands, task lifecycle and reservations moved to `RoverSystem` (Phase 10); its execution state (`goal`/`phase`) is runtime-only, machine-checked and documented in `docs/design/ROVER-STATE.md` (Phase 11); the *scheduler* — maintenance, rescue, supply-run auto-dispatch, behind an explicit job model (evaluators → filter → order → reserve → assign) — moved to `FleetAutomationSystem` (Phase 12); resource accounting — the storage ledger, cargo, depot transfers, site delivery and deposit reservations — moved to `LogisticsSystem` (Phase 13), with `Simulation`'s public storage surface kept as a delegate, while site crew choice stays in `ConstructionSystem`. Per-rover charging and storm recall remain in `RoverSystem`'s tick by design — the fleet-side of both lives in `FleetAutomationSystem` (dispatch pools and the storm filter). Exploration — POI discovery, supply-drop schedule/burial, and site-side salvage rewards — moved to `ExplorationSystem` (Phase 14); `World` still owns scatter, and the salvage *task* body stays in `RoverSystem`. Failures — equipment / rover / building / environmental / resource failure checks, `tripDamaged`, `endMission`, and the domain-event surface — moved to `FailureSystem` (Phase 15); failure→alert notification mapping moved to `AlertSystem` (Phase 16), with remaining direct `state.alerts` writers in other domain systems unchanged this phase. |
 | `sim/research/` | **OUT** | |
 | `sim/save/` | **extracted to** `sim/persistence/` | Schema, codec, validator and the v1…v7 migrations; `Simulation.snapshot/restore` are thin delegates. |
 | `input/` | **folded into** `app/Game.ts` | |

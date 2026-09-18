@@ -747,6 +747,29 @@ Persistent notes for future coding sessions.
   pre-Phase-10 `HEAD`. `Simulation.ts` 2,082 → 1,799 lines. Recorded in the
   roadmap's Phase 12 block.
 
+## Refactor Phase 16 (AlertSystem) — notifications without FailureSystem writes
+
+- **`src/sim/systems/AlertSystem.ts` owns failure→alert mapping.**
+  `applyFailureEvents` absorbs Phase 15's interim `FailureSystem.applyAlerts`
+  bridge and the action-site raises from `tripDamaged` / `endMission`
+  (`BuildingTripped` / `MissionLost`). Same keys, severities, copy and
+  raise/clear hysteresis — move-not-redesign.
+- **FailureSystem emits events only.** It no longer writes `state.alerts` or
+  imports AlertSystem. Simulation wires `FailureSystem.tick` →
+  `AlertSystem.applyFailureEvents`, and weather / life-support hooks apply
+  action events the same way.
+- **AlertBus stays in `alerts.ts`.** Deduplication, history drain and severity
+  ranking remain there; AlertSystem owns the mapping onto the bus. HUD
+  dismiss/snooze stays presentation-side.
+- **Other domain `state.alerts` writers unchanged** (Weather, Construction,
+  Exploration, …) — one architectural change this phase.
+- Gate on completion (2026-09-18): 65 suites / 761 checks green
+  (`tests/sim/alert-system.test.ts` +13), typecheck and `test:check` green,
+  production build green (`index.js` 1,049.72 kB / 304.68 gz, `sim.worker`
+  229.82 kB), behavior A/B byte-identical against Phase 15 tip `445942c`.
+  Smokes skipped (no Playwright on this host). `Simulation.ts` 1,410 → 1,419
+  lines (FailureSystem 690 → 428). Recorded in the roadmap's Phase 16 block.
+
 ## Refactor Phase 15 (FailureSystem) — failures without AlertSystem
 
 - **`src/sim/systems/FailureSystem.ts` owns failure outcomes and checks.**
