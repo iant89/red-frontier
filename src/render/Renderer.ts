@@ -19,6 +19,8 @@ import {
 import { WeatherFX } from './WeatherFX';
 import { DescentStage } from './DescentStage';
 import { buildWeatherStation, syncWeatherStation } from './WeatherStation';
+import { ModelRegistry } from './ModelRegistry';
+import { buildingAssetId, roverAssetId } from './assetCatalog';
 
 export type OverlayMode = 'none' | 'power' | 'life' | 'weather';
 
@@ -108,6 +110,13 @@ export class GameRenderer {
   camera: THREE.PerspectiveCamera;
   renderer: THREE.WebGLRenderer;
   private world: WorldView;
+
+  /**
+   * GLB asset registry (Leonardo exports under `public/models/`).
+   * Call `await models.preload(…)` once assets are present; mesh factories
+   use `getClone` and keep procedural meshes otherwise.
+   */
+  readonly models = new ModelRegistry();
 
   terrain: THREE.Mesh;
   private roverRoot = new THREE.Group();
@@ -1331,6 +1340,22 @@ export class GameRenderer {
   }
 
   private makeBuildingBody(kind: BuildingKind, id: number): THREE.Object3D {
+    // Prefer a Leonardo GLB when the registry has loaded one; otherwise the
+    // procedural body below (identical visuals when no assets are present).
+    const fromGlb = this.models.getClone(buildingAssetId(kind));
+    if (fromGlb) {
+      fromGlb.userData.fromGlb = buildingAssetId(kind);
+      fromGlb.castShadow = true;
+      fromGlb.traverse((o) => {
+        if (o instanceof THREE.Mesh) {
+          o.castShadow = !o.userData.noCastShadow;
+          o.receiveShadow = true;
+        }
+      });
+      fromGlb.userData.pickType = 'building';
+      fromGlb.userData.pickId = id;
+      return fromGlb;
+    }
     const g = new THREE.Group();
     const mat = (c: number, opts: { rough?: number; metal?: number; emissive?: number } = {}) =>
       new THREE.MeshStandardMaterial({
@@ -1668,6 +1693,24 @@ export class GameRenderer {
   }
 
   private makeRoverMesh(kind: RoverKind, id: number): THREE.Group {
+    // Prefer a Leonardo GLB when loaded; else the procedural truck below.
+    // Named light nodes (marker / lampL / headlight / strobe) should be present
+    // on the export for night lights to work — missing names no-op safely.
+    const fromGlb = this.models.getClone(roverAssetId(kind));
+    if (fromGlb) {
+      const g = new THREE.Group();
+      g.add(fromGlb);
+      fromGlb.traverse((o) => {
+        if (o instanceof THREE.Mesh) {
+          o.castShadow = true;
+        }
+      });
+      g.userData.pickable = true;
+      g.userData.pickType = 'rover';
+      g.userData.pickId = id;
+      g.userData.fromGlb = roverAssetId(kind);
+      return g;
+    }
     const def = ROVERS[kind];
     const g = new THREE.Group();
     // A cargo rover is simply a bigger truck: longer, wider, six wheels.

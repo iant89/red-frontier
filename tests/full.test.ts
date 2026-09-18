@@ -63,6 +63,7 @@ import './render/selection.test';
 import './render/solar.test';
 import './render/descent-stage.test';
 import './render/weather-station.test';
+import './render/glb-assets.test';
 import './app/update-check.test';
 import './app/game-controllers.test';
 import './app/pause-save.test';
@@ -85,4 +86,4 @@ import './hud/pause-menu.test';
 
 // Each suite prints one line as it runs; `report` prints the total, every
 // failure, and exits non-zero if anything broke.
-report(69);
+report(70);
