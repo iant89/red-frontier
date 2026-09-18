@@ -154,6 +154,8 @@ export type FailureEvent =
       worstCleanliness: number;
       dirtyCount: number;
       subjectId: number | null;
+      /** True when there is no runnable solar — clear without recovery copy. */
+      silentClear: boolean;
     }
   | {
       kind: 'BuildingTripped';
@@ -427,6 +429,7 @@ export class FailureSystem {
         worstCleanliness: worst,
         dirtyCount: dirty,
         subjectId: subject,
+        silentClear: false,
       });
     } else {
       events.push({
@@ -435,6 +438,7 @@ export class FailureSystem {
         worstCleanliness: 1,
         dirtyCount: 0,
         subjectId: null,
+        silentClear: true,
       });
     }
 
@@ -669,35 +673,10 @@ export class FailureSystem {
               stamp,
               e.subjectId ?? undefined,
             );
+          } else if (e.silentClear) {
+            A.clear('panels-dirty', t, stamp);
           } else {
-            // Match prior: clear with recovery text when panels exist and are
-            // clean enough; clear silently when there are no solar panels.
-            // evaluate always emits PanelsDirty; subjectId null + worst==1
-            // with dirtyCount 0 means "no panels" (silent) vs cleaned (text).
-            // We cannot distinguish from the event alone when active=false —
-            // use dirtyCount===0 && worstCleanliness===1 && subjectId===null
-            // as the no-panels sentinel evaluate emits.
-            if (e.dirtyCount === 0 && e.worstCleanliness === 1 && e.subjectId === null) {
-              // Ambiguous: either no panels, or all clean with worst exactly 1.
-              // Prior code: no panels → A.clear('panels-dirty', t, stamp);
-              //             clean → A.clear(..., 'Arrays are clean again.');
-              // When panels exist and are clean, worst is typically < 1 after
-              // any dust history, but a brand-new panel is cleanliness 1.
-              // Preserve prior by checking buildings here for the clear text.
-              const hasSolar = state.buildings.some(
-                (b) =>
-                  b.state === 'online' &&
-                  !b.damaged &&
-                  BUILDINGS[b.kind].generation === 'solar',
-              );
-              if (hasSolar) {
-                A.clear('panels-dirty', t, stamp, 'Arrays are clean again.');
-              } else {
-                A.clear('panels-dirty', t, stamp);
-              }
-            } else {
-              A.clear('panels-dirty', t, stamp, 'Arrays are clean again.');
-            }
+            A.clear('panels-dirty', t, stamp, 'Arrays are clean again.');
           }
           break;
         }
