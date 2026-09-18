@@ -2251,6 +2251,74 @@ Then:
     SimView/UI
 
 
+
+## Recorded (Phase 15 complete — 2026-09-18)
+
+Implemented on the shared computer (`refactor/phase-15-failure-system`).
+
+**Failures are centralized; alerts are not yet.** §19's distinction is now a
+module and a test. `src/sim/systems/FailureSystem.ts` owns the failure *actions*
+(`tripDamaged`, `endMission`) and the failure *checks* that used to live in
+`Simulation.evaluateAlerts`. It produces domain events (`RoverDisabled`,
+`BuildingFailed`, `PowerShortage`, `FluidReserve` / OxygenCritical, …) and
+bridges them onto `state.alerts` with the same keys, severities and copy as
+before — so AlertSystem (Phase 16) has a clean surface to consume without a
+behavior change today.
+
+**What moved, and where it came from**
+
+| Now in `FailureSystem` | Came from | Was |
+| --- | --- | --- |
+| `tripDamaged` | `Simulation` | WeatherHostHooks implementor |
+| `endMission` | `Simulation` | Weather / LifeSupport hooks implementor |
+| `evaluate` / `tick` / `applyAlerts` | `Simulation.evaluateAlerts` | step-9 failure checks → alerts |
+| `FailureEvent` union | *(new surface)* | named the conditions evaluateAlerts already raised |
+
+Not a redesign: every raise/clear path is the text and thresholds that were
+already there. `Simulation.evaluateAlerts` survives as a one-line
+`FailureSystem.tick` delegate; weather and life-support hooks now call
+FailureSystem for trip/endMission. `RoverSystem.disable` stays rover-domain;
+FailureSystem only *observes* stranded rovers.
+
+**What deliberately does not live here**
+
+- **AlertBus / AlertSystem** (dedupe, ack, history drain, HUD) — Phase 16.
+- **History sampling** (`recordHistory`) — Phase 17.
+- **Rover disable action** — `RoverSystem.disable` (Phase 10).
+- **Fluid draw / colonist needs** — LifeSupportSystem (Phase 7).
+
+**Tests** — `tests/sim/failure-system.test.ts`: tripDamaged (capacities +
+builder release), endMission, domain events (PowerShortage, FluidReserve,
+RoverDisabled, BuildingFailed, RoverWear), alert bridge (oxygen / stranded /
+suit), main-loop wiring, life-support death through FailureSystem, and the §48
+"one owner" guard (`gameOver=` / `.damaged = true` writers).
+
+**Gate results**
+
+| Gate | Result |
+| --- | --- |
+| `npm run typecheck` | green |
+| `npm test` | green — 64 suites / 750 checks (was 63/733), 74.3 s |
+| `npm run test:check` | green — 64 suites, all linked, all declare `@covers` |
+| `npm run build` | green — `index.js` 1,049.69 kB (304.64 kB gz), `sim.worker` 229.80 kB, 89 modules |
+| behavior A/B | **identical** — `scripts/behavior-baseline.ts` run against pre-Phase-15 tree and against today's tree |
+| smokes | skipped on this host (Playwright not installed); unit/integration + A/B cover the extraction |
+
+The §48 checklist, item by item: the responsibility has one owner
+(`FailureSystem`, with AlertSystem / HistorySystem / RoverSystem.disable
+explicitly named as living elsewhere); its imports are `state/*`, `defs`,
+`config`, `weather`, `alerts`, `LogisticsSystem` — no DOM, no three.js, no
+`app/`, no `ui/`, no `render/`; behavior is intact and proven by the A/B above;
+the extracted behavior has its own 18-check suite; determinism and the
+production build are green; no presentation dependency leaked; and no duplicate
+source of truth was introduced — the guard test above is the proof.
+Documentation: this record, the Phase 15 entry in `mnemosyne.md`, and the
+`docs/design/TDD.md` layout/testing rows.
+
+`Simulation.ts`: 1,652 → 1,410 lines. The next phase per §51 is **Phase 16 —
+Extract AlertSystem**.
+
+
 # 20. Phase 16 — Extract AlertSystem
 
 Goal:

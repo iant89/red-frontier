@@ -32,7 +32,8 @@
  * Cross-domain side effects the weather triggers but does not own (a building
  * tripping offline, a rover stranded by a flat battery, mission end) cross the
  * {@link WeatherHostHooks} seam so no second source of truth is introduced.
- * RoverSystem (Phase 10) and FailureSystem (Phase 15) will absorb them.
+ * RoverSystem (Phase 10) owns disableRover; FailureSystem (Phase 15) owns
+ * tripDamaged and endMission — the contract is unchanged.
  */
 
 import { BUILDINGS, ROVERS } from '../defs';
@@ -60,9 +61,9 @@ import {
 import { DIFFICULTIES } from '../difficulty';
 
 /**
- * Side effects weather triggers but does not own. Implemented by Simulation
- * (which already owns the rover/failure machinery); later phases replace the
- * implementor, not the contract.
+ * Side effects weather triggers but does not own. Simulation wires the
+ * implementors: RoverSystem.disable (Phase 10) and FailureSystem.tripDamaged /
+ * endMission (Phase 15). The contract is unchanged.
  */
 export interface WeatherHostHooks {
   /** A structure has been knocked offline by weather (failure domain). */

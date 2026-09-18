@@ -37,7 +37,6 @@ import {
   BUILDING_MAX_HEALTH,
   DAMAGED_HEALTH,
   REPAIR_RESTART_HEALTH,
-  ROVER_CONDITION_ALERT,
   GARAGE_SERVICE_RATE,
   DEV_MAX_BUILDING_LEVEL,
   devLevelMul,
@@ -54,8 +53,6 @@ import {
   ROVERS,
   BUILDINGS,
   ALL_RESOURCES,
-  ALL_FLUIDS,
-  FLUIDS,
   emptyAmounts,
 } from './defs';
 import {
@@ -68,7 +65,6 @@ import type { Poi, PoiKind } from './pois';
 import { ExplorationSystem } from './systems/ExplorationSystem';
 import { SolClock } from './clock';
 import type { SunState } from './clock';
-import { stormLabel } from './weather';
 import type { Weather, StormKindReal } from './weather';
 import type { PowerResult } from './power';
 import {
@@ -95,6 +91,11 @@ import {
   type FleetAutomationHostHooks,
 } from './systems/FleetAutomationSystem';
 import { LogisticsSystem } from './systems/LogisticsSystem';
+import {
+  FailureSystem,
+  type FailureHostHooks,
+  type FailureSystemContext,
+} from './systems/FailureSystem';
 
 // Phase 2 — state extraction
 import {
@@ -132,14 +133,14 @@ export class Simulation {
 
   /**
    * Cross-domain side effects WeatherSystem triggers but does not own
-   * (Phase 5 seam). Implemented against the machinery that already lives
-   * here so no second source of truth appears; RoverSystem (Phase 10) and
-   * FailureSystem (Phase 15) will absorb the implementor, not the contract.
+   * (Phase 5 seam). Phase 10 absorbed disableRover into RoverSystem; Phase 15
+   * absorbed tripDamaged / endMission into FailureSystem. The contract is
+   * unchanged — only the implementor moved.
    */
   private readonly weatherHooks: WeatherHostHooks = {
-    tripDamaged: (b, cause) => this.tripDamaged(b, cause),
+    tripDamaged: (b, cause) => FailureSystem.tripDamaged(this.state, b, cause, this.failureHooks),
     disableRover: (r) => RoverSystem.disable(this.state, r),
-    endMission: (reason) => this.endMission(reason),
+    endMission: (reason) => FailureSystem.endMission(this.state, reason),
   };
 
   /**
@@ -155,13 +156,12 @@ export class Simulation {
 
   /**
    * Cross-domain effects LifeSupportSystem triggers but does not own
-   * (Phase 7 seam). Death ends the mission (FailureSystem, Phase 15);
-   * assisting construction completes a building — Phase 9 moved that
-   * implementor into ConstructionSystem, the contract is unchanged.
+   * (Phase 7 seam). Phase 15 absorbed endMission into FailureSystem; Phase 9
+   * moved completeBuilding into ConstructionSystem. The contract is unchanged.
    * Same shape as {@link weatherHooks} / {@link powerContext}.
    */
   private readonly lifeSupportHooks: LifeSupportHostHooks = {
-    endMission: (reason) => this.endMission(reason),
+    endMission: (reason) => FailureSystem.endMission(this.state, reason),
     completeBuilding: (b) => ConstructionSystem.complete(this.state, b),
   };
 
@@ -203,6 +203,23 @@ export class Simulation {
    */
   private readonly fleetHooks: FleetAutomationHostHooks = {
     canDeliverCargo: (r) => this.canDeliverAny(r),
+  };
+
+  /**
+   * Cross-domain effects FailureSystem triggers but does not own (Phase 15
+   * seam). Releasing a builder when a structure trips is rover-task lifecycle.
+   */
+  private readonly failureHooks: FailureHostHooks = {
+    finishTask: (r) => RoverSystem.finishTask(r),
+  };
+
+  /**
+   * Answers FailureSystem's checks need but do not own: the trailing-sol
+   * fluid reserve ledger, and the shared online-and-undamaged predicate.
+   */
+  private readonly failureContext: FailureSystemContext = {
+    reserveSols: (f) => this.reserveSols(f),
+    runnable: (b) => this.runnable(b),
   };
 
   constructor(params: {
@@ -948,20 +965,7 @@ export class Simulation {
     return RoverSystem.issueSalvage(this.state, roverId, poiId, queued);
   }
 
-  /** Storm damage has tripped a building offline until it is repaired. */
-  private tripDamaged(b: Building, cause = 'the storm'): void {
-    b.damaged = true;
-    const def = BUILDINGS[b.kind];
-    this.event('crit', `${def.label} damaged by ${cause} — offline until repaired.`);
-    this.recomputeCapacities();
-    // Any builder pointed at it can do nothing; release the crew.
-    for (const r of this.rovers) {
-      if (r.command.type === 'construct' && r.command.buildingId === b.id) {
-        RoverSystem.finishTask(r);
-        b.workerId = null;
-      }
-    }
-  }
+  // Phase 15: tripDamaged lives in FailureSystem (weatherHooks implementor).
 
   /** Whether a building is online *and* structurally sound enough to run. */
   private runnable(b: Building): boolean {
@@ -1013,21 +1017,11 @@ export class Simulation {
   // ----------------------------------------------------- life support ----
   // Phase 7: the fluid draw, shelter occupancy, EVA orders, colonist motion
   // and colonist/fluid restore live in systems/LifeSupportSystem.ts —
-  // Simulation passes the state plus the cross-domain hooks. Alerts that
-  // *report* life-support state (low O₂, colonist health) stay in
-  // evaluateAlerts until AlertSystem (Phase 16) extracts them.
+  // Simulation passes the state plus the cross-domain hooks. Failure checks
+  // that *report* life-support state (low O₂, colonist health) live in
+  // FailureSystem (Phase 15); AlertSystem (Phase 16) will own notification.
 
-  private endMission(reason: string): void {
-    this.gameOver = { reason, sol: this.clock.sol + 1 };
-    this.alerts.raise(
-      'mission-over',
-      'crit',
-      'Mission lost',
-      reason,
-      this.simTime,
-      this.clock.format(),
-    );
-  }
+  // Phase 15: endMission lives in FailureSystem (weather / life-support hooks).
 
   // --------------------------------------------------------- logistics ----
   // Phase 13: resource accounting — the storage ledger, cargo transfers,
@@ -1051,6 +1045,10 @@ export class Simulation {
   // must remain the simulation's.
 
   // ------------------------------------------------------------ alerts ----
+  // Phase 15: failure checks + the interim alert bridge live in
+  // systems/FailureSystem.ts. AlertSystem (Phase 16) will separate
+  // notification from the domain events FailureSystem already emits.
+  // History sampling stays here until Phase 17.
 
   /** Sols of reserve left for a fluid at the trailing-sol net rate. */
   solsOfReserve(f: FluidId): number {
@@ -1058,247 +1056,7 @@ export class Simulation {
   }
 
   private evaluateAlerts(): void {
-    const t = this.simTime;
-    const stamp = this.clock.format();
-    const A = this.alerts;
-
-    // ---- power ------------------------------------------------------------
-    const p = this.power;
-    if (p.firstShedTier !== null && p.firstShedTier <= 1) {
-      A.raise(
-        'brownout-critical',
-        'crit',
-        'Grid brownout',
-        `Life-support tiers are being shed. Generation ${p.generationKw.toFixed(1)} kW vs ${p.demandKw.toFixed(1)} kW demand.`,
-        t,
-        stamp,
-      );
-    } else {
-      A.clear('brownout-critical', t, stamp, 'Critical loads are powered again.');
-      if (p.brownout) {
-        A.raise(
-          'brownout',
-          'warn',
-          'Power deficit',
-          `Non-essential loads throttled. ${p.generationKw.toFixed(1)} kW generated, ${p.demandKw.toFixed(1)} kW requested.`,
-          t,
-          stamp,
-        );
-      } else {
-        A.clear('brownout', t, stamp);
-      }
-    }
-
-    const cap = p.capacityKWh;
-    const frac = cap > 0 ? p.storedKWh / cap : 0;
-    if (frac < 0.1 && p.batteryFlowKw < 0) {
-      A.raise(
-        'battery-low',
-        'warn',
-        'Batteries nearly flat',
-        `${p.storedKWh.toFixed(0)} kWh left, draining at ${(-p.batteryFlowKw).toFixed(1)} kW.`,
-        t,
-        stamp,
-      );
-    } else if (frac > 0.25 || p.batteryFlowKw >= 0) {
-      A.clear('battery-low', t, stamp);
-    }
-
-    // ---- life support -----------------------------------------------------
-    for (const f of ALL_FLUIDS) {
-      const amount = this.pools.amounts[f];
-      const reserve = this.reserveSols(f);
-      const info = FLUIDS[f];
-      const key = `${f}-low`;
-      const critSols = f === 'oxygen' ? 0.5 : f === 'water' ? 1 : 2;
-      const warnSols = f === 'oxygen' ? 1.5 : f === 'water' ? 3 : 6;
-
-      if (amount <= 1e-6) {
-        A.raise(
-          key,
-          'crit',
-          `${info.label} exhausted`,
-          f === 'oxygen'
-            ? 'The colonist is breathing suit reserves. Restore oxygen production now.'
-            : `No ${info.label.toLowerCase()} left in the colony.`,
-          t,
-          stamp,
-        );
-      } else if (reserve < critSols) {
-        A.raise(
-          key,
-          'crit',
-          `${info.label} critical`,
-          `${amount.toFixed(1)} kg left — about ${reserve.toFixed(1)} sol${reserve >= 2 ? 's' : ''} at the current rate.`,
-          t,
-          stamp,
-        );
-      } else if (reserve < warnSols) {
-        A.raise(
-          key,
-          'warn',
-          `${info.label} reserve falling`,
-          `${amount.toFixed(1)} kg left — about ${reserve.toFixed(1)} sols at the current rate.`,
-          t,
-          stamp,
-        );
-      } else {
-        A.clear(key, t, stamp);
-      }
-    }
-
-    // ---- the human --------------------------------------------------------
-    const c = this.colonist;
-    if (!c.dead) {
-      if (c.health < 35) {
-        A.raise(
-          'colonist-health',
-          'crit',
-          `${c.name} is failing`,
-          `Health ${c.health.toFixed(0)}%. Restore life support immediately.`,
-          t,
-          stamp,
-          c.id,
-        );
-      } else if (c.health < 70) {
-        A.raise(
-          'colonist-health',
-          'warn',
-          `${c.name} is unwell`,
-          `Health ${c.health.toFixed(0)}%.`,
-          t,
-          stamp,
-          c.id,
-        );
-      } else {
-        A.clear('colonist-health', t, stamp, `${c.name} has recovered.`);
-      }
-
-      if (!c.inside && c.suitO2 < SUIT_O2_CAPACITY * 0.35) {
-        A.raise(
-          'suit-o2',
-          'crit',
-          'Suit oxygen low',
-          `${c.name} must reach a pressurised volume.`,
-          t,
-          stamp,
-          c.id,
-        );
-      } else {
-        A.clear('suit-o2', t, stamp);
-      }
-    }
-
-    // ---- stranded & worn rovers -------------------------------------------
-    for (const r of this.rovers) {
-      const key = `rover-dead-${r.id}`;
-      if (r.phase === 'disabled') {
-        A.raise(
-          key,
-          'warn',
-          `${r.label} stranded`,
-          'Battery flat, out in the field — another rover can jump-start it.',
-          t,
-          stamp,
-          r.id,
-        );
-      } else {
-        A.clear(key, t, stamp);
-      }
-      const wkey = `rover-wear-${r.id}`;
-      if (r.condition < ROVER_CONDITION_ALERT) {
-        A.raise(
-          wkey,
-          'warn',
-          `${r.label} needs service`,
-          `Drivetrain at ${Math.round(r.condition)}% — work rate reduced. Park it at a Rover Garage.`,
-          t,
-          stamp,
-          r.id,
-        );
-      } else {
-        A.clear(wkey, t, stamp, `${r.label} is back in shape.`);
-      }
-    }
-
-    // ---- storage ----------------------------------------------------------
-    const full = this.fullResources();
-    if (full.length > 0) {
-      A.raise(
-        'storage-full',
-        'warn',
-        full.length === ALL_RESOURCES.length ? 'All silos full' : 'Silo full',
-        `${full.map((r) => RESOURCES[r].label).join(', ')} at capacity — build a Warehouse to keep hauling.`,
-        t,
-        stamp,
-      );
-    } else {
-      A.clear('storage-full', t, stamp);
-    }
-
-    // ---- weather ------------------------------------------------------------
-    const wx = this.weather;
-    const active = wx.current();
-    if (active) {
-      const sev: Severity =
-        active.kind === 'severe' || active.kind === 'planetary'
-          ? 'crit'
-          : active.kind === 'devil'
-            ? 'info'
-            : 'warn';
-      const drop = Math.round((1 - this.dustTransmission) * 100);
-      A.raise(
-        'storm-active',
-        sev,
-        stormLabel(active.kind),
-        `Solar −${drop}% from dust · visibility ${Math.round(wx.visibility * 100)}% · winds ${Math.round(wx.windSpeed)} m/s.`,
-        t,
-        stamp,
-      );
-    } else {
-      A.clear('storm-active', t, stamp, 'Storm passed — skies are settling.');
-    }
-
-    // ---- storm damage & dirty panels ---------------------------------------
-    const hurt = this.buildings.filter((b) => b.damaged);
-    if (hurt.length > 0) {
-      A.raise(
-        'building-damaged',
-        'crit',
-        hurt.length === 1 ? `${BUILDINGS[hurt[0].kind].label} damaged` : `${hurt.length} structures damaged`,
-        hurt.length === 1
-          ? 'Offline until a rover repairs it.'
-          : `${hurt.map((b) => BUILDINGS[b.kind].label).join(', ')} — dispatch rovers to repair.`,
-        t,
-        stamp,
-        hurt[0].id,
-      );
-    } else {
-      A.clear('building-damaged', t, stamp, 'All structures repaired.');
-    }
-
-    const panels = this.buildings.filter(
-      (b) => this.runnable(b) && BUILDINGS[b.kind].generation === 'solar',
-    );
-    if (panels.length > 0) {
-      const worst = Math.min(...panels.map((b) => b.cleanliness));
-      const dirty = panels.filter((b) => b.cleanliness < 0.6).length;
-      if (worst < 0.6) {
-        A.raise(
-          'panels-dirty',
-          'warn',
-          'Solar arrays dusted',
-          `Output down ${Math.round((1 - worst) * 100)}% on the dirtiest array${dirty > 1 ? ` (${dirty} arrays need cleaning)` : ''} — send a rover to clean.`,
-          t,
-          stamp,
-          panels.sort((a, b) => a.cleanliness - b.cleanliness)[0].id,
-        );
-      } else {
-        A.clear('panels-dirty', t, stamp, 'Arrays are clean again.');
-      }
-    } else {
-      A.clear('panels-dirty', t, stamp);
-    }
+    FailureSystem.tick(this.state, this.failureContext);
   }
 
   // ----------------------------------------------------------- history ----
