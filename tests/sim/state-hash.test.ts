@@ -122,7 +122,7 @@ test('every state family moves the hash', () => {
 test('presentation wording does not move the hash', () => {
   const sim = fresh();
   const baseline = hashSimulation(sim);
-  sim.rovers[0].statusText = 'completely different words';
+  sim.rovers[0].label = 'completely different words';
   sim.colonist.name = 'Someone Else';
   if (sim.buildings[0]) sim.buildings[0].idleReason = 'other phrasing';
   assert.equal(hashSimulation(sim), baseline, 'labels and reasons are presentation');

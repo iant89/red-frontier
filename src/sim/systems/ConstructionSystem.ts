@@ -54,7 +54,8 @@ import { recomputeCapacitiesState } from '../state/ColonyState';
 import type { Building } from '../state/BuildingState';
 import { remainingCostTotal } from '../state/BuildingState';
 import type { Rover, RoverGoal, RoverTask } from '../state/RoverState';
-import { cargoMass } from '../state/RoverState';
+import { cargoMass, enterWork } from '../state/RoverState';
+import { LogisticsSystem } from './LogisticsSystem';
 import { evaluateSite } from '../rules';
 import type { BuildingKind, ResourceAmounts } from '../defs';
 import { BUILDINGS, ROVERS, RESOURCES, ALL_RESOURCES, emptyAmounts } from '../defs';
@@ -237,46 +238,26 @@ export class ConstructionSystem {
 
   /**
    * Pour whatever is available in storage into a site's remaining cost.
-   * Returns the mass committed this tick.
+   * Returns the mass committed this tick. The transfer itself is the storage
+   * ledger's (Phase 13) — what stays here is when a site gets fed.
    */
   static commitAvailableMaterials(state: ColonyState, b: Building): number {
-    let took = 0;
-    for (const res of ALL_RESOURCES) {
-      const need = b.remainingCost[res];
-      if (need <= 0) continue;
-      const give = Math.min(need, state.storage[res]);
-      if (give <= 0) continue;
-      state.storage[res] -= give;
-      b.remainingCost[res] = Math.max(0, need - give);
-      took += give;
-    }
-    return took;
+    return LogisticsSystem.deliverToSite(state, b);
   }
 
-  /** True when storage covers every line of a cost. */
+  /** True when storage covers every line of a cost (the ledger's answer). */
   static hasMaterials(state: ColonyState, amounts: ResourceAmounts): boolean {
-    for (const res of ALL_RESOURCES) {
-      if (amounts[res] > 0 && state.storage[res] < amounts[res]) return false;
-    }
-    return true;
+    return LogisticsSystem.hasMaterials(state, amounts);
   }
 
-  /** Take a cost out of storage (floored at zero). */
+  /** Take a cost out of storage — the ledger's floored take, per line. */
   static consumeMaterials(state: ColonyState, amounts: ResourceAmounts): void {
-    for (const res of ALL_RESOURCES) {
-      state.storage[res] = Math.max(0, state.storage[res] - amounts[res]);
-    }
+    LogisticsSystem.consumeMaterials(state, amounts);
   }
 
   /** Player-facing list of what a cost still needs: "40 kg Regolith, …". */
   static missingList(amounts: ResourceAmounts): string {
-    const parts: string[] = [];
-    for (const res of ALL_RESOURCES) {
-      if (amounts[res] > 0.01) {
-        parts.push(`${Math.ceil(amounts[res])} kg ${RESOURCES[res].label}`);
-      }
-    }
-    return parts.join(', ') || 'materials';
+    return LogisticsSystem.missingList(amounts);
   }
 
   // ------------------------------------------------------- worker choice ----
@@ -353,9 +334,7 @@ export class ConstructionSystem {
       return;
     }
     r.gid = b.id;
-    r.goal = 'build';
-    r.phase = 'working';
-    r.statusText = 'Building';
+    enterWork(r, 'build');
 
     const def = BUILDINGS[b.kind];
 
@@ -458,21 +437,18 @@ export class ConstructionSystem {
         const committed = def.cost[res] - b.remainingCost[res];
         if (committed <= 0) continue;
         /**
-         * Refund the full amount even if it overfills the silo. This material
-         * *came out* of that silo, so putting it back can never be an exploit —
-         * and quietly destroying a player's resources on cancel is far worse
-         * than a temporarily over-full store, which drains as it gets used.
-         *
-         * Caveat found while extracting this (Phase 9), preserved not fixed:
-         * the `recomputeCapacitiesState` call at the end of this method clamps
+         * The refund is the ledger's one deliberate over-fill (Phase 13 moved
+         * the rule into `LogisticsSystem.refund`). Caveat found while
+         * extracting this (Phase 9), preserved not fixed: the
+         * `recomputeCapacitiesState` call at the end of this method clamps
          * every silo back to capacity, so when the silo is *already full* the
          * refund is silently lost and the promise above does not hold. It does
          * hold in the ordinary case (room in the silo), and
          * `SimulationAssertions` still permits over-capacity storage on the
-         * strength of this comment. Deciding which of the three is wrong is a
+         * strength of this rule. Deciding which of the three is wrong is a
          * behavior change — see the roadmap's Phase 9 "quirks" block.
          */
-        state.storage[res] += committed;
+        LogisticsSystem.refund(state, res, committed);
         refunded += committed;
       }
       ConstructionSystem.log(

@@ -17,6 +17,7 @@ import {
   ConstructionSystem,
   type ConstructionHostHooks,
 } from '../../src/sim/systems/ConstructionSystem';
+import { RoverSystem } from '../../src/sim/systems/RoverSystem';
 import { ColonyMirror } from '../../src/sim/host/mirror';
 import { projectView } from '../../src/sim/host/projection';
 import { hashSimulation } from '../../src/sim/debug/StateHash';
@@ -391,7 +392,10 @@ test('a worker pulled onto a player order is released, and the site is re-staffe
   assert.equal(other.command.type, 'construct', 'the spare rover is really on the job now');
 
   // A rover that leaves the fleet entirely releases its claim just as firmly.
-  other.phase = 'disabled';
+  // Disabled through the domain (Phase 11's execution invariant), not by
+  // hand-writing `phase`: `disable()` parks the goal too, and a fixture must
+  // never hold a state the sim cannot reach.
+  RoverSystem.disable(sim.state, other);
   sim.step(1 / 20);
   assert.equal(b.workerId, null, 'a disabled worker holds no site');
 });

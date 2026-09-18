@@ -18,6 +18,7 @@
  */
 
 import type { SimWritable } from './view';
+import { enterIdle } from '../state/RoverState';
 import { ROVERS } from '../defs';
 
 /** The name the developer panel's keep-battery-full pin registers under. */
@@ -45,12 +46,10 @@ function applyBatteryPins(sim: SimWritable, ids: readonly number[]): void {
     if (r.battery >= def.maxBatteryKWh) continue;
     r.battery = def.maxBatteryKWh;
     if (r.phase === 'disabled') {
-      r.phase = 'idle';
-      r.goal = 'idle';
+      enterIdle(r);
       r.command = { type: 'idle' };
       r.pending = [];
       r.recharge = true; // limp home, normally
-      r.statusText = 'Returning to charge';
     }
   }
 }

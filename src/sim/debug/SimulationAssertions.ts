@@ -36,7 +36,7 @@
 
 import { ROVERS, ALL_RESOURCES, ALL_FLUIDS } from '../defs';
 import { SUIT_O2_CAPACITY } from '../config';
-import type { Simulation, Rover, Building, RoverTask } from '../Simulation';
+import type { Simulation, Rover, Building, RoverPhase, RoverTask } from '../Simulation';
 
 /** One broken invariant. `code` is stable so tests can pin it. */
 export interface InvariantViolation {
@@ -227,6 +227,75 @@ function checkRovers(sim: Simulation, out: InvariantViolation[]): void {
         code: 'rover-position',
         subject: who,
         message: `position must be finite, found (${r.x}, ${r.y}, ${r.z})`,
+      });
+    }
+  }
+}
+
+/**
+ * Rover execution state (roadmap Phase 11): `goal` and `phase` are runtime
+ * execution state — rebuilt from the task every tick, never saved — and their
+ * legal combinations are the table in `docs/design/ROVER-STATE.md` §3. An
+ * impossible pair means a transition site drifted, which nothing in the UI
+ * would notice: the HUD derives its wording, and the renderer only asks about
+ * `disabled`. That is exactly the failure an extraction can hide, so the pair
+ * is checked here.
+ */
+function checkRoverExecution(sim: Simulation, out: InvariantViolation[]): void {
+  /** goal -> legal phase(s). `mine` is the one goal with a travel and a work phase. */
+  const LEGAL_PHASES: Record<string, RoverPhase[]> = {
+    idle: ['idle', 'charging', 'disabled'],
+    move: ['moving'],
+    mine: ['moving', 'working'],
+    toDepot: ['moving'],
+    toCharge: ['moving'],
+    charge: ['charging'],
+    toSite: ['moving'],
+    build: ['working'],
+    toService: ['moving'],
+    service: ['working'],
+    toSalvage: ['moving'],
+    salvage: ['working'],
+    toRecover: ['moving'],
+    recover: ['working'],
+  };
+  /** While a rover is working a task, the command it holds must still be that task. */
+  const COMMANDS: Record<string, string[]> = {
+    move: ['moveTo'],
+    mine: ['mine'],
+    toSite: ['construct'],
+    build: ['construct'],
+    toService: ['clean', 'repair'],
+    service: ['clean', 'repair'],
+    toSalvage: ['salvage'],
+    salvage: ['salvage'],
+    toRecover: ['recover'],
+    recover: ['recover'],
+  };
+
+  for (const r of sim.rovers) {
+    const who = roverName(r);
+    const legal = LEGAL_PHASES[r.goal];
+    if (legal && !legal.includes(r.phase)) {
+      out.push({
+        code: 'rover-execution',
+        subject: who,
+        message: `goal '${r.goal}' cannot be in phase '${r.phase}' (legal: ${legal.join(' | ')})`,
+      });
+    }
+    if (r.phase === 'moving' && r.navPath.length === 0) {
+      out.push({
+        code: 'rover-execution',
+        subject: who,
+        message: "phase 'moving' with an empty nav path",
+      });
+    }
+    const expects = COMMANDS[r.goal];
+    if (expects && !expects.includes(r.command.type)) {
+      out.push({
+        code: 'rover-execution',
+        subject: who,
+        message: `goal '${r.goal}' is executing command '${r.command.type}' (expected ${expects.join(' | ')})`,
       });
     }
   }
@@ -472,6 +541,7 @@ export function checkInvariants(sim: Simulation): InvariantViolation[] {
   checkTime(sim, out);
   const ids = checkIds(sim, out);
   checkRovers(sim, out);
+  checkRoverExecution(sim, out);
   checkBuildings(sim, ids.rovers, out);
   checkResources(sim, out);
   checkWorld(sim, ids.rovers, out);
