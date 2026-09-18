@@ -55,7 +55,7 @@ import { defaultRoverRules, type Rover, type RoverTask } from './RoverState';
 import type { Building } from './BuildingState';
 import type { FluidFlow } from './ResourceState';
 import type { HistorySample } from './HistoryState';
-import { emptyFlows, emptyHistoryWindows } from './HistoryState';
+import { emptyFlows } from './HistoryState';
 import type { Poi } from '../pois';
 
 export interface ColonyState {
@@ -140,7 +140,9 @@ export function createColonyState(params: ColonyStateParams): ColonyState {
 
   const flows = emptyFlows();
   const lastFlows = emptyFlows();
-  const historyWindows = emptyHistoryWindows();
+  const history: HistorySample[] = [];
+  const flowWindow: Array<{ t: number; f: Record<FluidId, FluidFlow> }> = [];
+  const lastHistoryAt = -Infinity;
 
   let nextId = 1000;
   const rovers: Rover[] = [];
@@ -226,9 +228,9 @@ export function createColonyState(params: ColonyStateParams): ColonyState {
     storedKWh,
     flows,
     lastFlows,
-    flowWindow: historyWindows.flowWindow,
-    history: historyWindows.history,
-    lastHistoryAt: historyWindows.lastHistoryAt,
+    flowWindow,
+    history,
+    lastHistoryAt,
     gameOver: null,
     dustTransmission: BASE_DUST_TRANSMISSION,
     nextDropSol,

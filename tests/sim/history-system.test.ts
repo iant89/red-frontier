@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Simulation } from '../../src/sim/Simulation';
 import { HistorySystem } from '../../src/sim/systems/HistorySystem';
-import { emptyFlows, emptyHistoryWindows } from '../../src/sim/state/HistoryState';
+import { emptyFlows } from '../../src/sim/state/HistoryState';
 import {
   HISTORY_SAMPLES,
   HISTORY_INTERVAL_S,
@@ -173,13 +173,9 @@ test('afterTimeJump rewinds the sample clock and flow window', () => {
   // history samples themselves are left alone (devSetTime did not clear them)
 });
 
-test('emptyFlows / emptyHistoryWindows helpers match the cleared shape', () => {
+test('emptyFlows helper matches the cleared flow shape', () => {
   const f = emptyFlows();
   assert.deepEqual(f.water, { produced: 0, consumed: 0 });
-  const w = emptyHistoryWindows();
-  assert.deepEqual(w.history, []);
-  assert.deepEqual(w.flowWindow, []);
-  assert.equal(w.lastHistoryAt, -Infinity);
 });
 
 // ============================================================ main-loop wiring ====

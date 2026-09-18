@@ -33,15 +33,3 @@ export function emptyFlows(): Record<FluidId, FluidFlow> {
   };
 }
 
-/** Snapshot of the sampling windows used at create / restore / time-jump. */
-export function emptyHistoryWindows(): {
-  history: HistorySample[];
-  flowWindow: Array<{ t: number; f: Record<FluidId, FluidFlow> }>;
-  lastHistoryAt: number;
-} {
-  return {
-    history: [],
-    flowWindow: [],
-    lastHistoryAt: -Infinity,
-  };
-}
