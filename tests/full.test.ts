@@ -49,6 +49,7 @@ import './sim/lights.test';
 import './sim/determinism.test';
 import './sim/exploration-system.test';
 import './sim/failure-system.test';
+import './sim/alert-system.test';
 import './sim/pois.test';
 import './sim/persistence.test';
 import './sim/devtools.test';
@@ -80,4 +81,4 @@ import './hud/pause-menu.test';
 
 // Each suite prints one line as it runs; `report` prints the total, every
 // failure, and exits non-zero if anything broke.
-report(64);
+report(65);

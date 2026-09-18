@@ -4,9 +4,10 @@
  * @covers src/sim/systems/FailureSystem.ts src/sim/Simulation.ts
  * @desc FailureSystem extraction (Phase 15): tripDamaged / endMission actions,
  * failure-check domain events (PowerShortage, OxygenCritical via FluidReserve,
- * RoverDisabled, BuildingFailed, …), the interim alert bridge, main-loop
- * wiring, and the architecture guard that gameOver / damaged trip writes
- * go through FailureSystem — AlertSystem (Phase 16) is deliberately not here.
+ * RoverDisabled, BuildingFailed, …), main-loop wiring, and the architecture
+ * guard that gameOver / damaged trip writes go through FailureSystem.
+ * Notification mapping lives in AlertSystem (Phase 16) — see
+ * tests/sim/alert-system.test.ts.
  */
 
 import assert from 'node:assert/strict';
@@ -24,7 +25,6 @@ import { enterDisabled } from '../../src/sim/state/RoverState';
 import {
   DAMAGED_HEALTH,
   ROVER_CONDITION_ALERT,
-  SUIT_O2_CAPACITY,
 } from '../../src/sim/config';
 import { run, buildOnline } from '../fixtures/sim';
 import { group, test, finish } from '../harness';
@@ -85,9 +85,12 @@ test('trips a building offline, recomputes capacities, and emits BuildingTripped
   assert.equal(ev.kind, 'BuildingTripped');
   assert.equal(ev.buildingId, b.id);
   assert.equal(ev.cause, 'lightning');
+  assert.equal(ev.label.length > 0, true);
+  // Notification is AlertSystem's job — FailureSystem must not write alerts.
+  // buildOnline may have logged construction events; assert no *new* damage line.
   assert.ok(
-    sim.alerts.history().some((l) => l.text.includes('damaged by lightning')),
-    'crit log line',
+    !sim.alerts.history().some((l) => l.text.includes('damaged by lightning')),
+    'no alert writes from FailureSystem',
   );
   // Damaged solar no longer contributes generation capacity side-effects via
   // recompute — at minimum the call must not throw and state stays coherent.
@@ -109,7 +112,7 @@ test('releases a builder mid-job when the site trips', () => {
 
 group('FailureSystem.endMission');
 
-test('latches gameOver and raises mission-over', () => {
+test('latches gameOver without raising mission-over', () => {
   const sim = fresh();
   assert.equal(sim.gameOver === null, true);
   const ev = FailureSystem.endMission(sim.state, 'test loss');
@@ -117,7 +120,8 @@ test('latches gameOver and raises mission-over', () => {
   assert.match(JSON.stringify(ev), /test loss/);
   assert.ok(sim.gameOver, 'FailureSystem.endMission latched the loss');
   assert.ok(sim.gameOver!.reason.includes('test loss'));
-  assert.ok(sim.alerts.isActive('mission-over'));
+  // Notification is AlertSystem's job — FailureSystem must not write alerts.
+  assert.ok(!sim.alerts.isActive('mission-over'), 'AlertSystem owns mission-over');
 });
 
 // ============================================================ evaluate ====
@@ -181,56 +185,36 @@ test('RoverWear is active below ROVER_CONDITION_ALERT', () => {
   assert.equal(w!.active, true);
 });
 
-// ============================================================ alert bridge ====
+// ============================================================ no alert writes ====
 
-group('FailureSystem.applyAlerts — interim bridge');
+group('FailureSystem does not write alerts');
 
-test('oxygen exhaustion raises oxygen-low exactly once via tick', () => {
-  const sim = fresh();
-  // amount <= 1e-6 is the exhausted branch — no flow history required.
-  sim.pools.amounts.oxygen = 0;
-  FailureSystem.tick(sim.state, ctx(sim));
-  assert.ok(sim.alerts.isActive('oxygen-low'));
-  const raised = sim.alerts.list().filter((a) => a.key === 'oxygen-low');
-  assert.equal(raised.length, 1);
-});
-
-test('clearing oxygen restores clears the alert', () => {
+test('tick produces FluidReserve events without touching the alert bus', () => {
   const sim = fresh();
   sim.pools.amounts.oxygen = 0;
-  FailureSystem.tick(sim.state, ctx(sim));
-  assert.ok(sim.alerts.isActive('oxygen-low'));
-  sim.pools.amounts.oxygen = sim.pools.capacity.oxygen;
-  FailureSystem.tick(sim.state, ctx(sim));
-  assert.ok(!sim.alerts.isActive('oxygen-low'), 'refill clears via FailureSystem.tick');
+  const events = FailureSystem.tick(sim.state, ctx(sim));
+  assert.ok(ofKind(events, 'FluidReserve').some((e) => e.level === 'exhausted'));
+  assert.equal(sim.alerts.list().length, 0, 'evaluate/tick must not raise');
+  assert.equal(sim.alerts.history().length, 0);
 });
 
-test('stranded rover raises rover-dead-*', () => {
+test('endMission latches gameOver without raising mission-over', () => {
   const sim = fresh();
-  const r = sim.rovers[0];
-  enterDisabled(r);
-  FailureSystem.tick(sim.state, ctx(sim));
-  assert.ok(sim.alerts.isActive(`rover-dead-${r.id}`));
-});
-
-test('suit oxygen low raises suit-o2', () => {
-  const sim = fresh();
-  const c = sim.colonist;
-  c.inside = false;
-  c.suitO2 = SUIT_O2_CAPACITY * 0.1;
-  FailureSystem.tick(sim.state, ctx(sim));
-  assert.ok(sim.alerts.isActive('suit-o2'));
+  const ev = FailureSystem.endMission(sim.state, 'test loss');
+  assert.equal(ev.kind, 'MissionLost');
+  assert.ok(sim.gameOver);
+  assert.ok(!sim.alerts.isActive('mission-over'), 'AlertSystem owns mission-over');
 });
 
 // ============================================================ tick wiring ====
 
 group('Tick wiring');
 
-test('Simulation.step runs FailureSystem — low oxygen alerts without a direct call', () => {
+test('Simulation.step runs FailureSystem + AlertSystem — low oxygen alerts', () => {
   const sim = fresh();
   sim.pools.amounts.oxygen = 0.01;
   run(sim, 0.1);
-  assert.ok(sim.alerts.isActive('oxygen-low'), 'main loop tick raises via FailureSystem');
+  assert.ok(sim.alerts.isActive('oxygen-low'), 'main loop tick raises via AlertSystem');
 });
 
 test('weatherHooks.tripDamaged is FailureSystem (live lightning path)', () => {
@@ -312,23 +296,23 @@ test('gameOver= and BuildingTripped damaged= writers are FailureSystem (+ restor
   assert.ok(damagedAssign.has('systems/FailureSystem.ts'));
 });
 
-test('FailureSystem does not import a Phase-16 AlertSystem or write HUD objects', () => {
+test('FailureSystem does not import AlertSystem, write state.alerts, or touch HUD', () => {
   const src = readFileSync(
     fileURLToPath(new URL('../../src/sim/systems/FailureSystem.ts', import.meta.url)),
     'utf8',
   );
-  // Mentions in the "handoff to Phase 16" header are fine; an import is not.
   assert.ok(
-    !/^import .*AlertSystem/m.test(src),
-    'must not import AlertSystem — Phase 16 is not this phase',
+    !/^import .*\bAlertSystem\b/m.test(src),
+    'must not import AlertSystem — Simulation wires the seam',
   );
+  assert.ok(!/state\.alerts\./.test(src), 'must not write the alert bus');
+  assert.ok(!/static applyAlerts/.test(src), 'applyAlerts moved to AlertSystem');
   assert.ok(!/[^\w]document\./.test(src));
   assert.ok(!src.includes("from 'three'") && !src.includes('from "three"'));
   assert.ok(src.includes('domain events'), 'header names the event surface');
-  assert.ok(src.includes('Phase 16'), 'header names the handoff');
 });
 
-test('Simulation.evaluateAlerts is a one-line FailureSystem.tick delegate', () => {
+test('Simulation.evaluateAlerts wires FailureSystem → AlertSystem', () => {
   const src = readFileSync(
     fileURLToPath(new URL('../../src/sim/Simulation.ts', import.meta.url)),
     'utf8',
@@ -337,7 +321,11 @@ test('Simulation.evaluateAlerts is a one-line FailureSystem.tick delegate', () =
   assert.ok(m, 'evaluateAlerts still exists as the tick seam');
   assert.ok(
     /FailureSystem\.tick\(this\.state,\s*this\.failureContext\)/.test(m![1]),
-    'body is the FailureSystem.tick delegate',
+    'emits via FailureSystem.tick',
+  );
+  assert.ok(
+    /AlertSystem\.applyFailureEvents\(this\.state,\s*events\)/.test(m![1]),
+    'maps via AlertSystem.applyFailureEvents',
   );
   assert.ok(!/brownout-critical/.test(m![1]), 'alert copy no longer lives in Simulation');
 });

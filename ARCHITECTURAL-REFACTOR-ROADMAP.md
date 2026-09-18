@@ -2351,6 +2351,78 @@ They should produce simulation-level events/state.
 The UI should consume the resulting `SimView`.
 
 
+
+## Recorded (Phase 16 complete — 2026-09-18)
+
+Implemented on the shared computer (`refactor/phase-16-alert-system`).
+
+**Notifications are centralized; other domain alert writers remain.** §20's
+distinction is now a module and a test. `src/sim/systems/AlertSystem.ts` owns
+the mapping from failure domain events onto `state.alerts` (AlertBus) with the
+same keys, severities, copy, raise/clear and hysteresis Phase 15's interim
+`FailureSystem.applyAlerts` bridge used — including `BuildingTripped` /
+`MissionLost`, which used to raise at the action site. FailureSystem now emits
+events only; Simulation wires `FailureSystem.tick` →
+`AlertSystem.applyFailureEvents`, and the weather / life-support hooks apply
+action events the same way.
+
+**What moved, and where it came from**
+
+| Now in `AlertSystem` | Came from | Was |
+| --- | --- | --- |
+| `applyFailureEvents` | `FailureSystem.applyAlerts` | interim Phase 15 bridge |
+| `BuildingTripped` / `MissionLost` notification | `FailureSystem.tripDamaged` / `endMission` | raised at the action site |
+| named owner of failure→alert mapping | *(new surface)* | Simulation still owns `evaluateAlerts` as the tick seam |
+
+Not a redesign: every raise/clear path is the text and thresholds that were
+already there. Acknowledgement / snooze stays presentation-side in the HUD
+(moving ack into sim state would change save/restore). `alerts.ts` remains the
+AlertBus data structure beside AlertSystem — same split as `weather.ts` beside
+WeatherSystem.
+
+**What deliberately does not live here**
+
+- **Failure checks / tripDamaged / endMission** — FailureSystem (Phase 15).
+- **AlertBus mechanics implementation** — `alerts.ts`.
+- **History sampling** (`recordHistory`) — HistorySystem Phase 17.
+- **HUD dismiss / snooze** — presentation; reads SimView alerts.
+- **Direct `state.alerts` writers in Weather / Construction / Exploration /
+  LifeSupport / Rover / FleetAutomation / Logistics** — unchanged this phase
+  (one architectural change). FailureSystem is the first producer that emits
+  domain events for AlertSystem to consume.
+
+**Tests** — `tests/sim/alert-system.test.ts`: oxygen raise/clear, stranded
+rover, suit O₂, BuildingTripped / MissionLost ownership, PowerShortage copy,
+dedupe/hysteresis, main-loop wiring, life-support death through the seam, and
+architecture guards (AlertSystem owns applyFailureEvents; does not own failure
+actions). `tests/sim/failure-system.test.ts` updated so FailureSystem no longer
+writes alerts and `evaluateAlerts` wires FailureSystem → AlertSystem.
+
+**Gate results**
+
+| Gate | Result |
+| --- | --- |
+| `npm run typecheck` | green |
+| `npm test` | green — 65 suites / 761 checks (was 64/750), 74.8 s |
+| `npm run test:check` | green — 65 suites, all linked, all declare `@covers` |
+| `npm run build` | green — `index.js` 1,049.72 kB (304.68 kB gz), `sim.worker` 229.82 kB, 90 modules |
+| behavior A/B | **identical** — `scripts/behavior-baseline.ts` run against Phase 15 tip (`445942c`) and against today's tree |
+| smokes | skipped on this host (Playwright not installed); unit/integration + A/B cover the extraction |
+
+The §48 checklist, item by item: the responsibility has one owner
+(`AlertSystem` for failure→notification mapping, with remaining domain alert
+writers explicitly named as living elsewhere); its imports are `state/*`,
+`defs`, `weather`, `FailureSystem` (type only) — no DOM, no three.js, no
+`app/`, no `ui/`, no `render/`; behavior is intact and proven by the A/B above;
+the extracted behavior has its own focused suite; determinism and the
+production build are green; no presentation dependency leaked; and no duplicate
+source of truth was introduced — FailureSystem must not import AlertSystem or
+write `state.alerts`. Documentation: this record, the Phase 16 entry in
+`mnemosyne.md`, and the `docs/design/TDD.md` layout/testing rows.
+
+`Simulation.ts`: 1,410 → 1,419 lines (wiring only; FailureSystem 690 → 428). The next phase per §51 is **Phase 17 — Extract History/Event Tracking**.
+
+
 # 21. Phase 17 — Extract History/Event Tracking
 
 Goal:
