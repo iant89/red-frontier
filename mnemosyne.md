@@ -4,24 +4,44 @@ Persistent notes for future coding sessions.
 
 ## In-play update check (TDD §23)
 
-- `vite.config.ts` writes `dist/version.json` (`{ name, commit, builtAt }`) at
-  build time — commit from `GITHUB_SHA` in CI, else local `git rev-parse HEAD`.
-  The Pages workflow uploads `dist/` as-is, so the manifest is *by
-  construction* the live build. Never remove it from the Pages upload path.
+- `vite.config.ts` writes `dist/version.json` (`{ name, commit, builtAt,
+  notes }`) at build time — commit from `GITHUB_SHA` in CI, else local
+  `git rev-parse HEAD`; `notes` = the last 8 non-merge commit subjects
+  (`buildNotes()`, `[]` when git is unavailable). The Pages workflow uploads
+  `dist/` as-is, so the manifest is *by construction* the live build. Never
+  remove it from the Pages upload path. The Pages checkout is `fetch-depth: 0`
+  on purpose: the changelog needs full history, and main's HEAD is a merge
+  commit a shallow clone cannot expand.
 - `src/app/UpdateCheck.ts` polls that manifest every 5 min **while a colony
   runs** (started in `Game.launch`, production builds only, stopped on
-  `returnToMenu`/mission end). Same-origin on purpose: the GitHub API
-  (`BuildStatus.latestMainCommit`, main-menu badge) answers "where is main?",
-  which can sit ahead of the live deploy (a failed smoke gate blocks the
-  deploy while main moves), and rate-limits per IP.
-- Flow on a newer commit: one-shot — freeze sim, `NEW BUILD AVAILABLE` banner,
-  save via `Game.save(quiet, onDone)`, dispose host, `reload()` after 3 s.
-  Save failure → "Reload anyway" button instead of a forced reload. Hidden
-  tabs skip + re-arm on `visibilitychange`. QA knob: `?updateCheckMs=…` (≥1000).
+  `returnToMenu`/mission end) and hands the Game an `UpdateFound`
+  `{ commit, notes }` — `latestDeployedCommit` (`src/ui/BuildStatus.ts`)
+  validates the sha and the note list (strings only, trimmed, capped at 12).
+  Same-origin on purpose: the GitHub API (`BuildStatus.latestMainCommit`,
+  main-menu badge) answers "where is main?", which can sit ahead of the live
+  deploy (a failed smoke gate blocks the deploy while main moves), and
+  rate-limits per IP.
+- Flow on a newer commit: one-shot — freeze the sim, open the **update card**
+  (frost + card, `#update-banner` / `.update-overlay`): it lists what is new
+  (the `notes` changelog) and tells the player that continuing means **they**
+  save and **they** reload. **Nothing saves or reloads by itself — that is a
+  user requirement, not an implementation detail.** Card actions: "Save
+  colony" runs the normal `Game.save(false, onDone)` under the save-progress
+  frost; only a *successful* save reveals "Reload now", which the player
+  clicks to run `leaveToMenu(0)`. "Later" (or Esc) hides the card and
+  restores the pre-notice speed; the check is over for the session (a manual
+  page reload re-arms it). Save failure in the `update` context is reported
+  **on the card** (`updateNoticeSaveFailed`), never as a stacked
+  save-failed prompt. Hidden tabs skip + re-arm on `visibilitychange`. QA
+  knob: `?updateCheckMs=…` (≥1000).
 - `scripts/update-check-smoke.mjs` drives the whole flow in headless Chromium
-  (rewrites `dist/version.json` mid-run and restores it); run it after any
-  change to the manifest/poller/reload path. `tests/app/update-check.test.ts`
-  covers the poller unit-level (fake fetcher, no DOM).
+  (rewrites `dist/version.json` mid-run — commit **and notes** — and restores
+  it); it proves the 5 s no-auto-save/no-auto-reload window, "Later", the
+  reload-re-triggers-the-card path, and the player's Save → Reload path; run
+  it after any change to the manifest/poller/card. `tests/app/update-check.
+  test.ts` covers the poller unit-level (fake fetcher, no DOM, notes
+  pass-through/validation); `tests/app/pause-save.test.ts` "Update card"
+  covers the Game-level flow (jsdom).
 
 
 ## Pause menu + save hand-off (the "Save failed" bug)

@@ -1798,34 +1798,57 @@ body {
   color: #1c0f06;
 }
 
-/* In-play update notice (TDD §23): a newer build is live. Top-centre, above
-   the alerts, warm border — important but not an emergency. */
-.update-banner {
+/* In-play update notice (TDD §23): a newer build is live. Same frost family
+   as the save overlays (z 120) with a card dead-centre — it tells the
+   player what is new and that saving + reloading is their choice. The page
+   never reloads behind their back, so this must be readable, not a toast. */
+.update-overlay {
   position: fixed;
-  top: 46px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(560px, calc(100vw - 24px));
-  z-index: 40;
-  background: var(--ui-bg);
-  border: 1px solid var(--warn);
-  border-radius: 8px;
-  padding: 10px 14px;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+  inset: 0;
+  z-index: 120;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(8, 6, 4, 0.42);
+  -webkit-backdrop-filter: blur(7px) saturate(0.92) brightness(0.72);
+  backdrop-filter: blur(7px) saturate(0.92) brightness(0.72);
+  animation: save-fade-in 0.18s ease-out;
 }
-.update-banner .ub-title {
-  font-size: 12px;
+.update-overlay .ub-card {
+  width: min(470px, 100%);
+  border-color: var(--warn);
+}
+.update-overlay .ub-builds {
+  margin: -8px 0 12px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ui-text-dim);
+}
+.update-overlay .ub-what {
+  margin-bottom: 12px;
+}
+.update-overlay .ub-what-title {
+  font-size: 10.5px;
+  letter-spacing: 2.4px;
+  text-transform: uppercase;
+  color: var(--accent);
   font-weight: 700;
-  letter-spacing: 0.08em;
-  color: var(--warn);
+  margin-bottom: 6px;
 }
-.update-banner .ub-text {
-  margin-top: 4px;
-  font-size: 12px;
-  line-height: 1.45;
+.update-overlay #update-notes {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  line-height: 1.5;
 }
-.update-banner #update-btn {
-  margin-top: 8px;
+.update-overlay #update-notes li + li {
+  margin-top: 3px;
+}
+.update-overlay .ub-text {
+  margin-bottom: 14px;
+  font-size: 12.5px;
+  line-height: 1.5;
 }
 
 /* ------------------------------------------------------------ mobile --- */
@@ -2506,9 +2529,10 @@ body {
     bottom: 150px;
   }
 
-  .update-banner {
-    top: auto;
-    bottom: 120px;
+  /* The update card keeps the centred overlay on small screens; only the
+     card gets a little less air. */
+  .update-overlay .ub-card {
+    width: min(400px, 100%);
   }
 
   /* The weather cell gets room to report the storm's position. */

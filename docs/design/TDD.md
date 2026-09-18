@@ -39,7 +39,7 @@ Status tags match the GDD: **IN** / **PARTIAL** / **OUT**.
 
 **Hard gates that exist today**
 
-- `npm test` — 54 suites / 567 checks (unit, integration, determinism, load, HUD)
+- `npm test` — 58 suites / 621 checks (unit, integration, determinism, load, HUD)
 - `scripts/worker-smoke.mjs` — both transports on every PR
 - `scripts/mobile-smoke.mjs` — headless Chromium play path
 - `scripts/update-check-smoke.mjs` — in-play save-and-reload update flow
@@ -149,7 +149,7 @@ src/
   ui/                HUD, menus, wizard, save store, globe picker
   lib/               deterministic RNG + simplex noise
   style.css          play HUD + menu theme
-tests/               54 suites: sim/*, hud/*, render/*, ui/*, app/*
+tests/               58 suites: sim/*, hud/*, render/*, ui/*, app/*
 scripts/             test runner, Playwright smokes, screenshots
 docs/design/         this GDD + TDD
 ```
@@ -454,15 +454,24 @@ inspection, deterministic state hash readout, teleport/reveal commands.
 
 - Static Vite SPA, GitHub Pages workflow present. — **IN**
 - Build identity: every build stamps its commit into the bundle (`__RF_BUILD_COMMIT__`)
-  and ships `version.json` (`{ commit, builtAt }`) in `dist/` (Vite plugin in
-  `vite.config.ts`). CI uses `GITHUB_SHA`, local builds use `git rev-parse HEAD`. — **IN**
+  and ships `version.json` (`{ commit, builtAt, notes }`) in `dist/` (Vite plugin in
+  `vite.config.ts`); `notes` is the recent non-merge commit subjects — the changelog
+  the in-play card reads. CI uses `GITHUB_SHA`, local builds use `git rev-parse HEAD`.
+  The Pages checkout is full-depth (`fetch-depth: 0`) because main's HEAD is a merge
+  commit the changelog must expand. — **IN**
 - In-play update check (`src/app/UpdateCheck.ts`): while a colony runs, the app
   polls its own `version.json` every ~5 min (same origin, `no-store` + a fresh
   cache-buster query so no CDN copy can answer stale). Newer commit found →
-  one-shot hand-off to `Game.onNewBuild`: freeze the sim, banner
-  ("NEW BUILD AVAILABLE — saving your colony, then reloading"), persist via the
-  normal save path, dispose the host, reload after 3 s. If the save fails the
-  banner offers "Reload anyway" instead of forcing a state-losing reload.
+  one-shot hand-off to `Game.onNewBuild`: freeze the sim and raise the **update
+  card** (frost + centered card, not a toast). The card lists what is new (the
+  manifest's `notes`), names both builds, and tells the player that continuing
+  means *they* save and *they* reload. **Nothing happens automatically — no
+  auto-save, no auto-reload** (a player requirement): "Save colony" runs the
+  normal save under the progress frost, and only a successful save reveals
+  "Reload now"; that click alone tears the colony down and reloads the page.
+  "Later" / Esc dismisses the card and restores the pre-notice speed; a manual
+  page reload re-arms the check. A failed save in this context is reported on
+  the card (retry / keep playing), never as a stacked save-failed prompt.
   Hidden tabs skip the check and re-arm on return; the check starts at colony
   launch and stops on menu hand-off or mission end; dev mode is out (HMR covers
   it, the dev server ships no manifest). QA knob: `?updateCheckMs=…` (≥ 1000 ms). — **IN**

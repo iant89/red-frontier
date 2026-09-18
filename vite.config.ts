@@ -12,6 +12,32 @@ function buildCommit(): string {
   }
 }
 
+/**
+ * The manifest's "what's new": the most recent non-merge commit subjects.
+ * CI must check out with `fetch-depth: 0` (pages.yml), because main's HEAD
+ * is a merge commit and a shallow clone would leave the list empty. Local
+ * builds and the smoke tests get real subjects; anything without git
+ * history degrades to an empty list and the update card says so.
+ */
+function buildNotes(): string[] {
+  try {
+    const out = execFileSync('git', ['log', '--no-merges', '--pretty=%s', '-n', 8, 'HEAD'], {
+      encoding: 'utf8',
+    });
+    return out
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      // `--no-merges` already skips real merges, but on a shallow clone a
+      // boundary merge cannot be followed and leaks through — the player's
+      // changelog is for features, not "Merge pull request #49".
+      .filter((s) => !/^merge (pull request|branch|remote-tracking|commit)/i.test(s))
+      .slice(0, 8);
+  } catch {
+    return [];
+  }
+}
+
 const BUILD_COMMIT = buildCommit();
 
 /**
@@ -22,7 +48,7 @@ const BUILD_COMMIT = buildCommit();
  * keeps moving), and the GitHub API neither says that nor survives
  * unauthenticated rate limits (TDD §23).
  */
-function buildManifest(commit: string): Plugin {
+function buildManifest(commit: string, notes: string[]): Plugin {
   let outDir = 'dist';
   return {
     name: 'red-frontier:build-manifest',
@@ -33,7 +59,11 @@ function buildManifest(commit: string): Plugin {
     closeBundle() {
       writeFileSync(
         join(outDir, 'version.json'),
-        `${JSON.stringify({ name: 'red-frontier', commit, builtAt: new Date().toISOString() }, null, 2)}\n`,
+        `${JSON.stringify(
+          { name: 'red-frontier', commit, builtAt: new Date().toISOString(), notes },
+          null,
+          2,
+        )}\n`,
       );
     },
   };
@@ -41,7 +71,7 @@ function buildManifest(commit: string): Plugin {
 
 export default defineConfig({
   base: './',
-  plugins: [buildManifest(BUILD_COMMIT)],
+  plugins: [buildManifest(BUILD_COMMIT, buildNotes())],
   define: {
     // Browser code cannot run `gh`; stamp the checked-out commit into its bundle.
     __RF_BUILD_COMMIT__: JSON.stringify(BUILD_COMMIT),

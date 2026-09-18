@@ -37,8 +37,8 @@ import { WORLD_SIZES, DIFFICULTIES, DEFAULT_WORLD_OPTIONS, hashSeed } from '../s
 import type { NewGameConfig, WorldSizeId } from '../sim/difficulty';
 import { stormLabel } from '../sim/weather';
 import { AudioSystem } from '../audio/AudioSystem';
-import { BUILD_COMMIT, shortSha } from '../ui/BuildStatus';
-import { UpdateCheck, updateCheckIntervalOverride } from './UpdateCheck';
+import { BUILD_COMMIT } from '../ui/BuildStatus';
+import { UpdateCheck, updateCheckIntervalOverride, type UpdateFound } from './UpdateCheck';
 import { getProfiler, resetProfiler, setProfilerEnabled } from '../sim/debug/Profiler';
 
 void SAVE_VERSION;
@@ -136,6 +136,8 @@ export class Game {
   private lastInspector = 0;
   /** In-play update check while a colony runs (TDD §23); null in dev mode. */
   private updateCheck: UpdateCheck | null = null;
+  /** The speed to restore when the player dismisses the update card. */
+  private updateNoticeSpeed = 1;
   private started = false;
   private shiftHeld = false;
   private longPressTimer: number | null = null;
@@ -170,11 +172,15 @@ export class Game {
       // race that disposed the host before the save could finish).
       onMenu: () => this.openPauseMenu(),
       onDev: () => this.toggleDevPanel(),
-      onSaveRetry: () => this.retrySave(),
-      onSaveAsNew: () => this.saveAsNew(),
-      onSaveDismiss: () => this.hud.hideSaveError(),
-      onSaveAbandon: () => this.abandonToMenu(),
-    });
+    onSaveRetry: () => this.retrySave(),
+    onSaveAsNew: () => this.saveAsNew(),
+    onSaveDismiss: () => this.hud.hideSaveError(),
+    onSaveAbandon: () => this.abandonToMenu(),
+    // The update card's actions — all of them the player's, none automatic.
+    onUpdateSave: () => this.updateNoticeSave(),
+    onUpdateReload: () => this.updateNoticeReload(),
+    onUpdateLater: () => this.updateNoticeLater(),
+  });
     this.dev = new DevMode(
       (sev, text) => this.hud.addLog(sev, text),
       (command, ack) => {
@@ -667,6 +673,18 @@ export class Game {
     if ((e.ctrlKey || e.metaKey) && key === 's') {
       e.preventDefault();
       this.manualSave();
+      return;
+    }
+    // The update card owns the keyboard while it is open: Esc means "later"
+    // (keep playing this build); a stray key must not leak into a frozen
+    // colony. While the card's own save is in flight Esc is ignored —
+    // dismissing the card mid-save would make the save land on a card the
+    // player can no longer see.
+    if (this.hud.isUpdateNoticeOpen()) {
+      if (e.key === 'Escape' && !this.saveInFlight) {
+        this.updateNoticeLater();
+        this.audio.command('rover/stop');
+      }
       return;
     }
     // The pause menu owns the keyboard while it is open: Esc resumes, and
@@ -1301,7 +1319,12 @@ export class Game {
     this.lastSave = { at: Date.now(), ok: false };
     if (!quiet) this.hud.saveProgressEnd(false);
     const visible = document.visibilityState !== 'hidden';
-    if (!quiet || (visible && this.saveContext !== 'update')) {
+    if (this.saveContext === 'update') {
+      // The update card owns this failure: it is on screen, the player is
+      // reading it, and it already offers the recovery (retry / keep playing).
+      // A save-failed prompt would sit on top of the card and compete with it.
+      this.hud.updateNoticeSaveFailed(kind);
+    } else if (!quiet || visible) {
       this.hud.showSaveError(kind, this.saveContext === 'menu');
     } else {
       this.hud.flashSave('Save failed — the colony could not be saved');
@@ -1407,33 +1430,51 @@ export class Game {
 
   /**
    * A newer build is live (TDD §23). The check has already stopped itself —
-   * one notice per session, never a nag. Freeze the colony so nothing moves
-   * while the save and the reload happen, tell the player what is going on,
-   * persist, and let the reload land them on the new build.
+   * one notice per session, never a nag. Freeze the colony so the player can
+   * read in peace, and raise the update card: it tells them what is new and
+   * that continuing means they save and they reload. Nothing saves or reloads
+   * by itself — both are the player's clicks, made from the card.
    */
-  private onNewBuild(latest: string): void {
+  private onNewBuild(found: UpdateFound): void {
+    this.updateNoticeSpeed = this.hud.speedIdx;
     this.hud.setSpeed(0);
     this.audio.setPaused(true);
-    this.hud.showUpdateNotice(BUILD_COMMIT, latest);
-    // The update banner carries this save's progress and its failure
-    // fallback, so the save-failed prompt must not pile on top of it.
+    this.hud.showUpdateNotice({ current: BUILD_COMMIT, latest: found.commit, notes: found.notes });
+    // The card carries this save's progress and its failure fallback, so the
+    // save-failed prompt must not pile on top of it (see onSaveFailure).
     this.saveContext = 'update';
-    this.save(true, (ok, stamp) => {
-      if (ok) {
-        this.audio.saved();
-        this.hud.updateNoticeText(
-          `Colony saved · ${stamp}. Reloading to build ${shortSha(latest)}…`,
-        );
-        this.leaveToMenu(3000);
-      } else {
-        this.audio.reject();
-        this.hud.updateNoticeText(
-          `The colony could not be saved — your last autosave is at most ${this.autosaveSec || AUTOSAVE_INTERVAL_S} s old. ` +
-            `Reload to the new build, or keep playing this one.`,
-        );
-        this.hud.updateNoticeAction('Reload anyway', () => this.leaveToMenu());
-      }
+  }
+
+  /** The update card's "Save colony": the normal save, reported back to the card. */
+  private updateNoticeSave(): void {
+    if (!this.hud.isUpdateNoticeOpen() || this.saveInFlight) return;
+    this.saveContext = 'update';
+    this.hud.updateNoticeSaving();
+    this.save(false, (ok, stamp) => {
+      // ok === true: offer the reload. ok === false: onSaveFailure has already
+      // put the failure and the retry on the card (update context).
+      if (ok) this.hud.updateNoticeSaved(stamp);
     });
+  }
+
+  /**
+   * The update card's "Reload now" — offered only after a successful save.
+   * This is the player's own reload; the page never does it on a timer.
+   */
+  private updateNoticeReload(): void {
+    if (!this.hud.isUpdateNoticeOpen()) return;
+    this.hud.hideUpdateNotice();
+    this.saveContext = 'auto';
+    this.leaveToMenu(0);
+  }
+
+  /** The update card's "Later" (or Esc): keep playing this build; the check is over. */
+  private updateNoticeLater(): void {
+    if (!this.hud.isUpdateNoticeOpen()) return;
+    this.hud.hideUpdateNotice();
+    this.hud.setSpeed(this.updateNoticeSpeed);
+    this.audio.setPaused(this.hud.speedIdx === 0);
+    this.saveContext = 'auto';
   }
 
   /**
@@ -1493,7 +1534,9 @@ export class Game {
    */
   private openPauseMenu(): void {
     if (!this.started || this.pauseMenu || !this.host) return;
-    if (this.hud.isSaveErrorOpen() || this.hud.isSaveProgressOpen()) return;
+    // The update card already owns the frozen colony; a second overlay on top
+    // of it would be two menus fighting for the same player.
+    if (this.hud.isSaveErrorOpen() || this.hud.isSaveProgressOpen() || this.hud.isUpdateNoticeOpen()) return;
     this.prePauseSpeed = this.hud.speedIdx;
     this.hud.setSpeed(0);
     this.audio.setPaused(true);

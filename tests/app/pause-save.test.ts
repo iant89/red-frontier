@@ -307,6 +307,180 @@ test('a failed autosave in a hidden tab logs and toasts instead of prompting', a
   }
 });
 
+// -------------------------------------------------------------- update card --
+
+const NEWER_BUILD = 'f'.repeat(39) + 'a'; // → shortSha "fffffff", newer than the test build
+const NEW_FEATURES = [
+  'In-game pause menu with expedition stats',
+  'A stable return-to-menu save',
+  'A frostier save dialog',
+];
+
+const cardOpen = () => overlay('update-banner').style.display === 'flex';
+
+const press = (id: string) =>
+  overlay(id).dispatchEvent(new dom.window.Event('pointerdown', { bubbles: true, cancelable: true }));
+
+/**
+ * The page reload can't happen in jsdom, so the teardown's reload timer is
+ * swallowed; what matters is that it is only scheduled *after the player
+ * clicks Reload* — never by the notice itself.
+ */
+function swallowReloads(fn: () => void): number {
+  const real = win.setTimeout.bind(win);
+  let reloads = 0;
+  win.setTimeout = ((f: () => void, d?: number) => {
+    if (d === 0 && /reload/.test(String(f))) {
+      reloads++;
+      return 999999;
+    }
+    return real(f, d);
+  }) as typeof win.setTimeout;
+  try {
+    fn();
+  } finally {
+    win.setTimeout = real;
+  }
+  return reloads;
+}
+
+group('Update card');
+
+test('finding a newer build freezes the colony and raises the card — nothing saves or reloads by itself', async () => {
+  const { host, state } = makeHost();
+  const game = await makeGame(host);
+  const g = game as any;
+  const hud = game.hud;
+
+  hud.setSpeed(2);
+  const real = win.setTimeout.bind(win);
+  win.setTimeout = ((f: () => void, d?: number) => {
+    if (d === 700 || d === 3000) return 999999; // any scheduled reload, old-style or new
+    return real(f, d);
+  }) as typeof win.setTimeout;
+  try {
+    g.onNewBuild({ commit: NEWER_BUILD, notes: NEW_FEATURES });
+
+    assert.ok(cardOpen(), 'the card is up');
+    assert.equal(hud.speedIdx, 0, 'the colony is frozen so the notice is readable');
+    assert.equal(g.saveContext, 'update');
+    assert.equal(state.snapshots, 0, 'no automatic save');
+
+    assert.match(overlay('update-title').textContent, /new version/i);
+    assert.ok(overlay('update-builds').textContent!.includes('fffffff'), 'the new build is named');
+    const notes = Array.from(doc.querySelectorAll('#update-notes li')).map((li) => li.textContent);
+    assert.deepEqual(notes, NEW_FEATURES, 'the changelog is listed');
+    assert.match(overlay('update-text').textContent, /save/i, 'it says the player must save');
+    assert.match(overlay('update-text').textContent, /reload/i, 'and then reload');
+    assert.equal(overlay('ub-reload').style.display, 'none', 'reload waits for a successful save');
+
+    await wait(150);
+    assert.equal(state.snapshots, 0, 'still no automatic save a moment later');
+    assert.ok(cardOpen(), 'the card waits for the player');
+  } finally {
+    win.setTimeout = real;
+  }
+});
+
+test('the player saves from the card; reload is offered only after the save lands', async () => {
+  const { host, state } = makeHost();
+  const game = await makeGame(host);
+  const g = game as any;
+  g.onNewBuild({ commit: NEWER_BUILD, notes: NEW_FEATURES });
+  assert.ok(cardOpen());
+
+  press('ub-save');
+  await wait(150);
+  assert.equal(state.snapshots, 1, 'the save ran when asked');
+  assert.match(overlay('update-text').textContent, /saved/i, 'the card reports the save');
+  assert.equal(overlay('ub-reload').style.display, '', 'now the reload is offered');
+  assert.equal(state.disposed, false, 'yet the page still waits for the click');
+  assert.equal(g.started, true);
+});
+
+test('"Reload now" — after the save — tears the colony down and schedules the page reload', async () => {
+  const { host, state } = makeHost();
+  const game = await makeGame(host);
+  const g = game as any;
+  g.onNewBuild({ commit: NEWER_BUILD, notes: NEW_FEATURES });
+  press('ub-save');
+  await wait(150);
+  assert.equal(overlay('ub-reload').style.display, '');
+
+  const reloads = swallowReloads(() => press('ub-reload'));
+  assert.equal(reloads, 1, 'the reload is the player\'s click, and only his');
+  assert.equal(state.disposed, true);
+  assert.equal(g.started, false);
+  assert.ok(!cardOpen(), 'the card is gone with the colony');
+});
+
+test('"Later" keeps the player on this build and restores the pre-notice speed', async () => {
+  const { host, state } = makeHost();
+  const game = await makeGame(host);
+  const g = game as any;
+  g.hud.setSpeed(2);
+  g.onNewBuild({ commit: NEWER_BUILD, notes: NEW_FEATURES });
+  assert.equal(g.hud.speedIdx, 0);
+
+  press('ub-later');
+  assert.ok(!cardOpen(), 'the card is down');
+  assert.equal(g.hud.speedIdx, 2, 'the pre-notice speed is restored');
+  assert.equal(g.saveContext, 'auto', 'background saves are un-remarkable again');
+  assert.equal(state.snapshots, 0, 'nothing was saved');
+  assert.equal(state.disposed, false);
+  assert.equal(g.started, true, 'the colony keeps running');
+});
+
+test('Esc is ignored while the card\'s own save is in flight', async () => {
+  const { host } = makeHost();
+  const game = await makeGame(host);
+  const g = game as any;
+  g.hud.setSpeed(2);
+  g.onNewBuild({ commit: NEWER_BUILD, notes: NEW_FEATURES });
+
+  press('ub-save');
+  // The snapshot hop is still in flight (25 ms); dismissing the card now
+  // would make the success land on a card the player can no longer see.
+  win.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  assert.ok(cardOpen(), 'the card stays up while its save runs');
+  assert.equal(g.hud.speedIdx, 0);
+
+  await wait(150);
+  assert.match(overlay('update-text').textContent, /saved/i, 'the save still lands on the card');
+  assert.equal(overlay('ub-reload').style.display, '', 'and unlocks the reload');
+});
+
+test('Esc behaves as "Later" while the card is open', async () => {
+  const { host } = makeHost();
+  const game = await makeGame(host);
+  const g = game as any;
+  g.hud.setSpeed(2);
+  g.onNewBuild({ commit: NEWER_BUILD, notes: NEW_FEATURES });
+
+  win.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  assert.ok(!cardOpen(), 'Esc dismisses the card');
+  assert.equal(g.hud.speedIdx, 2, 'and resumes the colony');
+});
+
+test('a failed save from the card reports on the card; the retry goes through the same button', async () => {
+  const { host, state } = makeHost(1); // the first snapshot fails, the retry succeeds
+  const game = await makeGame(host);
+  const g = game as any;
+  g.onNewBuild({ commit: NEWER_BUILD, notes: NEW_FEATURES });
+
+  press('ub-save');
+  await wait(150);
+  assert.equal(overlay('save-error').style.display, 'none', 'no prompt stacked on the card');
+  assert.match(overlay('update-text').textContent, /failed/i, 'the card carries the failure');
+  assert.equal(overlay('ub-reload').style.display, 'none', 'no reload before a save succeeded');
+  assert.equal(state.disposed, false, 'the colony is alive for the retry');
+
+  press('ub-save'); // retry
+  await wait(150);
+  assert.match(overlay('update-text').textContent, /saved/i, 'the retry lands on the card');
+  assert.equal(overlay('ub-reload').style.display, '', 'and unlocks the reload');
+});
+
 await finish('app/pause-save');
 // The Game under test schedules its frame loop via requestAnimationFrame
 // (backed by a jsdom timer), which keeps the event loop alive. Every case has

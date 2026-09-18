@@ -29,6 +29,11 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        # Full history: the build manifest's "what's new" is the last few
+        # commit subjects (vite.config.ts), and main's HEAD is a merge
+        # commit — a shallow clone would leave the card's list empty.
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:

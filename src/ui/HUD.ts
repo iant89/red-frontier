@@ -71,6 +71,12 @@ export interface HUDCallbacks {
   onSaveDismiss?: () => void;
   /** "Return without saving" on the save-failed dialog (menu hand-off only). */
   onSaveAbandon?: () => void;
+  /** "Save colony" on the in-play update card (TDD §23). */
+  onUpdateSave?: () => void;
+  /** "Reload now" on the update card — offered only after a successful save. */
+  onUpdateReload?: () => void;
+  /** "Later" on the update card — keep playing this build. */
+  onUpdateLater?: () => void;
 }
 
 const fmtKg = (n: number) =>
@@ -387,12 +393,26 @@ export class HUD {
         <div class="toolbar" id="speeds"></div>
       </div>
 
-      <!-- In-play update notice (TDD §23): a newer build is live, the colony
-           is being saved, and the page will reload onto it. -->
-      <div class="update-banner" id="update-banner" style="display:none" role="status" aria-live="assertive">
-        <div class="ub-title" id="update-title"></div>
-        <div class="ub-text" id="update-text"></div>
-        <button class="btn" id="update-btn" style="display:none"></button>
+      <!-- In-play update notice (TDD §23): a newer build is live. A frosted
+           card, not a toast — it tells the player what is new and that they
+           must save and reload themselves to continue. Nothing happens
+           automatically: both the save and the reload are the player's click. -->
+      <div class="update-overlay" id="update-banner" style="display:none" role="alertdialog" aria-modal="true" aria-labelledby="update-title">
+        <div class="sp-card ub-card">
+          <div class="sp-kicker">Update</div>
+          <div class="sp-title" id="update-title">A new version is live</div>
+          <div class="ub-builds" id="update-builds"></div>
+          <div class="ub-what" id="ub-what" style="display:none">
+            <div class="ub-what-title">What's new</div>
+            <ul id="update-notes"></ul>
+          </div>
+          <div class="ub-text" id="update-text"></div>
+          <div class="se-actions">
+            <button class="btn primary" id="ub-save" title="Save your colony before switching builds">💾 <span class="btn-t">Save colony</span></button>
+            <button class="btn" id="ub-reload" style="display:none" title="Reload the page onto the new build">⟳ <span class="btn-t">Reload now</span></button>
+            <button class="btn" id="ub-later" title="Keep playing this build for now">Later</button>
+          </div>
+        </div>
       </div>
 
       <div class="panel" id="vitals">
@@ -582,6 +602,18 @@ export class HUD {
     this.el('se-abandon').addEventListener('pointerdown', (e) => {
       e.stopPropagation();
       this.cb.onSaveAbandon?.();
+    });
+    this.el('ub-save').addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.cb.onUpdateSave?.();
+    });
+    this.el('ub-reload').addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.cb.onUpdateReload?.();
+    });
+    this.el('ub-later').addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.cb.onUpdateLater?.();
     });
     this.el('hist-close').addEventListener('pointerdown', (e) => {
       e.stopPropagation();
@@ -2540,35 +2572,82 @@ export class HUD {
     if (text) h.innerHTML = text;
   }
 
+  private updateNoticeOpen = false;
+
   /**
-   * In-play update notice (TDD §23): a newer build is live. The banner stages
-   * itself — shown here, then the Game updates the text as saving → reload
-   * progresses, and may attach an action for the save-failed fallback.
+   * In-play update notice (TDD §23): a newer build is live. The card tells
+   * the player what is new and that continuing means *they* save and *they*
+   * reload — nothing happens automatically. The Game drives the status line
+   * and the button set as the player acts (saving → saved → reload).
    */
-  showUpdateNotice(current: string | null, latest: string | null): void {
-    this.el('update-title').textContent = 'NEW BUILD AVAILABLE';
+  showUpdateNotice(found: { current: string | null; latest: string | null; notes: string[] }): void {
+    this.el('update-title').textContent = 'A new version is live';
+    this.el('update-builds').textContent = `build ${shortSha(found.current)} → build ${shortSha(found.latest)}`;
+    const list = this.el('update-notes');
+    list.replaceChildren(
+      ...found.notes.map((n) => {
+        const li = document.createElement('li');
+        li.textContent = n;
+        return li;
+      }),
+    );
+    this.el('ub-what').style.display = found.notes.length > 0 ? '' : 'none';
     this.el('update-text').textContent =
-      `You are playing build ${shortSha(current)} — build ${shortSha(latest)} is live. ` +
-      `Saving your colony, then reloading…`;
-    const btn = this.el('update-btn');
-    btn.style.display = 'none';
-    btn.onclick = null;
-    this.el('update-banner').style.display = 'block';
+      'Your colony is paused. To keep playing on the new version, save your colony and reload — nothing happens automatically.';
+    const save = this.el('ub-save') as HTMLButtonElement;
+    save.style.display = '';
+    save.disabled = false;
+    this.el('ub-reload').style.display = 'none';
+    this.updateNoticeOpen = true;
+    this.el('update-banner').style.display = 'flex';
   }
 
+  /** The card's status line (the Game narrates the save as it progresses). */
   updateNoticeText(text: string): void {
     this.el('update-text').textContent = text;
   }
 
-  updateNoticeAction(label: string, onClick: () => void): void {
-    const btn = this.el('update-btn');
-    btn.textContent = label;
-    btn.onclick = onClick;
-    btn.style.display = '';
+  /** The card's save is running: the save button goes quiet under the frost. */
+  updateNoticeSaving(): void {
+    this.el('update-text').textContent = 'Saving your colony…';
+    (this.el('ub-save') as HTMLButtonElement).disabled = true;
+  }
+
+  /**
+   * The save settled: the reload button is now the player's to press. The
+   * page still does not reload on its own — the card only offers it.
+   */
+  updateNoticeSaved(stamp: string): void {
+    this.el('update-text').textContent =
+      `Colony saved · ${stamp}. Reload when you are ready to continue on the new version.`;
+    this.el('ub-save').style.display = 'none';
+    this.el('ub-reload').style.display = '';
+  }
+
+  /**
+   * The save failed: the card carries the recovery. A save-failed prompt
+   * would sit on top of the card the player is reading, so the update
+   * context reports here instead (the Game routes it — TDD §23).
+   */
+  updateNoticeSaveFailed(kind: SaveErrorKind): void {
+    this.el('update-text').textContent =
+      kind === 'storage'
+        ? 'The save failed — browser storage is full. Retry when it frees up, or keep playing this build.'
+        : 'The save failed — the colony could not be read. Nothing was lost. Retry, or keep playing this build.';
+    this.el('ub-reload').style.display = 'none';
+    const save = this.el('ub-save') as HTMLButtonElement;
+    save.style.display = '';
+    save.disabled = false;
+  }
+
+  /** Whether the update card is on screen (the Game guards the pause menu on it). */
+  isUpdateNoticeOpen(): boolean {
+    return this.updateNoticeOpen;
   }
 
   hideUpdateNotice(): void {
     this.el('update-banner').style.display = 'none';
+    this.updateNoticeOpen = false;
   }
 
   flashSave(txt = 'Saved'): void {
