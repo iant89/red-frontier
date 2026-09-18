@@ -41,9 +41,6 @@ import {
   GARAGE_SERVICE_RATE,
   DEV_MAX_BUILDING_LEVEL,
   devLevelMul,
-  POI_DISCOVER_M,
-  DROP_GAP_SOL_MIN,
-  DROP_GAP_SOL_MAX,
 } from './config';
 import type {
   ResourceId,
@@ -66,15 +63,9 @@ import {
   DEFAULT_WORLD_OPTIONS,
 } from './difficulty';
 import type { DifficultyId, WorldOptions } from './difficulty';
-import {
-  burialRate,
-  isPickedClean,
-  makeSupplyDrop,
-  POI_KINDS,
-  rollDropRing,
-  salvageTotalKg,
-} from './pois';
+import { POI_KINDS } from './pois';
 import type { Poi, PoiKind } from './pois';
+import { ExplorationSystem } from './systems/ExplorationSystem';
 import { SolClock } from './clock';
 import type { SunState } from './clock';
 import { stormLabel } from './weather';
@@ -885,7 +876,8 @@ export class Simulation {
     WeatherSystem.tick(this.state, this.weatherHooks);
 
     // 2b. the world past the base: what the fleet has found, and what Earth sent
-    this.tickExploration();
+    // Phase 14: delegated to ExplorationSystem
+    ExplorationSystem.tick(this.state);
 
     // 3 & 4. power network, then production scaled by what it delivered.
     // Phase 6: delegated to PowerSystem
@@ -931,8 +923,10 @@ export class Simulation {
   }
 
 
-  /** Storm damage has tripped a building offline until it is repaired. */
   // -------------------------------------------------------- exploration ----
+  // Phase 14: discovery, supply drops, burial and site-side salvage rewards
+  // live in systems/ExplorationSystem.ts. World owns physical sites
+  // (`world.pois`); Simulation exposes them directly (World vs Exploration).
 
   /** Every site on the planet — found or not. */
   get pois(): Poi[] {
@@ -941,139 +935,6 @@ export class Simulation {
 
   poiById(id: number): Poi | undefined {
     return this.world.pois.find((p) => p.id === id);
-  }
-
-  /**
-   * The world past the base (GDD §06, §10). Runs straight after the weather,
-   * because the only thing that decides how fast a landed container disappears
-   * is the sky.
-   */
-  private tickExploration(): void {
-    this.tickDiscovery();
-    this.tickSupplyDrops();
-  }
-
-  /**
-   * GDD §06: "the map begins mostly unknown." A site joins the map when a rover
-   * or the colonist gets within {@link POI_DISCOVER_M} of it — and says so out
-   * loud, because a find the player never hears about is a find that never
-   * happened. Discovery is permanent: finding something does not un-find it when
-   * the rover drives away.
-   */
-  private tickDiscovery(): void {
-    for (const p of this.world.pois) {
-      if (p.discovered) continue;
-      const near = (x: number, z: number) => Math.hypot(x - p.x, z - p.z) <= POI_DISCOVER_M;
-      const seen =
-        this.rovers.some((r) => r.phase !== 'disabled' && near(r.x, r.z)) ||
-        near(this.colonist.x, this.colonist.z);
-      if (!seen) continue;
-      p.discovered = true;
-      const info = POI_KINDS[p.kind];
-      const kg = salvageTotalKg(p);
-      this.alerts.raise(
-        `poi-found-${p.id}`,
-        'opportunity',
-        `${info.icon} ${info.label} found`,
-        kg > 1 ? `${info.blurb} About ${Math.round(kg)} kg of salvage.` : info.blurb,
-        this.simTime,
-        this.clock.format(),
-      );
-    }
-  }
-
-  /**
-   * Earth cargo missions (GDD §10): they arrive at uncertain locations, are
-   * marked by a transponder, and the dust takes them if nobody comes.
-   *
-   * Three things happen here, in this order: book the next mission, land it when
-   * its sol arrives, and run down the burial clock on whatever is on the ground.
-   * The clock runs at `burialRate(stormIntensity)` times normal inside a storm,
-   * which is the entire design of the feature — the drop is not lost because
-   * time passed, it is lost because the sky came in and the player had to choose
-   * between it and the arrays.
-   */
-  private tickSupplyDrops(): void {
-    const solNow = this.clock.sol + this.clock.frac;
-    if (solNow >= this.nextDropSol) this.landSupplyDrop();
-
-    const dtSols = SIM_TICK * SOLS_PER_SEC;
-    const rate = burialRate(this.weather.stormIntensity);
-    for (const p of this.world.pois) {
-      if (p.kind !== 'supplyDrop') continue;
-
-      /**
-       * A drop is finished either way — buried by the dust or stripped by a
-       * rover — and either way its deadline alert has to go. Clearing only on
-       * burial would leave a recovered container on the alert board forever,
-       * counting down a sol it no longer has.
-       */
-      if (p.buried || isPickedClean(p)) {
-        this.alerts.clear(`drop-live-${p.id}`, this.simTime, this.clock.format());
-        continue;
-      }
-
-      p.solsToBury -= dtSols * rate;
-      if (p.solsToBury > 0) {
-        // One standing alert per live drop, with the clock in it, so the HUD
-        // reads as a deadline rather than a rumour. `raise` only logs on the
-        // transition, so re-asserting it every tick is not log spam.
-        const sols = p.solsToBury;
-        this.alerts.raise(
-          `drop-live-${p.id}`,
-          sols < 1 ? 'crit' : 'opportunity',
-          `📦 Supply drop — ${p.manifest}`,
-          `${Math.round(salvageTotalKg(p))} kg at ${Math.round(p.x)}, ${Math.round(p.z)}. ` +
-            `Buried in ${sols.toFixed(1)} sols${rate > 1 ? ' — the storm is filling it in fast' : ''}.`,
-          this.simTime,
-          this.clock.format(),
-          p.id,
-        );
-        continue;
-      }
-
-      p.solsToBury = 0;
-      p.buried = true;
-      this.alerts.clear(`drop-live-${p.id}`, this.simTime, this.clock.format());
-      this.event(
-        'warn',
-        `The dust took the ${p.manifest.toLowerCase()} drop — ${Math.round(salvageTotalKg(p))} kg left under the regolith.`,
-      );
-    }
-  }
-
-  /**
-   * Put one container on the ground. The site is chosen inside a ring — far
-   * enough out that recovery is an expedition, close enough in that it is not a
-   * fool's errand on a flat battery (GDD §10's "uncertain locations").
-   */
-  private landSupplyDrop(): void {
-    const ring = rollDropRing(this.dropRng, this.world.half);
-    let x = 0;
-    let z = 0;
-    let placed = false;
-    for (let t = 0; t < 48 && !placed; t++) {
-      const ang = this.dropRng() * Math.PI * 2;
-      const d = ring.min + this.dropRng() * (ring.max - ring.min);
-      x = Math.cos(ang) * d;
-      z = Math.sin(ang) * d;
-      placed = this.world.canDrive(x, z);
-    }
-    this.nextDropSol =
-      this.clock.sol + this.clock.frac + DROP_GAP_SOL_MIN +
-      this.dropRng() * (DROP_GAP_SOL_MAX - DROP_GAP_SOL_MIN);
-    if (!placed) {
-      this.event('info', 'Earth reports a cargo mission aborted before landing.');
-      return;
-    }
-    const id = this.world.nextPoiSlot;
-    const drop = makeSupplyDrop(id, x, z, this.dropRng);
-    this.world.addPoi(drop);
-    this.event(
-      'opportunity',
-      `Transponder contact: a ${drop.manifest.toLowerCase()} container landed at ${Math.round(x)}, ${Math.round(z)} — ` +
-        `${Math.round(salvageTotalKg(drop))} kg, and the dust is already working on it.`,
-    );
   }
 
   /**
@@ -1087,6 +948,7 @@ export class Simulation {
     return RoverSystem.issueSalvage(this.state, roverId, poiId, queued);
   }
 
+  /** Storm damage has tripped a building offline until it is repaired. */
   private tripDamaged(b: Building, cause = 'the storm'): void {
     b.damaged = true;
     const def = BUILDINGS[b.kind];

@@ -2148,6 +2148,75 @@ This allows the game to eventually support:
     mapping
 
 
+## Recorded (Phase 14 complete — 2026-09-18)
+
+Implemented on the shared computer (`refactor/phase-14-exploration-system`).
+
+**World stays the planet; ExplorationSystem is what the player has found.** §18's
+distinction is now a module and a test. `src/sim/systems/ExplorationSystem.ts`
+owns discovery, the supply-drop schedule and burial clock, and the site-side of
+salvage (depletion + surviving-cell rewards). `World.generatePois` / `makePoi` /
+`pickPoiKind` stay where they were — scatter is physical world generation, not
+exploration. The salvage *task* body (`issueSalvage` / `doSalvage` — pathing,
+hold fill, unload ping-pong) stays in `RoverSystem` (Phase 10), the same split
+Phase 13 used between "kg arithmetic" and "rover work".
+
+**What moved, and where it came from**
+
+| Now in `ExplorationSystem` | Came from | Was |
+| --- | --- | --- |
+| `tick` / `tickDiscovery` / `tickSupplyDrops` / `landSupplyDrop` | `Simulation` | the private exploration block after weather |
+| `pois` / `poiById` | `Simulation` | public accessors over `world.pois` |
+| `takeSalvage` | `pois.takeSalvage` (call site in `RoverSystem.doSalvage`) | pure helper; the named owner is now the system |
+| `recoverSiteCells` | `RoverSystem.recoverSiteCells` | surviving-cell reward into the grid store |
+
+Not a redesign: every method is the arithmetic and alert text that was already
+there, with its comment. The names the rest of the code calls survive as
+delegates — `Simulation.pois` / `poiById`, `RoverSystem.recoverSiteCells` — so
+hosts, UI and the existing `tests/sim/pois.test.ts` suite keep their call sites.
+
+**What deliberately does not live here**
+
+- **World generation** (`World.generatePois`, `makePoi`, `pickPoiKind`,
+  `scatterableKinds`): the planet is World's.
+- **The salvage task** (`RoverSystem.issueSalvage` / `doSalvage`): rover domain.
+- **`pois.ts` content tables** (`POI_KINDS`, `DROP_MANIFESTS`, `burialRate`,
+  `rollDropRing`, `makeSupplyDrop`): data-shaped, like `weather.ts` beside
+  WeatherSystem.
+
+**Tests** — `tests/sim/exploration-system.test.ts`: discovery (rover + colonist),
+accessor delegates, land / bury / clear-on-recover for supply drops, takeSalvage
+conservation, recoverSiteCells (fit + full-batteries overflow), main-loop wiring,
+and the §48 "one owner" guard (`.discovered=` / `.buried=` writers are exactly
+`ExplorationSystem`; `nextDropSol=` writers are exactly ExplorationSystem +
+ColonyState init/reset + Simulation's accessor).
+
+**Gate results**
+
+| Gate | Result |
+| --- | --- |
+| `npm run typecheck` | green |
+| `npm test` | green — 63 suites / 733 checks (was 62/720), 74.0 s |
+| `npm run test:check` | green — 63 suites, all linked, all declare `@covers` |
+| `npm run build` | green — `index.js` 1,046.93 kB (303.80 kB gz), `sim.worker` 227.03 kB, 88 modules |
+| behavior A/B | **identical** — `scripts/behavior-baseline.ts` run against pre-Phase-14 tree and against today's tree |
+| smokes | skipped on this host (Playwright not installed); unit/integration + A/B cover the extraction |
+
+The §48 checklist, item by item: the responsibility has one owner
+(`ExplorationSystem`, with world generation and the salvage *task* body
+explicitly named as living elsewhere); its imports are `state/*`, `pois`,
+`config`, `alerts` — no DOM, no three.js, no `app/`, no `ui/`, no `render/`;
+behavior is intact and proven by the A/B above; the extracted behavior has its
+own 13-check suite; determinism and the production build are green; no
+presentation dependency leaked; and no duplicate source of truth was introduced
+— the guard test above is the proof. Documentation: this record, the Phase 14
+entry in `mnemosyne.md`, and the `docs/design/TDD.md` layout/testing rows.
+
+`Simulation.ts`: 1,790 → 1,652 lines. The next phase per §51 is **Phase 15 —
+Extract FailureSystem**.
+
+
+
 # 19. Phase 15 — Extract FailureSystem
 
 Goal:

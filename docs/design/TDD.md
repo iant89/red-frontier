@@ -135,6 +135,9 @@ src/
       LogisticsSystem.ts   the storage ledger, cargo transfers, site material,
                            deposit reservations — the one owner of resource
                            accounting (Phase 13)
+      ExplorationSystem.ts discovery, supply drops, burial, site-side salvage
+                           rewards — what the player has found (Phase 14);
+                           World still owns scatter
     persistence/     versioned saves: schema, codec, validator, v1…v7 migrations
     debug/           invariant checks, state hash, profiler, command transcripts
     host/            the seam
@@ -156,7 +159,7 @@ src/
   ui/                HUD, menus, wizard, save store, globe picker
   lib/               deterministic RNG + simplex noise
   style.css          play HUD + menu theme
-tests/               62 suites: sim/*, hud/*, render/*, ui/*, app/*
+tests/               63 suites: sim/*, hud/*, render/*, ui/*, app/*
 scripts/             test runner, Playwright smokes, screenshots, behavior-baseline
 docs/design/         this GDD + TDD + ROVER-STATE.md (rover state model)
 ```
@@ -167,7 +170,7 @@ docs/design/         this GDD + TDD + ROVER-STATE.md (rover state model)
 |---|---|---|
 | `sim/ecs/` | **not used** | Entities are typed objects on `Simulation` (rovers, buildings, colonist, POIs). Data-oriented enough for the current scale; a formal ECS is not required until entity counts demand it. |
 | `sim/utilities/` | **OUT** | Only power is a network; fluids are tank pools on buildings. |
-| `sim/ai/` | **`sim/systems/`** | Rover commands, task lifecycle and reservations moved to `RoverSystem` (Phase 10); its execution state (`goal`/`phase`) is runtime-only, machine-checked and documented in `docs/design/ROVER-STATE.md` (Phase 11); the *scheduler* — maintenance, rescue, supply-run auto-dispatch, behind an explicit job model (evaluators → filter → order → reserve → assign) — moved to `FleetAutomationSystem` (Phase 12); resource accounting — the storage ledger, cargo, depot transfers, site delivery and deposit reservations — moved to `LogisticsSystem` (Phase 13), with `Simulation`'s public storage surface kept as a delegate, while site crew choice stays in `ConstructionSystem`. Per-rover charging and storm recall remain in `RoverSystem`'s tick by design — the fleet-side of both lives in `FleetAutomationSystem` (dispatch pools and the storm filter). |
+| `sim/ai/` | **`sim/systems/`** | Rover commands, task lifecycle and reservations moved to `RoverSystem` (Phase 10); its execution state (`goal`/`phase`) is runtime-only, machine-checked and documented in `docs/design/ROVER-STATE.md` (Phase 11); the *scheduler* — maintenance, rescue, supply-run auto-dispatch, behind an explicit job model (evaluators → filter → order → reserve → assign) — moved to `FleetAutomationSystem` (Phase 12); resource accounting — the storage ledger, cargo, depot transfers, site delivery and deposit reservations — moved to `LogisticsSystem` (Phase 13), with `Simulation`'s public storage surface kept as a delegate, while site crew choice stays in `ConstructionSystem`. Per-rover charging and storm recall remain in `RoverSystem`'s tick by design — the fleet-side of both lives in `FleetAutomationSystem` (dispatch pools and the storm filter). Exploration — POI discovery, supply-drop schedule/burial, and site-side salvage rewards — moved to `ExplorationSystem` (Phase 14); `World` still owns scatter, and the salvage *task* body stays in `RoverSystem`. |
 | `sim/research/` | **OUT** | |
 | `sim/save/` | **extracted to** `sim/persistence/` | Schema, codec, validator and the v1…v7 migrations; `Simulation.snapshot/restore` are thin delegates. |
 | `input/` | **folded into** `app/Game.ts` | |
