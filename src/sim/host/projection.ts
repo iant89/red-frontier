@@ -147,83 +147,28 @@ function copy<T extends object>(src: T): T {
 /** Deep enough that nested mutable bags (cargo, maps, pending) are owned. */
 function projectRover(r: Rover): RoverView {
   return {
-    id: r.id,
-    kind: r.kind,
-    label: r.label,
-    x: r.x,
-    y: r.y,
-    z: r.z,
-    heading: r.heading,
-    battery: r.battery,
+    ...r,
     cargo: { ...r.cargo },
-    phase: r.phase,
     command: { ...r.command },
     pending: r.pending.map((t) => ({ ...t })),
-    goal: r.goal,
-    gx: r.gx,
-    gz: r.gz,
-    gid: r.gid,
-    recharge: r.recharge,
-    lowBatteryNotified: r.lowBatteryNotified,
-    chargeSat: r.chargeSat,
-    autoTask: r.autoTask,
-    condition: r.condition,
     rules: { ...r.rules },
-    routePaused: r.routePaused,
-    blockNotified: r.blockNotified,
-    sheltered: r.sheltered,
-    lightsOn: r.lightsOn,
-    lightsActive: r.lightsActive,
     navPath: r.navPath.map((p) => ({ x: p.x, z: p.z })),
-    navI: r.navI,
   };
 }
 
 function projectBuilding(b: Building): BuildingView {
   return {
-    id: b.id,
-    kind: b.kind,
-    x: b.x,
-    z: b.z,
-    rot: b.rot,
-    state: b.state,
+    ...b,
     remainingCost: { ...b.remainingCost },
-    needsMaterials: b.needsMaterials,
-    progress: b.progress,
-    buildTime: b.buildTime,
-    workerId: b.workerId,
-    enabled: b.enabled,
-    powerSat: b.powerSat,
-    throughput: b.throughput,
-    genKw: b.genKw,
-    loadKw: b.loadKw,
-    idleReason: b.idleReason,
-    health: b.health,
-    cleanliness: b.cleanliness,
-    damaged: b.damaged,
     assembly: b.assembly ? { ...b.assembly } : null,
-    level: b.level,
   };
 }
 
 function projectColonist(c: Colonist): ColonistView {
   return {
-    id: c.id,
-    name: c.name,
-    x: c.x,
-    y: c.y,
-    z: c.z,
-    heading: c.heading,
-    health: c.health,
-    suitO2: c.suitO2,
-    inside: c.inside,
-    shelterId: c.shelterId,
-    activity: c.activity,
+    ...c,
     order: { ...c.order },
-    gx: c.gx,
-    gz: c.gz,
     starved: { ...c.starved },
-    dead: c.dead,
   };
 }
 
