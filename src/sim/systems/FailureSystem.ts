@@ -44,7 +44,7 @@
  *   - **Rover disable action** (`RoverSystem.disable` / `enterDisabled`) —
  *     rover domain; this system *observes* `phase === 'disabled'` and emits
  *     RoverDisabled. Weather / construction still call disable via hooks.
- *   - **History sampling** (`recordHistory`) — HistorySystem Phase 17.
+ *   - **History sampling** (`HistorySystem.tick`) — HistorySystem (Phase 17).
  *   - **Fluid draw / colonist needs** — LifeSupportSystem Phase 7; we only
  *     *report* reserve / health conditions.
  *

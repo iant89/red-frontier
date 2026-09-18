@@ -53,7 +53,8 @@ import { makePools, makeColonist, type Colonist, type FluidPools } from '../life
 import { DROP_FIRST_SOL_MIN, DROP_FIRST_SOL_MAX } from '../config';
 import { defaultRoverRules, type Rover, type RoverTask } from './RoverState';
 import type { Building } from './BuildingState';
-import type { FluidFlow, HistorySample } from './ResourceState';
+import type { HistorySample } from './HistoryState';
+import { emptyFlows, type FluidFlow } from './ResourceState';
 import type { Poi } from '../pois';
 
 export interface ColonyState {
@@ -136,16 +137,11 @@ export function createColonyState(params: ColonyStateParams): ColonyState {
   const power = initialPowerState();
   const storedKWh = POD_BATTERY_KWH * 0.6;
 
-  const flows: Record<FluidId, FluidFlow> = {
-    water: { produced: 0, consumed: 0 },
-    oxygen: { produced: 0, consumed: 0 },
-    food: { produced: 0, consumed: 0 },
-  };
-  const lastFlows: Record<FluidId, FluidFlow> = {
-    water: { produced: 0, consumed: 0 },
-    oxygen: { produced: 0, consumed: 0 },
-    food: { produced: 0, consumed: 0 },
-  };
+  const flows = emptyFlows();
+  const lastFlows = emptyFlows();
+  const history: HistorySample[] = [];
+  const flowWindow: Array<{ t: number; f: Record<FluidId, FluidFlow> }> = [];
+  const lastHistoryAt = -Infinity;
 
   let nextId = 1000;
   const rovers: Rover[] = [];
@@ -231,9 +227,9 @@ export function createColonyState(params: ColonyStateParams): ColonyState {
     storedKWh,
     flows,
     lastFlows,
-    flowWindow: [],
-    history: [],
-    lastHistoryAt: -Infinity,
+    flowWindow,
+    history,
+    lastHistoryAt,
     gameOver: null,
     dustTransmission: BASE_DUST_TRANSMISSION,
     nextDropSol,

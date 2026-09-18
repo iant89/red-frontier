@@ -747,6 +747,29 @@ Persistent notes for future coding sessions.
   pre-Phase-10 `HEAD`. `Simulation.ts` 2,082 → 1,799 lines. Recorded in the
   roadmap's Phase 12 block.
 
+## Refactor Phase 17 (HistorySystem) — historical records without simulation mechanics
+
+- **`src/sim/systems/HistorySystem.ts` owns vitals sampling.** `tick` absorbs
+  `Simulation.recordHistory` + `resetFlows` (same interval gate, sample shape,
+  `HISTORY_SAMPLES` ring buffer, trailing-sol flow-window roll). `clear` /
+  `afterTimeJump` cover restore and `devSetTime` re-anchors.
+- **`src/sim/state/HistoryState.ts` owns `HistorySample`.** Moved out of
+  `ResourceState`; `emptyFlows` / `emptyHistoryWindows` helpers initialise and
+  clear the windows. ColonyState create uses them.
+- **Discrete event narratives stay on AlertBus.** Milestones, failures,
+  discoveries, construction completion and rover incidents still write
+  `state.alerts` — Domain Event → HistoryState event-log is foundation only
+  (replay/analytics/reports deferred). One architectural change this phase.
+- **Public rate queries stay on Simulation.** `netRatePerSol` /
+  `instantRatePerSol` / `reserveSols` / `history` read the windows
+  HistorySystem writes — host boundary unchanged.
+- Gate on completion (2026-09-18): 66 suites / 778 checks green
+  (`tests/sim/history-system.test.ts` +17), typecheck and `test:check` green,
+  production build green (`index.js` 1,049.48 kB / 304.74 gz, `sim.worker`
+  229.59 kB), behavior A/B byte-identical against Phase 16 tip `59b6814`.
+  Smokes skipped (no Playwright on this host). `Simulation.ts` 1,419 → 1,361
+  lines. Recorded in the roadmap's Phase 17 block.
+
 ## Refactor Phase 16 (AlertSystem) — notifications without FailureSystem writes
 
 - **`src/sim/systems/AlertSystem.ts` owns failure→alert mapping.**

@@ -10,3 +10,4 @@ export * from './ResourceState';
 export * from './EntityStore';
 export * from './PowerState';
 export * from './WeatherState';
+export * from './HistoryState';
