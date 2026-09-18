@@ -12,7 +12,7 @@
  * by sim design; fabricated entities are ordinary world objects afterwards.
  */
 
-import type { Rover, Building, Colonist } from '../sim/Simulation';
+import type { RoverView, BuildingView, ColonistView } from '../sim/host';
 import type { SimView } from '../sim/host';
 import type { BuildingKind, ResourceId, RoverKind } from '../sim/defs';
 import {
@@ -485,7 +485,7 @@ export class DevPanel {
 
   // ------------------------------------------------------------- rover ----
 
-  private roverEditorHtml(r: Rover): string {
+  private roverEditorHtml(r: RoverView): string {
     const def = ROVERS[r.kind];
     return `
       <div class="sub">${def.label} · ${def.role}</div>
@@ -557,7 +557,7 @@ export class DevPanel {
     });
   }
 
-  private patchRover(r: Rover): void {
+  private patchRover(r: RoverView): void {
     const def = ROVERS[r.kind];
     const bat = this.root.querySelector('#dvs-bat') as HTMLInputElement | null;
     if (!bat) return;
@@ -581,7 +581,7 @@ export class DevPanel {
 
   // ---------------------------------------------------------- building ----
 
-  private buildingEditorHtml(b: Building): string {
+  private buildingEditorHtml(b: BuildingView): string {
     const def = BUILDINGS[b.kind];
     const pct = Math.round(DEV_UPGRADE_STEP * 100);
     return `
@@ -672,7 +672,7 @@ export class DevPanel {
     });
   }
 
-  private patchBuilding(b: Building): void {
+  private patchBuilding(b: BuildingView): void {
     const stateEl = this.root.querySelector('#dvs-bstate') as HTMLElement | null;
     if (!stateEl) return;
     stateEl.textContent =
@@ -741,7 +741,7 @@ export class DevPanel {
     });
   }
 
-  private patchColonist(c: Colonist): void {
+  private patchColonist(c: ColonistView): void {
     const chp = this.root.querySelector('#dvs-chp') as HTMLInputElement | null;
     if (!chp) return;
     if (!this.focused(chp)) chp.value = String(Math.round(c.health));

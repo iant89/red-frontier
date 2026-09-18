@@ -3,7 +3,7 @@
  * selection visualization. Move-not-redesign from Game.ts.
  */
 
-import type { Rover } from '../sim/Simulation';
+import type { RoverView } from '../sim/host';
 import type { SimCommand, SimHost, SimView } from '../sim/host';
 import type { BuildingKind, RoverKind } from '../sim/defs';
 import { BUILDINGS, ROVERS } from '../sim/defs';
@@ -417,7 +417,7 @@ export class SelectionController {
    * active task is headed, then every queued task's destination. The renderer
    * just draws the polyline (it never interprets tasks).
    */
-  routePoints(rv: Rover): Array<{ x: number; z: number }> | null {
+  routePoints(rv: RoverView): Array<{ x: number; z: number }> | null {
     const sim = this.d.getSim();
     if (!sim) return null;
     const pts: Array<{ x: number; z: number }> = [{ x: rv.x, z: rv.z }];

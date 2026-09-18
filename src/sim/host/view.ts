@@ -1,14 +1,11 @@
 /**
  * The read model: everything the presentation layers are allowed to *see*.
  *
- * `SimView` is derived from `Simulation` with `Pick`, so it can never drift from
- * the sim's own fields — but the derivation is one-directional: a `Simulation`
- * satisfies `SimView`, while a `SimView` is **not** a `Simulation`. That single
- * asymmetry is what makes the worker migration safe: the moment the HUD, the
- * renderer and the dev panel are typed against the view, the compiler refuses
- * any code path that reaches for a sim-only method (`step`, `snapshot`,
- * `placeBuilding`, `issue*`), and those refusals are exactly the list of things
- * that must become commands.
+ * Phase 20: entity surfaces are explicit immutable view models (`RoverView`,
+ * `BuildingView`, …) produced by `projectView`. A live `Simulation` no longer
+ * satisfies `SimView` — both LocalSimHost and WorkerSimHost hand out a
+ * ColonyMirror over projected payloads, so presentation cannot observe (or
+ * mutate) sim entity identity.
  *
  * What is *not* here, on purpose:
  *
@@ -16,8 +13,7 @@
  *    exposes pure queries only — `canPlace`, `needsMaintenance`, `reserveSols` —
  *    so a future worker can serve them from a mirrored cache instead of a round
  *    trip. `tests/sim/host.test.ts` pins that no view member collides with a
- *    sim mutator, which is the same rule enforced by `Pick` but readable as a
- *    failure message.
+ *    sim mutator.
  *  - **The event queue.** `drainEvents()` clears as it reads, which is a write,
  *    so it lives on the host, not the view.
  *  - **Time control.** Stepping is the host's job; a view is a frozen "what is
@@ -28,8 +24,29 @@ import type { Simulation } from '../Simulation';
 import type { World } from '../World';
 import type { AlertBus } from '../alerts';
 import type { SolClock } from '../clock';
-import type { StormCell, StormKind, StormKindReal, Weather, WeatherRadar } from '../weather';
+import type { BuildingKind, FluidId } from '../defs';
 import type { DifficultyId, WorldOptions } from '../difficulty';
+import type { Poi } from '../pois';
+import type { PowerResult } from '../power';
+import type { SunState } from '../clock';
+import type {
+  AlertsView,
+  BuildingView,
+  ColonistView,
+  ResourceView,
+  RoverView,
+  WeatherView,
+} from './viewModels';
+
+export type {
+  AlertView,
+  AlertsView,
+  BuildingView,
+  ColonistView,
+  ResourceView,
+  RoverView,
+  WeatherView,
+} from './viewModels';
 
 /**
  * The static world the renderer and placement previews need: heights, surface
@@ -53,82 +70,30 @@ export type WorldView = Pick<
   | 'landingSite'
 >;
 
-/** The alert board, read-only. Raising and clearing alerts is sim-internal. */
-export type AlertsView = Pick<AlertBus, 'list' | 'history' | 'worst' | 'isActive'>;
-
 /** The sol clock, read-only. Time travel is a `dev/time` command. */
 export type ClockView = Pick<SolClock, 'sol' | 'frac' | 'format' | 'phase'>;
 
 /**
- * Weather, read as a snapshot of the sky.
- *
- * An explicit interface rather than `Pick<Weather, …>`, because the mirror is
- * *not* a `Weather`: it has no storm cells, no seeded RNG, no private state to
- * inherit. The class satisfies it structurally, so the local host hands out the
- * real object while the mirrored host answers the four forecast questions from
- * what the sim computed — one shape, two implementations, both checked.
+ * The whole read model. `Readonly<…>` / `ReadonlyArray` guard presentation
+ * slots; nested bags on entities are owned copies from projection.
  */
-export interface WeatherView {
-  readonly time: number;
-  readonly windSpeed: number;
-  readonly windDirRad: number;
-  readonly dust: number;
-  readonly visibility: number;
-  readonly storm: StormKind;
-  readonly stormIntensity: number;
-  readonly solarTransmission: number;
-  /** Weather radar returns and advanced-forecast capability. */
-  readonly radar: WeatherRadar;
-  /** The most recent lightning strike, for the renderer's flash. */
-  readonly lightning: { x: number; z: number; t: number } | null;
-  /** False while the developer panel has the sky flying by hand. */
-  readonly rollsSuppressed: boolean;
-  forecast(): { kind: StormKind; label: string; arrivesIn: number } | null;
-  current(): StormCell | null;
-  threat(): {
-    kind: StormKindReal;
-    label: string;
-    distKm: number;
-    bearingRad: number;
-    arrivesIn: number;
-    radiusKm: number;
-  } | null;
-  passesIn(): number;
-}
-
-/**
- * The whole read model. `Readonly<…>` guards the *slots* (no `view.rovers = []`);
- * entity fields stay open in-process, and the discipline that they are written
- * only by the sim is enforced structurally: the sim-side mutators they would
- * need are simply not on this type.
- */
-export type SimFields = Readonly<
-  Pick<
-    Simulation,
-    // world + identity
-    | 'version'
-    | 'seed'
-    | 'difficulty'
-    | 'worldOptions'
-    | 'simTime'
-    // entities
-    | 'rovers'
-    | 'buildings'
-    | 'colonist'
-    // economy + life support
-    | 'storage'
-    | 'pools'
-    | 'power'
-    | 'storedKWh'
-    | 'flows'
-    | 'lastFlows'
-    | 'history'
-    | 'gameOver'
-    // environment
-    | 'sun'
-    | 'dustTransmission'
-  >
-> & {
+export type SimFields = ResourceView & {
+  // world + identity
+  readonly version: number;
+  readonly seed: number;
+  readonly difficulty: DifficultyId;
+  readonly worldOptions: WorldOptions;
+  readonly simTime: number;
+  // entities — immutable view models
+  readonly rovers: ReadonlyArray<RoverView>;
+  readonly buildings: ReadonlyArray<BuildingView>;
+  readonly colonist: ColonistView;
+  // power + outcome
+  readonly power: PowerResult;
+  readonly gameOver: { reason: string; sol: number } | null;
+  // environment
+  readonly sun: SunState;
+  readonly dustTransmission: number;
   /** Narrowed subviews: the live objects are readable, their mutators are not. */
   readonly world: WorldView;
   readonly alerts: AlertsView;
@@ -143,22 +108,22 @@ export type SimFields = Readonly<
  * carries, with no side effects — which is what makes them safe to serve from a
  * cache across a worker boundary.
  *
- * The list is *only* what `ui/`, `render/`, `dev/` and `app/` call, and that is
- * load-bearing: every entry is a method `host/mirror.ts` must implement, so an
- * unused query is not merely dead code, it is a toll on the wire.
+ * Declared explicitly (not `Pick<Simulation, …>`) so return types are view
+ * models rather than live entity interfaces. The name list is still the
+ * contract `mirror.ts` must implement — see architecture guards in
+ * `tests/sim/host.test.ts`.
  */
-export type SimQuery = Pick<
-  Simulation,
-  | 'roverById'
-  | 'buildingById'
-  | 'poiById'
-  | 'idleRovers'
-  | 'needsMaintenance'
-  | 'canPlace'
-  | 'storageCapacity'
-  | 'reserveSols'
-  | 'netRatePerSol'
->;
+export interface SimQuery {
+  roverById(id: number): RoverView | undefined;
+  buildingById(id: number): BuildingView | undefined;
+  poiById(id: number): Poi | undefined;
+  idleRovers(): ReadonlyArray<RoverView>;
+  needsMaintenance(buildingId: number): 'repair' | 'clean' | null;
+  canPlace(kind: BuildingKind, x: number, z: number): string | null;
+  storageCapacity(): number;
+  reserveSols(f: FluidId): number;
+  netRatePerSol(f: FluidId): number;
+}
 
 /**
  * The whole read model a host hands to `app/`, `ui/`, `render/` and `dev/`:
@@ -176,6 +141,9 @@ export type SimView = SimFields & SimQuery;
  * panel code, the host hands it exactly these members. Anything else the overlay
  * wants has to become a command or an explicit sim-side backdoor — again, the
  * compiler is the one holding the line.
+ *
+ * Note: this is *not* the presentation surface. Overlays run against the live
+ * Simulation inside the host; SimView is the projected immutable read model.
  */
 export type SimWritable = Pick<
   Simulation,

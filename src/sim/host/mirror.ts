@@ -21,7 +21,7 @@
  */
 
 import { World } from '../World';
-import type { Building, Colonist, FluidFlow, HistorySample, Rover } from '../Simulation';
+import type { FluidFlow, HistorySample } from '../Simulation';
 import type { Poi } from '../pois';
 import type { FluidPools } from '../lifesupport';
 import type { Alert, LogEvent, Severity } from '../alerts';
@@ -33,7 +33,14 @@ import { evaluateSite, maintenanceNeed } from '../rules';
 import { BATTERY_PIN_OVERLAY } from './overlays';
 import type { SimTransport } from './SimHost';
 import type { ViewPayload } from './projection';
-import type { AlertsView, ClockView, SimView, WeatherView, WorldView } from './view';
+import type { ClockView, SimView, WorldView } from './view';
+import type {
+  AlertsView,
+  BuildingView,
+  ColonistView,
+  RoverView,
+  WeatherView,
+} from './viewModels';
 
 /**
  * The seed-derived facts needed to rebuild the terrain locally, as the *runtime*
@@ -67,6 +74,8 @@ export class ColonyMirror implements SimView {
   private readonly log: LogEvent[] = [];
   private unread: LogEvent[] = [];
   private payload: ViewPayload;
+  /** Rebuilt PowerResult; invalidated on apply() so frames can re-read cheaply. */
+  private powerCache: PowerResult | null = null;
 
   /**
    * The sub-views are built **once**, with getters, rather than per read. A frame
@@ -187,6 +196,7 @@ export class ColonyMirror implements SimView {
   /** Adopt the next payload. Called once per view message. */
   apply(payload: ViewPayload): void {
     this.payload = payload;
+    this.powerCache = null;
     if (payload.events.length > 0) {
       this.unread = this.unread.concat(payload.events);
       for (const ev of payload.events) {
@@ -235,13 +245,13 @@ export class ColonyMirror implements SimView {
   get gameOver(): { reason: string; sol: number } | null {
     return this.payload.gameOver;
   }
-  get rovers(): Rover[] {
+  get rovers(): ReadonlyArray<RoverView> {
     return this.payload.rovers;
   }
-  get buildings(): Building[] {
+  get buildings(): ReadonlyArray<BuildingView> {
     return this.payload.buildings;
   }
-  get colonist(): Colonist {
+  get colonist(): ColonistView {
     return this.payload.colonist;
   }
   get storage(): ResourceAmounts {
@@ -251,10 +261,12 @@ export class ColonyMirror implements SimView {
     return this.payload.pools;
   }
   get power(): PowerResult {
+    if (this.powerCache) return this.powerCache;
     const { satisfaction, ...rest } = this.payload.power;
     // Flattened to entries for the wire so a payload stays JSON-printable; the
-    // grid model wants a Map, so it is rebuilt here rather than at every read.
-    return { ...rest, satisfaction: new Map(satisfaction) };
+    // grid model wants a Map — rebuild once per payload, not per frame read.
+    this.powerCache = { ...rest, satisfaction: new Map(satisfaction) };
+    return this.powerCache;
   }
   get storedKWh(): number {
     return this.payload.storedKWh;
@@ -265,7 +277,7 @@ export class ColonyMirror implements SimView {
   get lastFlows(): Record<FluidId, FluidFlow> {
     return this.payload.lastFlows;
   }
-  get history(): HistorySample[] {
+  get history(): ReadonlyArray<HistorySample> {
     return this.payload.history;
   }
   get sun(): SunState {
@@ -290,11 +302,11 @@ export class ColonyMirror implements SimView {
 
   // ----------------------------------------------------------- queries ----
 
-  roverById(id: number): Rover | undefined {
+  roverById(id: number): RoverView | undefined {
     return this.payload.rovers.find((r) => r.id === id);
   }
 
-  buildingById(id: number): Building | undefined {
+  buildingById(id: number): BuildingView | undefined {
     return this.payload.buildings.find((b) => b.id === id);
   }
 
@@ -302,7 +314,7 @@ export class ColonyMirror implements SimView {
     return this.payload.pois.find((p) => p.id === id);
   }
 
-  idleRovers(): Rover[] {
+  idleRovers(): ReadonlyArray<RoverView> {
     return this.payload.rovers.filter(
       (r) =>
         r.phase !== 'disabled' &&

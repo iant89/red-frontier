@@ -3,10 +3,9 @@
  *
  * `app/`, `ui/`, `render/` and `dev/` import from here and from nowhere else in
  * `src/sim/` — the rule `tests/sim/host.test.ts` enforces by grepping the tree
- * for the `Simulation` class outside this directory. The sim's *types* (`Rover`,
- * `Building`, `Colonist`) still come from `sim/Simulation` and `sim/defs`,
- * because a shape is not an authority: knowing what a rover holds is different
- * from being able to move one.
+ * for the `Simulation` class outside this directory. Entity *view models*
+ * (`RoverView`, `BuildingView`, `ColonistView`) live here; live sim entity
+ * shapes stay inside the host / systems layers.
  */
 
 export type { SimHost, SimTransport } from './SimHost';
@@ -22,6 +21,11 @@ export type {
   ClockView,
   WeatherView,
   AlertsView,
+  RoverView,
+  BuildingView,
+  ColonistView,
+  ResourceView,
+  AlertView,
 } from './view';
 export type { SimCommand, SimCommandType, SimAck, RoverRule, DecodeResult } from './protocol';
 export { COMMAND_SHAPES, COMMAND_TYPES, decodeCommand } from './protocol';

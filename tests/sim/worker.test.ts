@@ -18,7 +18,7 @@ import { projectView, type ViewPayload } from '../../src/sim/host/projection';
 import { BATTERY_PIN_OVERLAY, EMPTY_OVERLAYS, runOverlays } from '../../src/sim/host/overlays';
 import { evaluateSite, maintenanceNeed } from '../../src/sim/rules';
 import { planHost, wantsWorker, workerSupported } from '../../src/sim/host/createHost';
-import { applyCommand } from '../../src/sim/host';
+import { applyCommand, LocalSimHost } from '../../src/sim/host';
 import type { HostPort, HostReply, HostRequest } from '../../src/sim/host/messages';
 import type { SimBootParams } from '../../src/sim/host/view';
 import { BUILDINGS, ROVERS } from '../../src/sim/defs';
@@ -558,6 +558,34 @@ test('the mirror is a read model: scribbling on it changes no world', async () =
   tick(host, port, 1);
   assert.ok(host.view.rovers[0].battery > 0, 'and the next payload overwrites the scribble');
   void battery;
+});
+
+test('LocalSimHost and projectView agree on entity presentation fields', () => {
+  const sim = twin(1811);
+  sim.rovers[0].cargo.iron = 33;
+  sim.colonist.health = 77;
+  const host = new LocalSimHost(sim);
+  const payload = projectView(sim, 'worker', {});
+  assert.equal(host.view.rovers[0].cargo.iron, payload.rovers[0].cargo.iron);
+  assert.equal(host.view.colonist.health, payload.colonist.health);
+  assert.deepEqual(
+    host.view.rovers.map((r) => ({ id: r.id, battery: r.battery, phase: r.phase })),
+    payload.rovers.map((r) => ({ id: r.id, battery: r.battery, phase: r.phase })),
+  );
+  assert.deepEqual(
+    host.view.buildings.map((b) => ({ id: b.id, kind: b.kind, health: b.health })),
+    payload.buildings.map((b) => ({ id: b.id, kind: b.kind, health: b.health })),
+  );
+});
+
+test('projected cargo bags are owned copies (immutability pin)', () => {
+  const sim = twin(1812);
+  const before = sim.rovers[0].cargo.iron;
+  const payload = projectView(sim, 'worker', {});
+  (payload.rovers[0].cargo as { iron: number }).iron = 9999;
+  (payload.colonist as { health: number }).health = 1;
+  assert.equal(sim.rovers[0].cargo.iron, before, 'sim cargo untouched');
+  assert.notEqual(sim.colonist.health, 1, 'sim colonist untouched');
 });
 
 test('the mirror answers every query the view promises, without being a Simulation', async () => {

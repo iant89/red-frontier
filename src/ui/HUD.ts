@@ -20,8 +20,8 @@ import {
   FLUIDS,
   ROVERS,
 } from '../sim/defs';
-import type { Building, Rover, Colonist, RoverTask } from '../sim/Simulation';
-import type { SimView, AlertsView } from '../sim/host';
+import type { BuildingView, RoverView, ColonistView, AlertView, AlertsView, SimView } from '../sim/host';
+import type { RoverTask } from '../sim/Simulation';
 import { roverStatusText, colonistStatusText } from '../sim/Simulation';
 import { stormLabel } from '../sim/weather';
 import { shortSha } from './BuildStatus';
@@ -34,7 +34,7 @@ import {
   devLevelMul,
 } from '../sim/config';
 import type { PowerTier } from '../sim/config';
-import type { Alert, Severity } from '../sim/alerts';
+import type { Severity } from '../sim/alerts';
 import { isPickedClean, POI_KINDS, salvageTotalKg } from '../sim/pois';
 import type { Poi } from '../sim/pois';
 import { MapRenderer, WorldMapOverlay, fitTransform, stormOverlayKey, type MapTransform } from './WorldMap';
@@ -190,7 +190,7 @@ export class HUD {
 
   /** Alert keys the player has snoozed (cleared when the condition resolves). */
   private dismissed = new Set<string>();
-  private lastAlerts: Alert[] = [];
+  private lastAlerts: ReadonlyArray<AlertView> = [];
 
   /** Opt-in: pause the sim the moment a *new* critical alert appears. */
   autopauseOnCrit = false;
@@ -1753,7 +1753,7 @@ export class HUD {
   }
 
   // ------------------------------------------------------------ alerts ----
-  updateAlerts(alerts: Alert[], bus?: AlertsView): void {
+  updateAlerts(alerts: ReadonlyArray<AlertView>, bus?: AlertsView): void {
     this.lastAlerts = alerts;
     if (bus) this.alertBus = bus;
     this.maybeAutopause(alerts);
@@ -1827,7 +1827,7 @@ export class HUD {
    * game before the first frame); afterwards any arrival pauses, while a
    * repeat of an already-seen key never re-pauses after the player resumes.
    */
-  private maybeAutopause(alerts: Alert[]): void {
+  private maybeAutopause(alerts: ReadonlyArray<AlertView>): void {
     const live = new Set(alerts.filter((a) => a.severity === 'crit').map((a) => a.key));
     if (!this.autopauseArmed) {
       this.autopauseArmed = true;
@@ -2064,7 +2064,7 @@ export class HUD {
    * the game loop passes `true` because it calls this method every tick and a
    * collapsed panel must not be reopened by a routine value refresh.
    */
-  showRover(r: Rover, sim: SimView, preserveCollapse = false): void {
+  showRover(r: RoverView, sim: SimView, preserveCollapse = false): void {
     const def = ROVERS[r.kind];
     if (!preserveCollapse) this.setInspectorCollapsed(false);
     const mass = ALL_RESOURCES.reduce((s, k) => s + r.cargo[k], 0);
@@ -2218,7 +2218,7 @@ export class HUD {
   }
 
   /** Render a building selection; see showRover for the refresh distinction. */
-  showBuilding(b: Building, sim: SimView, preserveCollapse = false): void {
+  showBuilding(b: BuildingView, sim: SimView, preserveCollapse = false): void {
     const def = BUILDINGS[b.kind];
     if (!preserveCollapse) this.setInspectorCollapsed(false);
     const key = `bld:${b.id}`;
@@ -2428,7 +2428,7 @@ export class HUD {
   }
 
   /** Render the colonist selection; see showRover for the refresh distinction. */
-  showColonist(c: Colonist, sim: SimView, preserveCollapse = false): void {
+  showColonist(c: ColonistView, sim: SimView, preserveCollapse = false): void {
     const key = `col:${c.id}`;
     if (!preserveCollapse) this.setInspectorCollapsed(false);
     const insp = this.el('inspector');

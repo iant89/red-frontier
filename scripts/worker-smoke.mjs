@@ -311,13 +311,12 @@ try {
     hostWarnings.length === 0,
     hostWarnings.slice(0, 2).join(' | ') || 'clean',
   );
+  // Phase 20: both hosts expose a projected SimView (ColonyMirror). The live
+  // Simulation never crosses the presentation boundary — same shape for
+  // in-process and worker.
   check(
-    wantsWorker
-      ? 'the view is a read model, not the simulation'
-      : 'the in-process view is the live world, by design',
-    wantsWorker
-      ? !first.viewHasStep && !first.viewHasRestore && !first.viewHasSnapshot && first.viewHasCanPlace
-      : first.viewHasStep && first.viewHasSnapshot,
+    'the view is a read model, not the simulation',
+    !first.viewHasStep && !first.viewHasRestore && !first.viewHasSnapshot && first.viewHasCanPlace,
     `step=${first.viewHasStep} restore=${first.viewHasRestore} snapshot=${first.viewHasSnapshot} canPlace=${first.viewHasCanPlace}`,
   );
   check('the mirrored colony has entities to draw', first.rovers > 0 && first.sol >= 0, `rovers=${first.rovers} sol=${first.sol}`);

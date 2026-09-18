@@ -15,7 +15,7 @@ import type { SimView, WeatherView } from '../sim/host';
 import { BUILDINGS, RESOURCES, ALL_RESOURCES } from '../sim/defs';
 import type { BuildingKind } from '../sim/defs';
 import { POI_KINDS } from '../sim/pois';
-import type { Rover } from '../sim/Simulation';
+import type { RoverView } from '../sim/host';
 import { stormLabel } from '../sim/weather';
 import type { WeatherRadarCell } from '../sim/weather';
 
