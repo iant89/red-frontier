@@ -99,11 +99,6 @@ export class DomainEventLog {
     return Object.freeze(out);
   }
 
-  /** Alias for {@link drain}. */
-  take(): ReadonlyArray<DomainEvent> {
-    return this.drain();
-  }
-
   /** Non-consuming peek (tests / debugging). */
   snapshot(): ReadonlyArray<DomainEvent> {
     return Object.freeze(this.pending.slice());

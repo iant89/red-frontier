@@ -36,7 +36,7 @@ function typesOf(events: ReadonlyArray<DomainEvent>): string[] {
 
 group('DomainEventLog');
 
-test('push / drain / take clears and returns ReadonlyArray', () => {
+test('push / drain clears and returns ReadonlyArray', () => {
   const log = new DomainEventLog();
   log.push({ type: 'storm/ended' });
   log.push({ type: 'game/over', reason: 'test', sol: 1 });
@@ -50,7 +50,7 @@ test('push / drain / take clears and returns ReadonlyArray', () => {
   assert.equal(log.drain().length, 0);
 
   log.push({ type: 'storm/started', kind: 'dust' });
-  const taken = log.take();
+  const taken = log.drain();
   assert.deepEqual(typesOf(taken), ['storm/started']);
   assert.equal(log.length, 0);
 });
