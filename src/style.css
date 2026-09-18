@@ -1611,34 +1611,244 @@ body {
   border: 1px solid var(--ui-border);
 }
 
-/* In-play update notice (TDD §23): a newer build is live. Top-centre, above
-   the alerts, warm border — important but not an emergency. */
-.update-banner {
+/* ------------------------------------------------- save overlays --------- */
+/* A save in flight (or a save that failed) frosts the live colony and puts
+   a card dead-centre: the blur is the signal that the game is holding its
+   breath for storage, not that the world stopped. Above the pause menu
+   (z 100) because it must be the thing the player sees while it runs. */
+.save-overlay {
   position: fixed;
-  top: 46px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(560px, calc(100vw - 24px));
-  z-index: 40;
+  inset: 0;
+  z-index: 120;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(8, 6, 4, 0.42);
+  -webkit-backdrop-filter: blur(7px) saturate(0.92) brightness(0.72);
+  backdrop-filter: blur(7px) saturate(0.92) brightness(0.72);
+  animation: save-fade-in 0.18s ease-out;
+}
+
+.save-overlay.leaving {
+  animation: save-fade-out 0.4s ease-in forwards;
+}
+
+@keyframes save-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes save-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+.sp-card {
+  width: min(420px, 100%);
   background: var(--ui-bg);
-  border: 1px solid var(--warn);
-  border-radius: 8px;
-  padding: 10px 14px;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+  border: 1px solid var(--ui-border-lit);
+  border-radius: 12px;
+  box-shadow:
+    0 24px 70px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(224, 123, 58, 0.08),
+    0 0 34px rgba(224, 123, 58, 0.1);
+  padding: 22px 24px 20px;
+  animation: save-rise 0.24s ease-out;
+  text-align: left;
 }
-.update-banner .ub-title {
-  font-size: 12px;
+
+@keyframes save-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+.sp-kicker {
+  font-size: 10.5px;
+  letter-spacing: 2.4px;
+  text-transform: uppercase;
+  color: var(--accent);
   font-weight: 700;
-  letter-spacing: 0.08em;
-  color: var(--warn);
+  margin-bottom: 4px;
 }
-.update-banner .ub-text {
-  margin-top: 4px;
-  font-size: 12px;
-  line-height: 1.45;
+
+.sp-kicker-err {
+  color: var(--crit);
 }
-.update-banner #update-btn {
-  margin-top: 8px;
+
+.sp-title {
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 1.6px;
+  color: var(--ui-text);
+  margin-bottom: 14px;
+}
+
+.sp-title-err {
+  color: #f0a08c;
+}
+
+.sp-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-bottom: 14px;
+}
+
+.sp-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--ui-text-faint);
+  transition: color 0.2s;
+}
+
+.sp-step .sp-ic {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ui-border);
+  border-radius: 50%;
+  font-size: 10.5px;
+  color: var(--ui-text-faint);
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.sp-step.active {
+  color: var(--ui-text);
+}
+
+.sp-step.active .sp-ic {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 10px rgba(224, 123, 58, 0.35);
+}
+
+.sp-step.done {
+  color: var(--ui-text-dim);
+}
+
+.sp-step.done .sp-ic {
+  border-color: var(--ok);
+  background: rgba(127, 180, 106, 0.14);
+  color: var(--ok);
+}
+
+.sp-track {
+  height: 8px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--ui-border);
+  overflow: hidden;
+}
+
+.sp-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 5px;
+  background: linear-gradient(90deg, #c85f22, #e2c14f);
+  box-shadow: 0 0 12px rgba(224, 123, 58, 0.55);
+  transition: width 0.3s ease-out;
+}
+
+.sp-meta {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--ui-text-faint);
+  line-height: 1.5;
+}
+
+.sp-card-err .sp-track {
+  display: none;
+}
+
+.sp-reason {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ui-text-dim);
+  margin-bottom: 16px;
+}
+
+.se-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.se-actions .btn {
+  width: 100%;
+  justify-content: flex-start;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.se-actions .btn.primary {
+  background: linear-gradient(180deg, #e98a4a, #cf6425);
+  border-color: #e98a4a;
+  color: #1c0f06;
+}
+
+/* In-play update notice (TDD §23): a newer build is live. Same frost family
+   as the save overlays (z 120) with a card dead-centre — it tells the
+   player what is new and that saving + reloading is their choice. The page
+   never reloads behind their back, so this must be readable, not a toast. */
+.update-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(8, 6, 4, 0.42);
+  -webkit-backdrop-filter: blur(7px) saturate(0.92) brightness(0.72);
+  backdrop-filter: blur(7px) saturate(0.92) brightness(0.72);
+  animation: save-fade-in 0.18s ease-out;
+}
+.update-overlay .ub-card {
+  width: min(470px, 100%);
+  border-color: var(--warn);
+}
+.update-overlay .ub-builds {
+  margin: -8px 0 12px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ui-text-dim);
+}
+.update-overlay .ub-what {
+  margin-bottom: 12px;
+}
+.update-overlay .ub-what-title {
+  font-size: 10.5px;
+  letter-spacing: 2.4px;
+  text-transform: uppercase;
+  color: var(--accent);
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.update-overlay #update-notes {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.update-overlay #update-notes li + li {
+  margin-top: 3px;
+}
+.update-overlay .ub-text {
+  margin-bottom: 14px;
+  font-size: 12.5px;
+  line-height: 1.5;
 }
 
 /* ------------------------------------------------------------ mobile --- */
@@ -2319,9 +2529,10 @@ body {
     bottom: 150px;
   }
 
-  .update-banner {
-    top: auto;
-    bottom: 120px;
+  /* The update card keeps the centred overlay on small screens; only the
+     card gets a little less air. */
+  .update-overlay .ub-card {
+    width: min(400px, 100%);
   }
 
   /* The weather cell gets room to report the storm's position. */

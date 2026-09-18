@@ -12,12 +12,22 @@
  * rate-limit per IP, which a per-player 5-minute poll would burn through.
  *
  * The check is one-shot: when a newer build is found it stops and hands
- * over to the Game, which freezes the colony, saves it, and reloads.
+ * over to the Game, which freezes the colony and raises the update card —
+ * the player then saves and reloads on their own (TDD §23); the page
+ * never saves or reloads behind their back.
  * Transient failures (network, dev server with no manifest) are silent —
  * the next poll simply retries.
  */
 
 import { assessBuild, latestDeployedCommit } from '../ui/BuildStatus';
+
+/** What the poller found: a newer deployed build and what is new in it. */
+export interface UpdateFound {
+  /** The newer commit, full 40-hex sha. */
+  commit: string;
+  /** The newer build's changelog (may be empty for older deploys). */
+  notes: string[];
+}
 
 /** ~5 minutes. The manifest is a few hundred bytes; this is negligible. */
 export const UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
@@ -41,8 +51,8 @@ export function updateCheckIntervalOverride(): number | undefined {
 export interface UpdateCheckOptions {
   /** This page's build identity — a validated full commit, or null. */
   current: string | null;
-  /** Fires exactly once with the newer commit; the poller then stops. */
-  onFound: (latest: string) => void;
+  /** Fires exactly once with the newer build (commit + changelog). */
+  onFound: (found: UpdateFound) => void;
   intervalMs?: number;
   fetcher?: typeof fetch;
   /** Test seam; defaults to the page's own manifest. */
@@ -119,9 +129,9 @@ export class UpdateCheck {
   private async check(): Promise<void> {
     if (!this.running || this.inFlight || !this.isVisible()) return;
     this.inFlight = true;
-    let latest: string;
+    let deployed;
     try {
-      latest = await latestDeployedCommit(
+      deployed = await latestDeployedCommit(
         this.opts.fetcher,
         this.opts.manifestUrl ? this.opts.manifestUrl() : undefined,
       );
@@ -134,14 +144,13 @@ export class UpdateCheck {
     }
     this.inFlight = false;
     if (!this.running) return; // stopped while the manifest was in flight
-    const result = assessBuild(this.opts.current, latest);
+    const result = assessBuild(this.opts.current, deployed.commit);
     if (result.state === 'old') {
-      const newer = result.latest as string;
       this.stop();
       try {
-        this.opts.onFound(newer);
+        this.opts.onFound({ commit: deployed.commit, notes: deployed.notes });
       } catch (e) {
-        // The hand-off (banner, save, reload) is the Game's; its failure
+        // The hand-off (card, save, reload) is the Game's; its failure
         // should not escape as an unhandled rejection from a poll.
         console.error('update hand-off failed', e);
       }

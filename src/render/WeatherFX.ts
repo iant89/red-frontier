@@ -112,12 +112,32 @@ export class WeatherFX {
    * doesn't read as a gust front arriving.
    */
   private windRamp = 0;
+  /** Weather particle master switch (graphics settings). */
+  private fxOn = true;
 
   constructor(scene: THREE.Scene, opts: WeatherFxOptions = {}) {
     this.rand = opts.rand ?? Math.random;
     this.pool = new ParticlePool(opts.maxParticles ?? 9000, this.rand);
     this.points = new ParticlePoints(this.pool.capacity);
     scene.add(this.points.points);
+  }
+
+  /**
+   * Graphical setting: master switch for every weather particle (wind, storm
+   * grit, devils, rover trails). Hidden while off rather than drained — the
+   * pool stays warm so switching back needs no re-priming — and the update is
+   * skipped entirely, so "off" costs one boolean, not 9000 dead particles.
+   */
+  setVisible(on: boolean): void {
+    if (this.fxOn === on) return;
+    this.fxOn = on;
+    this.points.points.visible = on;
+    if (on) {
+      // Derivatives (rover speed, wind ramp) are read from the last *visible*
+      // frame; a stale baseline would turn re-enabling into a one-frame gust.
+      this.prev.clear();
+      this.prevWind = null;
+    }
   }
 
   /** Live particles in the pool. */
@@ -164,6 +184,8 @@ export class WeatherFX {
   }
 
   sync(input: WeatherFxInput, camera: THREE.PerspectiveCamera, dt: number): void {
+    // Master switch off: no particles, no bookkeeping — nothing to derive.
+    if (!this.fxOn) return;
     const dtc = Math.min(0.5, Math.max(0, dt));
     // Paused (or a zero-length frame): frozen, exactly like the old field.
     if (dtc <= 0) return;

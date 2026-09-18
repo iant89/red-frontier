@@ -11,6 +11,7 @@
  */
 
 import type { Rover } from '../sim/Simulation';
+import { colonistStatusText } from '../sim/Simulation';
 import type { SimCommand, SimHost, SimView } from '../sim/host';
 import { createHost, planHost, restoreHost } from '../sim/host';
 import { GameRenderer } from '../render/Renderer';
@@ -19,21 +20,25 @@ import { CameraRig } from './CameraRig';
 import { singlePointerGesture, twoPointerGesture } from './gestures';
 import { HUD } from '../ui/HUD';
 import type { BuildingKind, ResourceId, RoverKind } from '../sim/defs';
-import { BUILDINGS, BUILDING_ORDER, ROVERS } from '../sim/defs';
+import { BUILDINGS, BUILDING_ORDER, ROVERS, ALL_RESOURCES, ALL_FLUIDS, RESOURCES, FLUIDS } from '../sim/defs';
 import { DevMode } from '../dev/DevMode';
 import type { SpawnSpec } from '../dev/DevMode';
 import { DevPanel } from '../dev/DevPanel';
-import { SPEEDS, AUTOSAVE_INTERVAL_S, SAVE_VERSION } from '../sim/config';
+import { SPEEDS, AUTOSAVE_INTERVAL_S, SAVE_VERSION, SOL_SECONDS, SUIT_O2_CAPACITY } from '../sim/config';
 import { SaveStore } from '../ui/SaveStore';
+import type { NewSaveInput } from '../ui/SaveStore';
 import { LoadingScreen, nextFrame, delay } from '../ui/LoadingScreen';
 import { MainMenu } from '../ui/MainMenu';
 import { NewGameWizard } from '../ui/NewGameWizard';
 import { LoadGameScreen } from '../ui/LoadGameScreen';
-import { WORLD_SIZES, DEFAULT_WORLD_OPTIONS, hashSeed } from '../sim/difficulty';
-import type { NewGameConfig } from '../sim/difficulty';
+import { PauseMenu, type ColonyStats, type PauseMenuSettings } from '../ui/PauseMenu';
+import { GameSettings, renderResolutionCap } from '../ui/Settings';
+import { WORLD_SIZES, DIFFICULTIES, DEFAULT_WORLD_OPTIONS, hashSeed } from '../sim/difficulty';
+import type { NewGameConfig, WorldSizeId } from '../sim/difficulty';
+import { stormLabel } from '../sim/weather';
 import { AudioSystem } from '../audio/AudioSystem';
-import { BUILD_COMMIT, shortSha } from '../ui/BuildStatus';
-import { UpdateCheck, updateCheckIntervalOverride } from './UpdateCheck';
+import { BUILD_COMMIT } from '../ui/BuildStatus';
+import { UpdateCheck, updateCheckIntervalOverride, type UpdateFound } from './UpdateCheck';
 import { getProfiler, resetProfiler, setProfilerEnabled } from '../sim/debug/Profiler';
 
 void SAVE_VERSION;
@@ -68,6 +73,18 @@ type Selection =
   | { type: 'poi'; id: number }
   | null;
 
+/**
+ * Reverse-look up a world size from the world's half-extent, for the
+ * expedition tab and the "save as new file" identity when the slot's meta is
+ * missing. Falls back to the classic campaign size.
+ */
+function worldSizeFromHalf(half: number): WorldSizeId {
+  for (const [id, def] of Object.entries(WORLD_SIZES)) {
+    if (def.worldHalf === half) return id as WorldSizeId;
+  }
+  return 'medium';
+}
+
 export class Game {
   /**
    * The colony's host — the only handle this class keeps to the simulation.
@@ -87,7 +104,26 @@ export class Game {
 
   private store!: SaveStore;
   private saveId: string | null = null;
+  /** Persisted player settings (pause menu → settings). */
+  private settings: GameSettings;
+  /** The in-game pause menu, while open. */
+  private pauseMenu: PauseMenu | null = null;
+  /** The speed to restore when the pause menu closes. */
+  private prePauseSpeed = 1;
   private menu: { unmount(): void } | null = null;
+  /**
+   * What the in-flight save is for. The save-failed prompt phrases its
+   * options by context: a *menu* hand-off can offer "return without saving",
+   * an *update* save defers to the update banner, *auto* saves only prompt
+   * while the player is actually looking.
+   */
+  private saveContext: 'auto' | 'manual' | 'menu' | 'update' = 'auto';
+  /** Whether a save is currently in flight (snapshot request outstanding). */
+  private saveInFlight = false;
+  /** The most recent save's outcome, for the expedition tab. */
+  private lastSave: { at: number | null; ok: boolean | null } = { at: null, ok: null };
+  /** Seconds between autosaves, 0 = off; read from settings at launch. */
+  private autosaveSec: number = AUTOSAVE_INTERVAL_S;
   private selected: Selection = null;
   private pendingBuild: BuildingKind | null = null;
   private mouse = { x: -1, y: -1, in: false };
@@ -100,6 +136,8 @@ export class Game {
   private lastInspector = 0;
   /** In-play update check while a colony runs (TDD §23); null in dev mode. */
   private updateCheck: UpdateCheck | null = null;
+  /** The speed to restore when the player dismisses the update card. */
+  private updateNoticeSpeed = 1;
   private started = false;
   private shiftHeld = false;
   private longPressTimer: number | null = null;
@@ -122,15 +160,27 @@ export class Game {
     // The graph starts lazily on the first user gesture (browser autoplay
     // policy), but its first scene is already the main-menu ambience.
     this.audio.setScene('menu');
+    this.settings = new GameSettings();
     this.hud = new HUD({
       onSpeed: (idx) => this.audio.setPaused(idx === 0),
       onPickBuild: (k) => this.setPendingBuild(k),
       onAction: (a, arg) => this.handleAction(a, arg),
       onStart: (seedText, near) => this.quickStart(seedText, near),
       onOverlay: (m) => this.renderer?.setOverlay(m),
-      onMenu: () => this.returnToMenu(),
+      // The ☰ button opens the pause menu; leaving is one of *its* options
+      // (which saves first, the way the old button did — but without the
+      // race that disposed the host before the save could finish).
+      onMenu: () => this.openPauseMenu(),
       onDev: () => this.toggleDevPanel(),
-    });
+    onSaveRetry: () => this.retrySave(),
+    onSaveAsNew: () => this.saveAsNew(),
+    onSaveDismiss: () => this.hud.hideSaveError(),
+    onSaveAbandon: () => this.abandonToMenu(),
+    // The update card's actions — all of them the player's, none automatic.
+    onUpdateSave: () => this.updateNoticeSave(),
+    onUpdateReload: () => this.updateNoticeReload(),
+    onUpdateLater: () => this.updateNoticeLater(),
+  });
     this.dev = new DevMode(
       (sev, text) => this.hud.addLog(sev, text),
       (command, ack) => {
@@ -162,8 +212,16 @@ export class Game {
     window.addEventListener('resize', () => this.resize());
 
     // Persist on tab hide — TDD §23 asks for saves on visibility transitions.
+    // The pause menu's "save when the tab is hidden" setting can switch this
+    // off for players who don't want a background write.
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'hidden' && this.started) this.save(true);
+      if (
+        document.visibilityState === 'hidden' &&
+        this.started &&
+        this.settings.saveOnTabHide() &&
+        !this.saveInFlight
+      )
+        this.save(true);
     });
 
     this.showMainMenu();
@@ -378,6 +436,12 @@ export class Game {
     this.hud.setDevActive(false);
     this.hud.setBuild(null);
     this.lastAuto = performance.now();
+    // A fresh colony: the save-failed prompt and the expedition tab both read
+    // these, so reset them rather than inherit the previous mission's state.
+    this.lastSave = { at: null, ok: null };
+    this.saveContext = 'auto';
+    this.saveInFlight = false;
+    this.autosaveSec = this.settings.autosaveIntervalSec();
     // Profiler is development-only diagnostics (Milestone 1): reset on every
     // launch, disabled until dev mode is turned on. Tests enable it via harness.
     resetProfiler();
@@ -386,6 +450,8 @@ export class Game {
     this.renderer.setOverlay(this.hud.overlay as OverlayMode);
     this.rig = new CameraRig(this.renderer.camera, host.view.world.half);
     this.resize();
+    // Apply the persisted graphical settings to the brand-new renderer.
+    this.applyGraphics();
     // The mode's per-step overlay installs on the host it edits, which is why
     // the frame loop no longer mentions developer mode at all.
     this.dev.attach(host);
@@ -606,7 +672,29 @@ export class Game {
 
     if ((e.ctrlKey || e.metaKey) && key === 's') {
       e.preventDefault();
-      this.save();
+      this.manualSave();
+      return;
+    }
+    // The update card owns the keyboard while it is open: Esc means "later"
+    // (keep playing this build); a stray key must not leak into a frozen
+    // colony. While the card's own save is in flight Esc is ignored —
+    // dismissing the card mid-save would make the save land on a card the
+    // player can no longer see.
+    if (this.hud.isUpdateNoticeOpen()) {
+      if (e.key === 'Escape' && !this.saveInFlight) {
+        this.updateNoticeLater();
+        this.audio.command('rover/stop');
+      }
+      return;
+    }
+    // The pause menu owns the keyboard while it is open: Esc resumes, and
+    // everything else is ignored so a stray key never leaks into a frozen
+    // colony (or the world map underneath the frost).
+    if (this.pauseMenu) {
+      if (e.key === 'Escape') {
+        this.closePauseMenu();
+        this.audio.command('rover/stop');
+      }
       return;
     }
     if (e.code === 'Backquote') {
@@ -1155,14 +1243,24 @@ export class Game {
   }
 
   /**
-   * Persist the colony. `quiet` suppresses the flash/sound (autosaves,
-   * menu hand-off); `onDone` reports the outcome to callers that must act
-   * on it — the update-check reload is the one that does.
+   * Persist the colony. `quiet` suppresses the progress dialog, flash and
+   * sound (autosaves, the tab-hide save); `onDone` reports the outcome to
+   * callers that must act on it — the return-to-menu hand-off is the one that
+   * does (and must: it is not allowed to dispose the host until this settles).
+   *
+   * A user-initiated save gets the full-screen progress dialog; a failed save
+   * turns it into the save-failed prompt with recovery options, rather than a
+   * toast the player reads half a second too late.
    */
   private save(quiet = false, onDone?: (ok: boolean, stamp: string) => void): void {
     const host = this.host;
     const id = this.saveId;
     if (!host || !id) {
+      // No slot to write into. A user-initiated save is still recoverable:
+      // the prompt's "save as new file" creates the missing slot.
+      if (!quiet) {
+        this.hud.showSaveError('read', this.saveContext === 'menu');
+      }
       onDone?.(false, '');
       return;
     }
@@ -1171,83 +1269,436 @@ export class Game {
     // never interleave two colonies if the mission ends mid-write.
     const sol = host.view.clock.sol + 1;
     const stamp = host.view.clock.format();
+    if (!quiet) this.hud.saveProgressStart(this.saveContext === 'menu' ? 'Returning to main menu' : 'Saving colony');
     // TDD §20 budgets a save at 1–2 s of user-visible time; asking the host for
     // the snapshot instead of building it here is how that stays off the frame
     // loop once the sim runs on its own thread.
-    void host.requestSnapshot().then(
-      (snapshot) => {
-        try {
-          this.store.update(id, snapshot, sol);
-          if (!quiet) {
-            this.hud.flashSave(`Saved · ${stamp}`);
-            this.audio.saved();
+    this.saveInFlight = true;
+    void host
+      .requestSnapshot()
+      .then(
+        (snapshot) => {
+          try {
+            if (!quiet) this.hud.saveProgressStage(2);
+            this.store.update(id, snapshot, sol);
+            this.lastSave = { at: Date.now(), ok: true };
+            if (!quiet) {
+              this.hud.saveProgressEnd(true);
+              this.hud.flashSave(`Saved · ${stamp}`);
+              this.audio.saved();
+            }
+            onDone?.(true, stamp);
+          } catch (e) {
+            // Quota is the realistic failure here; the snapshot was good, the
+            // disk said no.
+            console.error(e);
+            this.onSaveFailure('storage', quiet, onDone);
           }
-          onDone?.(true, stamp);
-        } catch (e) {
-          // Quota is the realistic failure here; say so rather than failing silently.
-          this.hud.flashSave('Save failed — browser storage full?');
-          this.audio.reject();
+        },
+        (e) => {
           console.error(e);
-          onDone?.(false, '');
-        }
-      },
-      (e) => {
-        this.hud.flashSave('Save failed — the colony could not be read');
-        this.audio.reject();
-        console.error(e);
-        onDone?.(false, '');
-      },
+          this.onSaveFailure('read', quiet, onDone);
+        },
+      )
+      .finally(() => {
+        this.saveInFlight = false;
+      });
+  }
+
+  /**
+   * One place that decides how a failed save is surfaced: the prompt, when
+   * the player can see it and can act; a logged line plus a toast, when they
+   * cannot (a background autosave in a hidden tab). The caller always gets
+   * `onDone(false)` either way.
+   */
+  private onSaveFailure(
+    kind: 'read' | 'storage',
+    quiet: boolean,
+    onDone: ((ok: boolean, stamp: string) => void) | undefined,
+  ): void {
+    this.lastSave = { at: Date.now(), ok: false };
+    if (!quiet) this.hud.saveProgressEnd(false);
+    const visible = document.visibilityState !== 'hidden';
+    if (this.saveContext === 'update') {
+      // The update card owns this failure: it is on screen, the player is
+      // reading it, and it already offers the recovery (retry / keep playing).
+      // A save-failed prompt would sit on top of the card and compete with it.
+      this.hud.updateNoticeSaveFailed(kind);
+    } else if (!quiet || visible) {
+      this.hud.showSaveError(kind, this.saveContext === 'menu');
+    } else {
+      this.hud.flashSave('Save failed — the colony could not be saved');
+    }
+    this.hud.addLog(
+      'warn',
+      `Save failed${kind === 'storage' ? ' — browser storage full' : ' — the colony could not be read'}. ` +
+        `Your last successful save is unchanged.`,
     );
+    this.audio.reject();
+    onDone?.(false, '');
+  }
+
+  /** A manual save from the pause menu (or Ctrl+S): full progress dialog. */
+  private manualSave(): void {
+    if (!this.host || !this.started) return;
+    this.saveContext = 'manual';
+    this.save(false);
+  }
+
+  /** The failed-save prompt's "retry": re-run the save in its own context. */
+  private retrySave(): void {
+    if (this.saveContext === 'menu') {
+      this.hud.hideSaveError();
+      this.returnToMenu();
+    } else {
+      this.hud.hideSaveError();
+      this.saveContext = 'manual';
+      this.save(false);
+    }
+  }
+
+  /**
+   * The failed-save prompt's "save as new file": take a fresh snapshot and
+   * write it to a brand-new slot, adopting the current colony's identity.
+   * Useful when the existing slot is corrupt or the quota write keeps
+   * failing into the same key.
+   */
+  private saveAsNew(): void {
+    const host = this.host;
+    if (!host || !this.started) {
+      this.hud.hideSaveError();
+      return;
+    }
+    const meta = this.saveId ? this.store.get(this.saveId) : null;
+    const sim = this.sim;
+    const input: NewSaveInput = {
+      name: meta?.name ?? 'Recovered Colony',
+      difficulty: sim?.difficulty ?? meta?.difficulty ?? 'pioneer',
+      worldSize:
+        meta?.worldSize ??
+        (sim ? worldSizeFromHalf(sim.world.half) : 'medium'),
+      region: meta?.region ?? sim?.world.region ?? null,
+      seedText: meta?.seedText ?? '',
+    };
+    const sol = host.view.clock.sol + 1;
+    this.hud.hideSaveError();
+    this.hud.saveProgressStart('Saving to a new file');
+    this.saveInFlight = true;
+    void host
+      .requestSnapshot()
+      .then(
+        (snapshot) => {
+          this.hud.saveProgressStage(2);
+          const newId = this.store.create(input, snapshot, sol);
+          this.saveId = newId;
+          this.lastSave = { at: Date.now(), ok: true };
+          this.hud.saveProgressEnd(true);
+          this.hud.flashSave('Saved to a new file');
+          this.audio.saved();
+          // If the failed save was the return-to-menu hand-off, the player's
+          // intent was to leave — the new file is written, so finish the job.
+          if (this.saveContext === 'menu') {
+            this.saveContext = 'auto';
+            this.leaveToMenu();
+          } else {
+            this.saveContext = 'manual';
+          }
+        },
+        (e) => {
+          console.error(e);
+          this.hud.saveProgressEnd(false);
+          this.hud.showSaveError('read', this.saveContext === 'menu');
+          this.audio.reject();
+        },
+      )
+      .finally(() => {
+        this.saveInFlight = false;
+      });
+  }
+
+  /**
+   * The failed-save prompt's "return without saving" (menu context only):
+   * the player explicitly chose to leave; the colony goes back as the last
+   * successful save left it.
+   */
+  private abandonToMenu(): void {
+    this.hud.hideSaveError();
+    this.hud.flashSave('Returned to menu — progress since the last save was not written');
+    this.saveContext = 'auto';
+    this.leaveToMenu();
   }
 
   /**
    * A newer build is live (TDD §23). The check has already stopped itself —
-   * one notice per session, never a nag. Freeze the colony so nothing moves
-   * while the save and the reload happen, tell the player what is going on,
-   * persist, and let the reload land them on the new build.
+   * one notice per session, never a nag. Freeze the colony so the player can
+   * read in peace, and raise the update card: it tells them what is new and
+   * that continuing means they save and they reload. Nothing saves or reloads
+   * by itself — both are the player's clicks, made from the card.
    */
-  private onNewBuild(latest: string): void {
+  private onNewBuild(found: UpdateFound): void {
+    this.updateNoticeSpeed = this.hud.speedIdx;
     this.hud.setSpeed(0);
     this.audio.setPaused(true);
-    this.hud.showUpdateNotice(BUILD_COMMIT, latest);
-    this.save(true, (ok, stamp) => {
-      if (ok) {
-        this.audio.saved();
-        this.hud.updateNoticeText(
-          `Colony saved · ${stamp}. Reloading to build ${shortSha(latest)}…`,
-        );
-        // Stop the world before the page goes (see returnToMenu): a host with
-        // a timer inside it must not tick through the reload.
-        this.dev.detach();
-        this.host?.dispose();
-        window.setTimeout(() => window.location.reload(), 3000);
-      } else {
-        this.audio.reject();
-        this.hud.updateNoticeText(
-          `The colony could not be saved — your last autosave is at most ${AUTOSAVE_INTERVAL_S} s old. ` +
-            `Reload to the new build, or keep playing this one.`,
-        );
-        this.hud.updateNoticeAction('Reload anyway', () => window.location.reload());
-      }
+    this.hud.showUpdateNotice({ current: BUILD_COMMIT, latest: found.commit, notes: found.notes });
+    // The card carries this save's progress and its failure fallback, so the
+    // save-failed prompt must not pile on top of it (see onSaveFailure).
+    this.saveContext = 'update';
+  }
+
+  /** The update card's "Save colony": the normal save, reported back to the card. */
+  private updateNoticeSave(): void {
+    if (!this.hud.isUpdateNoticeOpen() || this.saveInFlight) return;
+    this.saveContext = 'update';
+    this.hud.updateNoticeSaving();
+    this.save(false, (ok, stamp) => {
+      // ok === true: offer the reload. ok === false: onSaveFailure has already
+      // put the failure and the retry on the card (update context).
+      if (ok) this.hud.updateNoticeSaved(stamp);
     });
   }
 
-  /** Persist the colony and hand control back to the main menu. */
+  /**
+   * The update card's "Reload now" — offered only after a successful save.
+   * This is the player's own reload; the page never does it on a timer.
+   */
+  private updateNoticeReload(): void {
+    if (!this.hud.isUpdateNoticeOpen()) return;
+    this.hud.hideUpdateNotice();
+    this.saveContext = 'auto';
+    this.leaveToMenu(0);
+  }
+
+  /** The update card's "Later" (or Esc): keep playing this build; the check is over. */
+  private updateNoticeLater(): void {
+    if (!this.hud.isUpdateNoticeOpen()) return;
+    this.hud.hideUpdateNotice();
+    this.hud.setSpeed(this.updateNoticeSpeed);
+    this.audio.setPaused(this.hud.speedIdx === 0);
+    this.saveContext = 'auto';
+  }
+
+  /**
+   * Persist the colony and hand control back to the main menu.
+   *
+   * The hand-off is ordered, because the ordering is the whole bug this used
+   * to have: the old code fired the save and disposed the host on the very
+   * next line, so with the (default) worker transport the pending snapshot
+   * request was rejected as "the colony has shut down" — which is exactly the
+   * "Save failed — the colony could not be read" the player saw on every menu
+   * click. The dispose now happens only in `onDone`, after the write has
+   * settled one way or the other; a failure lands on the save-failed prompt
+   * instead of a toast.
+   */
   private returnToMenu(): void {
     if (!this.started) return;
+    this.closePauseMenu();
     this.updateCheck?.stop();
-    this.save(true);
-    this.hud.flashSave('Saved — returning to menu…');
-    // Stop the world before the page goes: a host with a timer inside it must
-    // not be left ticking through the reload the menu needs.
+    this.saveContext = 'menu';
+    this.save(false, (ok) => {
+      if (ok) {
+        this.saveContext = 'auto';
+        this.leaveToMenu();
+      }
+      // ok === false: onSaveFailure already raised the prompt with Retry /
+      // Save-as-new / Return-without-saving for the menu context.
+    });
+  }
+
+  /**
+   * Tear the colony down and let the page reload onto the main menu. Callers
+   * have already made the save decision; this only stops the world and goes.
+   * A host with a timer inside it must not be left ticking through the
+   * reload, which is why this runs after (never before) the save settles.
+   */
+  private leaveToMenu(reloadMs = 700): void {
+    this.closePauseMenu();
+    this.updateCheck?.stop();
     this.dev.detach();
     this.host?.dispose();
+    this.started = false;
     // Fade the live colony layers back to the command-deck bed during the
     // hand-off; a reload creates the same menu scene again on the next page.
     this.audio.setScene('menu');
+    this.audio.setPaused(true);
     // A clean boot is the only honest teardown for a WebGL colony: the menu
     // (and its splash) rebuilds in under a second.
-    window.setTimeout(() => window.location.reload(), 700);
+    window.setTimeout(() => window.location.reload(), reloadMs);
+  }
+
+  // -------------------------------------------------------- pause menu ----
+
+  /**
+   * The ☰ button's destination: freeze the sim and open the pause menu. The
+   * world keeps *rendering* behind the frost — what stops is the clock, so
+   * the player sees the colony they paused, not a blank.
+   */
+  private openPauseMenu(): void {
+    if (!this.started || this.pauseMenu || !this.host) return;
+    // The update card already owns the frozen colony; a second overlay on top
+    // of it would be two menus fighting for the same player.
+    if (this.hud.isSaveErrorOpen() || this.hud.isSaveProgressOpen() || this.hud.isUpdateNoticeOpen()) return;
+    this.prePauseSpeed = this.hud.speedIdx;
+    this.hud.setSpeed(0);
+    this.audio.setPaused(true);
+    const menu = new PauseMenu({
+      getStats: () => this.buildColonyStats(),
+      settings: this.pauseSettings(),
+      onResume: () => this.closePauseMenu(),
+      onSave: () => this.manualSave(),
+      onReturnToMenu: () => this.returnToMenu(),
+    });
+    menu.mount();
+    this.pauseMenu = menu;
+  }
+
+  /** Resume: restore the pre-pause speed and unmount. True if it was open. */
+  private closePauseMenu(): boolean {
+    if (!this.pauseMenu) return false;
+    this.pauseMenu.unmount();
+    this.pauseMenu = null;
+    this.hud.setSpeed(this.prePauseSpeed);
+    this.audio.setPaused(this.hud.speedIdx === 0);
+    return true;
+  }
+
+  /** The pause menu's settings contract: values + live-applying callbacks. */
+  private pauseSettings(): import('../ui/PauseMenu').PauseMenuSettings {
+    const s = this.settings;
+    return {
+      autopauseOnCrit: s.autopauseOnCrit(),
+      saveOnTabHide: s.saveOnTabHide(),
+      autosaveIntervalSec: s.autosaveIntervalSec(),
+      renderResolution: s.renderResolution(),
+      shadows: s.shadows(),
+      weatherFx: s.weatherFx(),
+      hudPanelsHidden: s.hudPanelsHidden(),
+      onAutopause: (on) => {
+        s.setAutopause(on);
+        this.hud.setAutopause(on);
+      },
+      onSaveOnTabHide: (on) => s.setSaveOnTabHide(on),
+      onAutosaveInterval: (sec) => {
+        s.setAutosaveInterval(sec);
+        this.autosaveSec = sec;
+        // A shorter interval should not wait out the previous window.
+        this.lastAuto = performance.now();
+      },
+      onRenderResolution: (r) => {
+        s.setRenderResolution(r);
+        this.applyGraphics();
+      },
+      onShadows: (on) => {
+        s.setShadows(on);
+        this.applyGraphics();
+      },
+      onWeatherFx: (on) => {
+        s.setWeatherFx(on);
+        this.applyGraphics();
+      },
+      onHudPanelsHidden: (on) => {
+        s.setHudPanelsHidden(on);
+        this.hud.setPanelsHidden(on);
+      },
+      onResetPanelLayout: () => this.hud.resetPanelLayout(),
+    };
+  }
+
+  /** Push the persisted graphical settings into the live renderer. */
+  private applyGraphics(): void {
+    const r = this.renderer;
+    if (!r) return;
+    r.setPixelRatioCap(renderResolutionCap(this.settings.renderResolution()));
+    r.setShadows(this.settings.shadows());
+    r.weatherFx.setVisible(this.settings.weatherFx());
+  }
+
+  /**
+   * The expedition tab's data pull: one plain object straight off the host
+   * view. Pure read — nothing here may touch a mutator, which is what keeps
+   * it honest on the worker transport.
+   */
+  private buildColonyStats(): ColonyStats | null {
+    const sim = this.sim;
+    if (!sim) return null;
+    const meta = this.saveId ? this.store.get(this.saveId) : null;
+    const site = sim.world.landingSite();
+    const p = sim.power;
+    const cap = sim.storageCapacity();
+    const c = sim.colonist;
+    const rovers = sim.rovers;
+    const stranded = rovers.filter((r) => r.phase === 'disabled').length;
+    const idle = sim.idleRovers().length;
+    const online = sim.buildings.filter((b) => b.state === 'online').length;
+    const building = sim.buildings.filter((b) => b.state === 'building').length;
+    const damaged = sim.buildings.filter((b) => b.damaged).length;
+    const alerts = sim.alerts.list();
+    const wx = sim.weather;
+    return {
+      name: meta?.name ?? site.name ?? 'Red Frontier',
+      clockText: sim.clock.format(),
+      difficulty: DIFFICULTIES[sim.difficulty]?.label ?? sim.difficulty,
+      worldSize: WORLD_SIZES[worldSizeFromHalf(sim.world.half)]?.label ?? '—',
+      region: site?.name ?? '—',
+      seedText: meta?.seedText ?? '',
+      solsPlayed: sim.simTime / SOL_SECONDS,
+      power: {
+        genKw: p.generationKw,
+        loadKw: p.servedKw,
+        batteryPct: p.capacityKWh > 0 ? (p.storedKWh / p.capacityKWh) * 100 : 0,
+        curtailKw: p.curtailedKw,
+      },
+      resources: ALL_RESOURCES.map((r) => ({
+        label: RESOURCES[r].label,
+        amount: sim.storage[r],
+        capacity: cap,
+      })),
+      fluids: ALL_FLUIDS.map((f) => ({
+        label: FLUIDS[f].label,
+        amount: sim.pools.amounts[f],
+        capacity: sim.pools.capacity[f],
+        netPerSol: sim.netRatePerSol(f),
+      })),
+      crew: {
+        name: c.name,
+        status: colonistStatusText(c),
+        healthPct: c.health,
+        suitPct: c.inside ? 100 : (c.suitO2 / SUIT_O2_CAPACITY) * 100,
+        inside: c.inside,
+      },
+      fleet: {
+        total: rovers.length,
+        working: rovers.length - idle - stranded,
+        idle,
+        stranded,
+        avgBatteryPct:
+          rovers.length > 0
+            ? (rovers.reduce((s, r) => s + r.battery / ROVERS[r.kind].maxBatteryKWh, 0) /
+                rovers.length) *
+              100
+            : 0,
+        avgConditionPct:
+          rovers.length > 0 ? rovers.reduce((s, r) => s + r.condition, 0) / rovers.length : 0,
+      },
+      structures: {
+        total: sim.buildings.length,
+        online,
+        building,
+        damaged,
+      },
+      weather: {
+        storm: stormLabel(wx.storm),
+        wind: wx.windSpeed,
+        dustPct: wx.dust * 100,
+        visibilityPct: wx.visibility * 100,
+      },
+      alerts: {
+        crit: alerts.filter((a) => a.severity === 'crit').length,
+        warn: alerts.filter((a) => a.severity === 'warn').length,
+        opportunity: alerts.filter((a) => a.severity === 'opportunity').length,
+      },
+      lastSave: { ...this.lastSave },
+      gameOver: { active: !!sim.gameOver, reason: sim.gameOver?.reason ?? '' },
+    };
   }
 
   // -------------------------------------------------------- per-frame ----
@@ -1298,7 +1749,8 @@ export class Game {
     this.renderer.sync(view);
     this.rig.update();
 
-    if (nowMs - this.lastAuto > AUTOSAVE_INTERVAL_S * 1000) {
+    // Autosave cadence is a player setting (pause menu → game); 0 disables it.
+    if (this.autosaveSec > 0 && nowMs - this.lastAuto > this.autosaveSec * 1000) {
       this.lastAuto = nowMs;
       this.save(true);
     }

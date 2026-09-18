@@ -8,7 +8,7 @@
 
 import assert from 'node:assert/strict';
 import { UPDATE_CHECK_INTERVAL_MS, UpdateCheck } from '../../src/app/UpdateCheck';
-import type { UpdateCheckOptions } from '../../src/app/UpdateCheck';
+import type { UpdateCheckOptions, UpdateFound } from '../../src/app/UpdateCheck';
 import { finish, group, test } from '../harness';
 
 const CURRENT = '1f8e9e0fc803259a0bf43b05305bda5f5950fa06';
@@ -63,7 +63,7 @@ test('a page without a build identity never polls', async () => {
 });
 
 test('a matching manifest is accepted and polling continues', async () => {
-  const found: string[] = [];
+  const found: UpdateFound[] = [];
   const { fetcher, calls } = manifestFetcher({ commit: CURRENT });
   await withCheck(
     { current: CURRENT, fetcher, intervalMs: INTERVAL, onFound: (l) => found.push(l) },
@@ -76,7 +76,7 @@ test('a matching manifest is accepted and polling continues', async () => {
 });
 
 test('a newer manifest is reported exactly once and the poller stops', async () => {
-  const found: string[] = [];
+  const found: UpdateFound[] = [];
   const { fetcher, calls } = manifestFetcher({ commit: NEWER });
   await withCheck(
     { current: CURRENT, fetcher, intervalMs: INTERVAL, onFound: (l) => found.push(l) },
@@ -85,12 +85,12 @@ test('a newer manifest is reported exactly once and the poller stops', async () 
       assert.equal(check.active, false, 'the poller must stop after the hand-off');
     },
   );
-  assert.deepEqual(found, [NEWER]);
+  assert.deepEqual(found, [{ commit: NEWER, notes: [] }]);
   assert.equal(calls.length, 1, 'one-shot: no further manifest requests after the hit');
 });
 
 test('a failed fetch is silent and retried on the next poll', async () => {
-  const found: string[] = [];
+  const found: UpdateFound[] = [];
   const calls: string[] = [];
   let n = 0;
   const fetcher = (async (input: RequestInfo | URL) => {
@@ -107,12 +107,12 @@ test('a failed fetch is silent and retried on the next poll', async () => {
       await sleep(80);
     },
   );
-  assert.deepEqual(found, [NEWER]);
+  assert.deepEqual(found, [{ commit: NEWER, notes: [] }]);
   assert.ok(calls.length >= 2, 'the failure must not end the polling');
 });
 
 test('an HTTP error or an invalid manifest is ignored, not trusted', async () => {
-  const found: string[] = [];
+  const found: UpdateFound[] = [];
   const calls: string[] = [];
   let n = 0;
   const fetcher = (async () => {
@@ -189,7 +189,7 @@ test('a hidden tab skips checks and re-arms when it becomes visible', async () =
       onVisibility = null;
     },
   };
-  const found: string[] = [];
+  const found: UpdateFound[] = [];
   const { fetcher, calls } = manifestFetcher({ commit: NEWER });
   try {
     await withCheck(
@@ -206,8 +206,47 @@ test('a hidden tab skips checks and re-arms when it becomes visible', async () =
     delete globals.document;
     delete globals.window;
   }
-  assert.deepEqual(found, [NEWER], 'returning to the tab must re-arm the check');
+  assert.deepEqual(found, [{ commit: NEWER, notes: [] }], 'returning to the tab must re-arm the check');
   assert.ok(calls.length >= 1);
+});
+
+test('the manifest changelog rides along so the card can list what is new', async () => {
+  const found: UpdateFound[] = [];
+  const notes = ['feat: in-game pause menu with expedition stats', 'fix: menu save no longer races the worker'];
+  const { fetcher } = manifestFetcher({ commit: NEWER, notes });
+  await withCheck(
+    { current: CURRENT, fetcher, intervalMs: INTERVAL, onFound: (l) => found.push(l) },
+    async () => {
+      await sleep(60);
+    },
+  );
+  assert.deepEqual(found, [{ commit: NEWER, notes }]);
+});
+
+test('non-string changelog entries are dropped and the list is capped', async () => {
+  const found: UpdateFound[] = [];
+  const dirty = [1, 'kept', '', null, '  trimmed  ', ...Array.from({ length: 20 }, () => 'x')];
+  const { fetcher } = manifestFetcher({ commit: NEWER, notes: dirty });
+  await withCheck(
+    { current: CURRENT, fetcher, intervalMs: INTERVAL, onFound: (l) => found.push(l) },
+    async () => {
+      await sleep(60);
+    },
+  );
+  assert.equal(found.length, 1);
+  assert.deepEqual(found[0].notes, ['kept', 'trimmed', ...Array.from({ length: 10 }, () => 'x')]);
+});
+
+test('a manifest without a changelog still reports the build', async () => {
+  const found: UpdateFound[] = [];
+  const { fetcher } = manifestFetcher({ commit: NEWER });
+  await withCheck(
+    { current: CURRENT, fetcher, intervalMs: INTERVAL, onFound: (l) => found.push(l) },
+    async () => {
+      await sleep(60);
+    },
+  );
+  assert.deepEqual(found, [{ commit: NEWER, notes: [] }]);
 });
 
 await finish('app/update-check');

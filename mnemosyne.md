@@ -4,25 +4,89 @@ Persistent notes for future coding sessions.
 
 ## In-play update check (TDD §23)
 
-- `vite.config.ts` writes `dist/version.json` (`{ name, commit, builtAt }`) at
-  build time — commit from `GITHUB_SHA` in CI, else local `git rev-parse HEAD`.
-  The Pages workflow uploads `dist/` as-is, so the manifest is *by
-  construction* the live build. Never remove it from the Pages upload path.
+- `vite.config.ts` writes `dist/version.json` (`{ name, commit, builtAt,
+  notes }`) at build time — commit from `GITHUB_SHA` in CI, else local
+  `git rev-parse HEAD`; `notes` = the last 8 non-merge commit subjects
+  (`buildNotes()`, `[]` when git is unavailable). The Pages workflow uploads
+  `dist/` as-is, so the manifest is *by construction* the live build. Never
+  remove it from the Pages upload path. The Pages checkout is `fetch-depth: 0`
+  on purpose: the changelog needs full history, and main's HEAD is a merge
+  commit a shallow clone cannot expand.
 - `src/app/UpdateCheck.ts` polls that manifest every 5 min **while a colony
   runs** (started in `Game.launch`, production builds only, stopped on
-  `returnToMenu`/mission end). Same-origin on purpose: the GitHub API
-  (`BuildStatus.latestMainCommit`, main-menu badge) answers "where is main?",
-  which can sit ahead of the live deploy (a failed smoke gate blocks the
-  deploy while main moves), and rate-limits per IP.
-- Flow on a newer commit: one-shot — freeze sim, `NEW BUILD AVAILABLE` banner,
-  save via `Game.save(quiet, onDone)`, dispose host, `reload()` after 3 s.
-  Save failure → "Reload anyway" button instead of a forced reload. Hidden
-  tabs skip + re-arm on `visibilitychange`. QA knob: `?updateCheckMs=…` (≥1000).
+  `returnToMenu`/mission end) and hands the Game an `UpdateFound`
+  `{ commit, notes }` — `latestDeployedCommit` (`src/ui/BuildStatus.ts`)
+  validates the sha and the note list (strings only, trimmed, capped at 12).
+  Same-origin on purpose: the GitHub API (`BuildStatus.latestMainCommit`,
+  main-menu badge) answers "where is main?", which can sit ahead of the live
+  deploy (a failed smoke gate blocks the deploy while main moves), and
+  rate-limits per IP.
+- Flow on a newer commit: one-shot — freeze the sim, open the **update card**
+  (frost + card, `#update-banner` / `.update-overlay`): it lists what is new
+  (the `notes` changelog) and tells the player that continuing means **they**
+  save and **they** reload. **Nothing saves or reloads by itself — that is a
+  user requirement, not an implementation detail.** Card actions: "Save
+  colony" runs the normal `Game.save(false, onDone)` under the save-progress
+  frost; only a *successful* save reveals "Reload now", which the player
+  clicks to run `leaveToMenu(0)`. "Later" (or Esc) hides the card and
+  restores the pre-notice speed; the check is over for the session (a manual
+  page reload re-arms it). Save failure in the `update` context is reported
+  **on the card** (`updateNoticeSaveFailed`), never as a stacked
+  save-failed prompt. Hidden tabs skip + re-arm on `visibilitychange`. QA
+  knob: `?updateCheckMs=…` (≥1000).
 - `scripts/update-check-smoke.mjs` drives the whole flow in headless Chromium
-  (rewrites `dist/version.json` mid-run and restores it); run it after any
-  change to the manifest/poller/reload path. `tests/app/update-check.test.ts`
-  covers the poller unit-level (fake fetcher, no DOM).
+  (rewrites `dist/version.json` mid-run — commit **and notes** — and restores
+  it); it proves the 5 s no-auto-save/no-auto-reload window, "Later", the
+  reload-re-triggers-the-card path, and the player's Save → Reload path; run
+  it after any change to the manifest/poller/card. `tests/app/update-check.
+  test.ts` covers the poller unit-level (fake fetcher, no DOM, notes
+  pass-through/validation); `tests/app/pause-save.test.ts` "Update card"
+  covers the Game-level flow (jsdom).
 
+
+## Pause menu + save hand-off (the "Save failed" bug)
+
+- Root cause of the old "Save failed — the colony could not be read" on every
+  ☰ click: the old menu button fired the save and disposed the host on the
+  very next line, so on the (default) worker transport the in-flight snapshot
+  request was rejected as "the colony has shut down". **The fix is ordering,
+  not retries:** `Game.leaveToMenu()` only runs from the save's `onDone`
+  callback — after the write has settled one way or the other — and a failed
+  hand-off save lands on the save-failed prompt instead of a toast.
+- The ☰ button now opens `src/ui/PauseMenu.ts`: the sim pauses
+  (`hud.setSpeed(0)`, restored on close; while open the menu owns the keyboard
+  and only Esc is honored). Tabs: actions (Resume / Save game / Return to main
+  menu), settings (game, graphical, interface — applied live through
+  `Game.pauseSettings()`), expedition (live stats from `Game.buildColonyStats()`).
+- Save UX contract (HUD): `#save-progress` is the full-screen frost
+  (z-120, above the pause menu's z-100) with a centered card and staged
+  progress — user-initiated saves only; `#save-flash` is transient (1.8 s);
+  `#save-error` is the save-failed prompt (Retry / Save as new file / Keep
+  playing, plus "Return to menu without saving" in menu context only).
+  `Game.saveContext: 'auto' | 'manual' | 'menu' | 'update'` decides phrasing
+  and visibility: the prompt shows when `!quiet || (visible && context
+  !== 'update')`; a hidden-tab autosave failure is console + toast, never a
+  prompt.
+- **Headless reload gotchas (learned the hard way in `scripts/pause-smoke.mjs`):**
+  after `location.reload()`, a long-lived in-page poller (Playwright
+  `waitForFunction`, in *any* polling mode) does not reliably re-arm in the
+  sparticuz Chromium build, while a fresh `page.evaluate` from Node always
+  sees the current document. Poll for the reload from the Node side — the
+  smoke sets `window.rfNav` before the quit click, then polls
+  `!('rfNav' in window)` every 250 ms. Also: the "Saved" flash is up ~1.8 s
+  total; catch it with a timer-polling wait armed *before* the save settles,
+  never by reading it after the progress frost lifts.
+- Tests: `tests/app/pause-save.test.ts` (Game-level) +
+  `tests/hud/pause-menu.test.ts`. jsdom notes: a standalone suite that
+  constructs `new Game()` must `process.exit` itself at the end (the frame
+  loop's chained rAF keeps Node alive), and `globalThis.fetch` must be stubbed
+  to reject (MainMenu's GitHub badge fetch hangs the runner in a blackholed
+  sandbox).
+- **Debt (roadmap Phase 19):** the save/pause-menu logic is deliberately still
+  in `Game.ts`. `save` / `onSaveFailure` / `returnToMenu` / `leaveToMenu` /
+  `manualSave` / `retrySave` / `saveAsNew` / `abandonToMenu` are
+  `SaveController`'s future contents; `openPauseMenu` / `closePauseMenu` /
+  `pauseSettings` / `buildColonyStats` are `MenuController`'s.
 
 - `scripts/setup-playwright.mjs` installs the Playwright browser-test dependencies. Use it when Playwright is needed instead of searching for another setup script.
 - TypeScript is a local project dependency. Run `npm install` before expecting `tsc` or other package tools to be available.

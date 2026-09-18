@@ -73,6 +73,17 @@ export function shortSha(sha: string | null): string {
 /** The manifest the Vite build writes next to the bundle (vite.config.ts). */
 export const MANIFEST_NAME = 'version.json';
 
+/** The deployed build: its identity plus the build-time "what's new". */
+export interface DeployedBuild {
+  /** The deployed commit, full 40-hex sha. */
+  commit: string;
+  /** The changelog the build shipped (recent commit subjects). May be empty. */
+  notes: string[];
+}
+
+/** Upper bound on changelog lines the card will ever show. */
+const NOTES_CAP = 12;
+
 /**
  * Ask the page's own origin which commit it is serving. The GitHub Pages
  * workflow uploads the built `dist/` tree — manifest included — as one
@@ -84,7 +95,7 @@ export const MANIFEST_NAME = 'version.json';
 export function latestDeployedCommit(
   fetcher: typeof fetch = fetch,
   url?: string,
-): Promise<string> {
+): Promise<DeployedBuild> {
   // A fresh query string per call: CDN caches key on the full URL, so the
   // manifest can never be answered from a pre-deploy copy.
   const target =
@@ -98,9 +109,15 @@ export function latestDeployedCommit(
     })();
   return fetcher(target, { cache: 'no-store' }).then(async (response) => {
     if (!response.ok) throw new Error(`manifest returned ${response.status}`);
-    const body = (await response.json()) as { commit?: unknown };
+    const body = (await response.json()) as { commit?: unknown; notes?: unknown };
     const sha = validSha(body.commit);
     if (!sha) throw new Error('manifest has no valid commit');
-    return sha;
+    // The notes are untrusted display text: keep only non-empty strings,
+    // cap the list, and never let a malformed field kill the check.
+    const notes = (Array.isArray(body.notes) ? body.notes : [])
+      .filter((n): n is string => typeof n === 'string' && n.trim().length > 0)
+      .map((n) => n.trim())
+      .slice(0, NOTES_CAP);
+    return { commit: sha, notes };
   });
 }

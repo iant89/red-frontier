@@ -1922,6 +1922,23 @@ Becomes the composition root.
 
 It wires everything together rather than implementing every behavior.
 
+## Noted (2026-09-17) — the save/menu logic arrived before the extraction
+
+The pause-menu and save hand-off work (pause menu with settings and expedition
+tabs, the save progress frost, the save-failed prompt, and the ordered
+save → `leaveToMenu()` teardown that fixed "Save failed — the colony could not
+be read") shipped with its logic **deliberately kept in `Game.ts`** — this
+phase stands as written, and that work is exactly what it will extract:
+`save` / `onSaveFailure` / `returnToMenu` / `leaveToMenu` / `manualSave` /
+`retrySave` / `saveAsNew` / `abandonToMenu` → `SaveController`;
+`openPauseMenu` / `closePauseMenu` / `pauseSettings` / `buildColonyStats` →
+`MenuController`. When Phase 19 runs, preserve the onDone-ordered teardown
+(the save must settle before the host is disposed — that ordering is the
+regression that used to surface as the save-failed prompt) and the
+`saveContext` phrasing/visibility rules. Behavior is pinned by
+`tests/app/pause-save.test.ts`, `tests/hud/pause-menu.test.ts` and
+`scripts/pause-smoke.mjs` (both transports).
+
 
 # 24. Phase 20 — Strengthen SimView
 
