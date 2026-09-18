@@ -925,16 +925,16 @@ export class Simulation {
 
   // -------------------------------------------------------- exploration ----
   // Phase 14: discovery, supply drops, burial and site-side salvage rewards
-  // live in systems/ExplorationSystem.ts — Simulation keeps the public
-  // surface as a thin delegate (same pattern as Phase 13's storage accessors).
+  // live in systems/ExplorationSystem.ts. World owns physical sites
+  // (`world.pois`); Simulation exposes them directly (World vs Exploration).
 
   /** Every site on the planet — found or not. */
   get pois(): Poi[] {
-    return ExplorationSystem.pois(this.state);
+    return this.world.pois;
   }
 
   poiById(id: number): Poi | undefined {
-    return ExplorationSystem.poiById(this.state, id);
+    return this.world.pois.find((p) => p.id === id);
   }
 
   /**

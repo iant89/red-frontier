@@ -79,17 +79,6 @@ import { batteryCapacityKWh } from '../state/PowerState';
 import type { Severity } from '../alerts';
 
 export class ExplorationSystem {
-  // -------------------------------------------------------- accessors ----
-
-  /** Every site on the planet — found or not. */
-  static pois(state: ColonyState): Poi[] {
-    return state.world.pois;
-  }
-
-  static poiById(state: ColonyState, id: number): Poi | undefined {
-    return state.world.pois.find((p) => p.id === id);
-  }
-
   // -------------------------------------------------------------- tick ----
 
   /**

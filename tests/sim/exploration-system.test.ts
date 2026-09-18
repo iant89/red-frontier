@@ -89,12 +89,12 @@ test('the colonist can discover a site the same way a rover can', () => {
   assert.equal(site.discovered, true);
 });
 
-test('Simulation.pois / poiById are thin delegates to ExplorationSystem', () => {
+test('Simulation.pois / poiById read world.pois directly', () => {
   const sim = fresh();
-  assert.equal(sim.pois, ExplorationSystem.pois(sim.state));
+  assert.equal(sim.pois, sim.world.pois);
   const site = sim.pois[0];
   assert.ok(site);
-  assert.equal(sim.poiById(site.id), ExplorationSystem.poiById(sim.state, site.id));
+  assert.equal(sim.poiById(site.id), site);
   assert.equal(sim.poiById(-1), undefined);
 });
 
