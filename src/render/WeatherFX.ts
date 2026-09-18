@@ -52,7 +52,7 @@ export interface WeatherFxInput {
   /** Absolute sim time (seconds). */
   time: number;
   weather: WeatherFxWeather;
-  rovers: WeatherFxRover[];
+  rovers: ReadonlyArray<WeatherFxRover>;
   heightAt: (x: number, z: number) => number;
   /**
    * Terrain colour at a point (0..1 RGB) — dust devils pick their dust up off

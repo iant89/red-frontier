@@ -23,20 +23,27 @@
  * (`mirror.ts`) rather than streaming a grid nobody asked for.
  */
 
-import type { Simulation, Rover, Building, HistorySample, FluidFlow } from '../Simulation';
+import type { Simulation, HistorySample, FluidFlow, Rover, Building } from '../Simulation';
 import type { Deposit } from '../World';
 import type { Poi } from '../pois';
-import type { Alert, LogEvent } from '../alerts';
+import type { LogEvent } from '../alerts';
 import type { SunState } from '../clock';
 import type { StormCell, StormKind, StormKindReal, WeatherRadar } from '../weather';
 import type { FluidId, ResourceAmounts } from '../defs';
 import { ALL_FLUIDS } from '../defs';
 import type { PowerTier } from '../config';
 import type { DifficultyId, WorldOptions } from '../difficulty';
+import type { Colonist } from '../lifesupport';
 import type { OverlayState } from './overlays';
 import { BATTERY_PIN_OVERLAY } from './overlays';
 import type { SimTransport } from './SimHost';
 import { getProfiler } from '../debug/Profiler';
+import type {
+  AlertView,
+  BuildingView,
+  ColonistView,
+  RoverView,
+} from './viewModels';
 
 /** What a weather system is doing, as the panels need it — plain data. */
 export interface WeatherPayload {
@@ -105,9 +112,9 @@ export interface ViewPayload {
   flows: Record<FluidId, FluidFlow>;
   lastFlows: Record<FluidId, FluidFlow>;
   history: HistorySample[];
-  rovers: Rover[];
-  buildings: Building[];
-  colonist: Simulation['colonist'];
+  rovers: RoverView[];
+  buildings: BuildingView[];
+  colonist: ColonistView;
   deposits: Array<Pick<Deposit, 'id' | 'resource' | 'x' | 'z' | 'amount' | 'maxAmount' | 'radius'>>;
   /**
    * Sites and landed drops, spread whole. Discovery and salvage progress are
@@ -115,7 +122,7 @@ export interface ViewPayload {
    * client-side from the seed — they have to travel.
    */
   pois: Poi[];
-  alerts: Alert[];
+  alerts: AlertView[];
   /** Log lines produced since the previous payload. */
   events: LogEvent[];
   /** Per-fluid numbers the HUD shows; computed where the smoothing lives. */
@@ -132,9 +139,92 @@ function livePins(sim: Simulation, overlays: OverlayState): number[] {
   return sim.rovers.filter((r) => wanted.has(r.id)).map((r) => r.id);
 }
 
-/** Cheap per-entity copy: every field, because a picked list always drifts. */
+/** Shallow object copy for plain records (history samples, alert rows). */
 function copy<T extends object>(src: T): T {
   return { ...src };
+}
+
+/** Deep enough that nested mutable bags (cargo, maps, pending) are owned. */
+function projectRover(r: Rover): RoverView {
+  return {
+    id: r.id,
+    kind: r.kind,
+    label: r.label,
+    x: r.x,
+    y: r.y,
+    z: r.z,
+    heading: r.heading,
+    battery: r.battery,
+    cargo: { ...r.cargo },
+    phase: r.phase,
+    command: { ...r.command },
+    pending: r.pending.map((t) => ({ ...t })),
+    goal: r.goal,
+    gx: r.gx,
+    gz: r.gz,
+    gid: r.gid,
+    recharge: r.recharge,
+    lowBatteryNotified: r.lowBatteryNotified,
+    chargeSat: r.chargeSat,
+    autoTask: r.autoTask,
+    condition: r.condition,
+    rules: { ...r.rules },
+    routePaused: r.routePaused,
+    blockNotified: r.blockNotified,
+    sheltered: r.sheltered,
+    lightsOn: r.lightsOn,
+    lightsActive: r.lightsActive,
+    navPath: r.navPath.map((p) => ({ x: p.x, z: p.z })),
+    navI: r.navI,
+  };
+}
+
+function projectBuilding(b: Building): BuildingView {
+  return {
+    id: b.id,
+    kind: b.kind,
+    x: b.x,
+    z: b.z,
+    rot: b.rot,
+    state: b.state,
+    remainingCost: { ...b.remainingCost },
+    needsMaterials: b.needsMaterials,
+    progress: b.progress,
+    buildTime: b.buildTime,
+    workerId: b.workerId,
+    enabled: b.enabled,
+    powerSat: b.powerSat,
+    throughput: b.throughput,
+    genKw: b.genKw,
+    loadKw: b.loadKw,
+    idleReason: b.idleReason,
+    health: b.health,
+    cleanliness: b.cleanliness,
+    damaged: b.damaged,
+    assembly: b.assembly ? { ...b.assembly } : null,
+    level: b.level,
+  };
+}
+
+function projectColonist(c: Colonist): ColonistView {
+  return {
+    id: c.id,
+    name: c.name,
+    x: c.x,
+    y: c.y,
+    z: c.z,
+    heading: c.heading,
+    health: c.health,
+    suitO2: c.suitO2,
+    inside: c.inside,
+    shelterId: c.shelterId,
+    activity: c.activity,
+    order: { ...c.order },
+    gx: c.gx,
+    gz: c.gz,
+    starved: { ...c.starved },
+    dead: c.dead,
+  };
 }
 
 /**
@@ -207,9 +297,9 @@ export function projectView(
     flows: copyFlows(sim.flows),
     lastFlows: copyFlows(sim.lastFlows),
     history: sim.history.map(copy),
-    rovers: sim.rovers.map(copy),
-    buildings: sim.buildings.map(copy),
-    colonist: copy(sim.colonist),
+    rovers: sim.rovers.map(projectRover),
+    buildings: sim.buildings.map(projectBuilding),
+    colonist: projectColonist(sim.colonist),
     deposits: sim.world.deposits.map((d) => ({
       id: d.id,
       resource: d.resource,

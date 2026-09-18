@@ -1,17 +1,15 @@
 import * as THREE from 'three';
 import { WORLD_HALF, SPAWN_X, SPAWN_Z, SPAWN_RADIUS } from '../sim/config';
 import type { Deposit } from '../sim/World';
-import type { Building as SBuilding, Rover as SRover } from '../sim/Simulation';
 // The renderer's entire window onto the colony is the host's read model: it can
 // draw state, and that is all. No sim mutator is even nameable from here.
-import type { SimView, WorldView } from '../sim/host';
+import type { SimView, WorldView, BuildingView, RoverView, ColonistView } from '../sim/host';
 import type { RoverKind, BuildingKind, ResourceId } from '../sim/defs';
 import { isPickedClean, POI_KINDS } from '../sim/pois';
 import type { Poi } from '../sim/pois';
 import { RESOURCES, ROVERS, BUILDINGS, ALL_FLUIDS } from '../sim/defs';
 import type { SunState } from '../sim/clock';
 import { sunDirection } from '../sim/clock';
-import type { Colonist } from '../sim/lifesupport';
 import {
   makeMarsFallbackMaterial,
   makeMarsTerrainMaterial,
@@ -690,7 +688,7 @@ export class GameRenderer {
   }
 
   // ---------------- colonist ----------------
-  private syncColonist(c: Colonist): void {
+  private syncColonist(c: ColonistView): void {
     if (!this.colonistMesh) {
       this.colonistMesh = this.makeColonistMesh(c.id);
       this.scene.add(this.colonistMesh);
@@ -858,7 +856,7 @@ export class GameRenderer {
     }
   }
 
-  private syncRovers(rovers: SRover[]): void {
+  private syncRovers(rovers: ReadonlyArray<RoverView>): void {
     const seen = new Set<number>();
     for (const r of rovers) {
       seen.add(r.id);
@@ -955,7 +953,7 @@ export class GameRenderer {
     }
   }
 
-  private syncBuildings(buildings: SBuilding[]): void {
+  private syncBuildings(buildings: ReadonlyArray<BuildingView>): void {
     const seen = new Set<number>();
     for (const b of buildings) {
       seen.add(b.id);

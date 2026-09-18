@@ -19,6 +19,7 @@ import {
   applyCommand,
   createLocalHost,
   decodeCommand,
+  projectView,
 } from '../../src/sim/host';
 import type { SimCommand, SimHost } from '../../src/sim/host';
 import { DevMode } from '../../src/dev/DevMode';
@@ -401,18 +402,24 @@ const MUTATOR_PATTERNS = [
   /^update$/,
 ];
 
-test('the view exposes queries only — no sim mutator survives the pick list', () => {
+test('the view exposes queries only — no sim mutator survives the read surface', () => {
   const view = readFileSync(`${SRC}/sim/host/view.ts`, 'utf8');
-  const pickLists = [...view.matchAll(/Pick<\s*\n?\s*(?:Simulation|AlertBus|SolClock|World),\n([^>]*?)\n\s*>/g)].map(
-    (m) => m[1],
+  // WorldView / ClockView stay as Pick lists; SimQuery is an explicit interface
+  // of view-model queries (Phase 20). SimWritable is *not* the read surface.
+  const pickBodies = [...view.matchAll(/export type (?:WorldView|ClockView) = Pick<[^>]+>/gs)].map(
+    (m) => m[0],
   );
-  assert.ok(pickLists.length >= 2, 'the guard expects the view to be built from Pick lists');
-  const names = pickLists
+  assert.ok(pickBodies.length >= 2, 'WorldView and ClockView should remain Pick-based');
+  const queryBlock = /export interface SimQuery \{([^}]*)\}/s.exec(view)?.[1] ?? '';
+  const queryNames = [...queryBlock.matchAll(/\b([a-zA-Z]+)\s*\(/g)].map((m) => m[1]);
+  assert.ok(queryNames.length >= 8, 'SimQuery should list the presentation queries');
+  const pickNames = pickBodies
     .join('\n')
-    .split('\n')
+    .split(/[|\n]/)
     .map((line) => line.replace(/[^a-zA-Z']/g, '').replace(/'/g, '').trim())
-    .filter(Boolean);
-  assert.ok(names.length > 10, 'the pick lists parsed empty');
+    .filter((n) => n && !['export', 'type', 'WorldView', 'ClockView', 'Pick', 'World', 'SolClock'].includes(n));
+  const names = [...pickNames, ...queryNames];
+  assert.ok(names.length > 10, 'the read-surface name list parsed empty');
   const offenders = names.filter((n) => MUTATOR_PATTERNS.some((re) => re.test(n)));
   assert.deepEqual(
     offenders,
@@ -423,14 +430,11 @@ test('the view exposes queries only — no sim mutator survives the pick list', 
 
 test('the app shell reaches the world only through read queries and order()', () => {
   const app = readFileSync(`${SRC}/app/Game.ts`, 'utf8');
-  // Derive the allow-list from the view's own pick list, so the two cannot drift.
+  // Derive the allow-list from SimQuery method names, so the two cannot drift.
   const view = readFileSync(`${SRC}/sim/host/view.ts`, 'utf8');
-  const queryList = /SimQuery = Pick<\s*\n?\s*Simulation,\n([^>]*?)\n\s*>/.exec(view)?.[1] ?? '';
+  const queryBlock = /export interface SimQuery \{([^}]*)\}/s.exec(view)?.[1] ?? '';
   const allowed = new Set(
-    queryList
-      .split('\n')
-      .map((line) => line.replace(/[^a-zA-Z]/g, ''))
-      .filter(Boolean),
+    [...queryBlock.matchAll(/\b([a-zA-Z]+)\s*\(/g)].map((m) => m[1]),
   );
   const seen: string[] = [];
   for (const match of app.matchAll(/\bthis\.sim\.([a-zA-Z]+)\s*\(/g)) {
@@ -486,15 +490,12 @@ test('the worker entry imports the runtime and nothing else', () => {
 test('every query the view promises is answered by the mirror', () => {
   // Adding a member to `SimQuery` without implementing it in `mirror.ts` would
   // otherwise surface as a runtime `undefined` on the worker path only, on the
-  // day someone turns the worker on. The types already catch it in `Simulation`;
-  // this catches it in the *protocol*, which is where the cost is paid.
+  // day someone turns the worker on. Types catch it on ColonyMirror; this
+  // catches it in the *protocol*, which is where the cost is paid.
   const view = readFileSync(`${SRC}/sim/host/view.ts`, 'utf8');
-  const pick = view.match(/export type SimQuery = Pick<\n\s*Simulation,\n([^>]*?)>;\n/s);
-  assert.ok(pick, 'the SimQuery pick list is still declared the documented way');
-  const names = (pick?.[1] ?? '')
-    .split('|')
-    .map((raw) => raw.trim().replace(/'/g, ''))
-    .filter((n) => n.length > 0);
+  const iface = view.match(/export interface SimQuery \{([^}]*)\}/s);
+  assert.ok(iface, 'SimQuery is declared as an explicit interface of view-model queries');
+  const names = [...(iface?.[1] ?? '').matchAll(/\b([a-zA-Z]+)\s*\(/g)].map((m) => m[1]);
   assert.ok(names.length >= 8, `found ${names.length} queries, which is fewer than the view has`);
   const mirror = code(readFileSync(`${SRC}/sim/host/mirror.ts`, 'utf8'));
   const missing = names.filter((n) => !new RegExp(`\\b${n}\\s*[(:=]`).test(mirror));
@@ -508,4 +509,55 @@ test('every query the view promises is answered by the mirror', () => {
   }
 });
 
+
+// ---------------------------------------------------- Phase 20 immutability ----
+
+group('Phase 20 — immutable SimView');
+
+test('LocalSimHost view is a projection, not the live Simulation', () => {
+  const sim = freshSim();
+  const host = new LocalSimHost(sim);
+  assert.notEqual(host.view as object, sim as object, 'the live sim must not masquerade as SimView');
+  assert.equal(host.view.rovers.length, sim.rovers.length);
+  assert.equal(host.view.colonist.id, sim.colonist.id);
+});
+
+test('mutating a LocalSimHost view-model field does not mutate sim state', () => {
+  const sim = freshSim();
+  const host = new LocalSimHost(sim);
+  const view = host.view;
+  const batteryBefore = sim.rovers[0].battery;
+  const cargoBefore = sim.rovers[0].cargo.iron;
+  const healthBefore = sim.colonist.health;
+  const ironBefore = sim.storage.iron;
+
+  (view.rovers[0] as { battery: number }).battery = 0;
+  (view.rovers[0].cargo as { iron: number }).iron = 9999;
+  (view.colonist as { health: number }).health = 1;
+  (view.storage as { iron: number }).iron = 1e9;
+
+  assert.equal(sim.rovers[0].battery, batteryBefore, 'rover battery is sealed');
+  assert.equal(sim.rovers[0].cargo.iron, cargoBefore, 'rover cargo bag is owned by the view');
+  assert.equal(sim.colonist.health, healthBefore, 'colonist is sealed');
+  assert.equal(sim.storage.iron, ironBefore, 'storage bag is owned by the view');
+});
+
+test('Local and projected payloads match for entity presentation fields', () => {
+  const sim = freshSim();
+  sim.rovers[0].battery = 12.5;
+  sim.rovers[0].cargo.iron = 40;
+  sim.colonist.health = 88;
+  const host = new LocalSimHost(sim);
+  const payload = projectView(sim, 'in-process', {});
+  assert.equal(host.view.rovers[0].battery, payload.rovers[0].battery);
+  assert.equal(host.view.rovers[0].cargo.iron, payload.rovers[0].cargo.iron);
+  assert.equal(host.view.colonist.health, payload.colonist.health);
+  assert.equal(host.view.buildings.length, payload.buildings.length);
+  assert.deepEqual(
+    host.view.rovers.map((r) => r.id),
+    payload.rovers.map((r) => r.id),
+  );
+});
+
 await finish('sim/host');
+

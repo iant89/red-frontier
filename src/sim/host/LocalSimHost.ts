@@ -2,11 +2,9 @@
  * The in-process host: today's behaviour, behind tomorrow's interface.
  *
  * It owns a `Simulation`, applies commands to it synchronously, runs overlays
- * after every step, and hands the live sim out as the view. That last part is
- * intentionally zero-copy — this class buys no performance, only the seam. Its
- * job is to prove the contract is *sufficient*: if every gesture and every panel
- * edit can be expressed as a command on this object, then a worker holding the
- * same object can serve the same UI with no other code changing.
+ * after every step, and hands out a **projected** SimView via ColonyMirror —
+ * the same immutable presentation surface WorkerSimHost serves. Presentation
+ * never receives the live Simulation object (Phase 20).
  *
  * Acks are synchronous here. That is a property of this class, not of
  * {@link SimHost}, and the only reason callers can still be written the way they
@@ -19,6 +17,8 @@ import { decodeCommand } from './protocol';
 import { applyCommand } from './applyCommand';
 import type { SimHost } from './SimHost';
 import { runOverlays, type OverlayState } from './overlays';
+import { ColonyMirror } from './mirror';
+import { projectView } from './projection';
 import type { SimBootParams, SimLogEvent, SimSnapshot, SimView } from './view';
 
 export class LocalSimHost implements SimHost {
@@ -27,17 +27,21 @@ export class LocalSimHost implements SimHost {
   private readonly sim: Simulation;
   private overlays: OverlayState = {};
   private disposed = false;
+  /** Projected read model — rebuilt/applied whenever the live sim changes. */
+  private mirror: ColonyMirror | null = null;
+  private viewDirty = true;
 
   constructor(sim: Simulation) {
     this.sim = sim;
   }
 
   /**
-   * The live sim *is* the view — same object, narrower type. No copies, no
-   * staleness, and a main-thread read costs exactly what it used to.
+   * The projected, immutable view — same ColonyMirror shape WorkerSimHost uses.
+   * Never the live Simulation.
    */
   get view(): SimView {
-    return this.sim;
+    this.refreshView();
+    return this.mirror!;
   }
 
   step(frameDt: number): void {
@@ -47,6 +51,7 @@ export class LocalSimHost implements SimHost {
     // frame, so a pinned battery keeps its grip while the world runs. Identical
     // code to the worker's, which is the entire reason they are functions here.
     runOverlays(this.sim, this.overlays);
+    this.viewDirty = true;
   }
 
   send(command: SimCommand): void {
@@ -67,6 +72,7 @@ export class LocalSimHost implements SimHost {
 
   syncOverlays(state: OverlayState): void {
     this.overlays = state;
+    this.viewDirty = true;
   }
 
   async requestSnapshot(): Promise<SimSnapshot> {
@@ -75,11 +81,16 @@ export class LocalSimHost implements SimHost {
 
   async loadSnapshot(snapshot: SimSnapshot): Promise<void> {
     this.sim.restore(snapshot);
+    // World identity may change on restore — drop the mirror so terrain rebuilds.
+    this.mirror = null;
+    this.viewDirty = true;
   }
 
   dispose(): void {
     this.disposed = true;
     this.overlays = {};
+    this.mirror = null;
+    this.viewDirty = true;
   }
 
   /** The one place the protocol's runtime gate runs, for every host flavour. */
@@ -92,7 +103,32 @@ export class LocalSimHost implements SimHost {
       console.error(`[sim:host] ${decoded.error}`, command);
       return { ok: false, error: decoded.error };
     }
-    return applyCommand(this.sim, decoded.command);
+    const ack = applyCommand(this.sim, decoded.command);
+    this.viewDirty = true;
+    return ack;
+  }
+
+  /**
+   * Project the live sim into the mirror. Events stay on the sim's queue
+   * (`drainEvents`); the payload carries an empty event list so we do not
+   * double-consume log lines that the HUD still expects from the host.
+   */
+  private refreshView(): void {
+    if (!this.viewDirty && this.mirror) return;
+    const payload = projectView(this.sim, 'in-process', this.overlays, []);
+    if (!this.mirror) {
+      this.mirror = new ColonyMirror(
+        {
+          seed: this.sim.world.seed,
+          worldHalf: this.sim.world.half,
+          region: this.sim.world.region,
+        },
+        payload,
+      );
+    } else {
+      this.mirror.apply(payload);
+    }
+    this.viewDirty = false;
   }
 }
 

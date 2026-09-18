@@ -2831,6 +2831,47 @@ This makes:
 semantically equivalent.
 
 
+## Recorded (Phase 20 complete — 2026-09-18)
+
+Implemented on the shared computer (`refactor/phase-20-sim-view`).
+
+**Presentation boundary is immutable.** Simulation entities no longer satisfy
+`SimView`. Explicit view models under `src/sim/host/viewModels.ts`:
+
+| View model | Role |
+| --- | --- |
+| `RoverView` | Readonly rover + owned cargo/pending/rules/navPath copies |
+| `BuildingView` | Readonly building + owned remainingCost/assembly |
+| `ColonistView` | Readonly colonist + owned order/starved |
+| `ResourceView` | Storage / economy slice (`storage`, `pools`, `flows`, `history`, `storedKWh`) |
+| `WeatherView` | Strengthened existing sky snapshot (readonly radar/lightning) |
+| `AlertView` / `AlertsView` | Readonly alert rows + board queries |
+
+**Projection path.** `projectView` emits deep-enough view models. Both
+`LocalSimHost` and `WorkerSimHost` serve presentation through `ColonyMirror`
+over those payloads — Local no longer hands out the live `Simulation`.
+Queries (`roverById`, `idleRovers`, …) return view models.
+
+**Move-not-redesign.** No domain events (Phase 21), no command redesign
+(Phase 22), no tick-order or gameplay rule changes. Consumers in `ui/`,
+`render/`, `dev/`, `app/`, `audio/` switched types to view models.
+
+**Tests** — `tests/sim/host.test.ts` Phase 20 group (projection ≠ live sim,
+immutability pin, Local↔payload entity match); `tests/sim/worker.test.ts`
+LocalSimHost↔projectView entity match + cargo ownership pin. Prior host/
+worker protocol and byte-equality tests adapted and green.
+
+**Gate results**
+
+| Gate | Result |
+| --- | --- |
+| `npm run typecheck` | green |
+| `npm test` | 68 suites / 800 checks green |
+| `npm run test:check` | 68 suites / 800 checks linked |
+| `npm run build` | green (`index.js` 1,060.15 kB / 307.67 gz, `sim.worker` 231.39 kB) |
+
+
+
 # 25. Phase 21 — Introduce Domain Events
 
 Do this only after systems have been extracted.

@@ -1,0 +1,156 @@
+/**
+ * Immutable presentation view models for SimView (Phase 20).
+ *
+ * Plain readonly data only — no class instances, no mutator methods. Projection
+ * (`projectView`) is the sole producer; LocalSimHost and WorkerSimHost both
+ * surface these through the same ColonyMirror path so presentation reads are
+ * semantically equivalent across transports.
+ */
+
+import type { BuildingKind, FluidId, ResourceAmounts, RoverKind } from '../defs';
+import type { Alert, LogEvent, Severity } from '../alerts';
+import type { FluidFlow, HistorySample } from '../Simulation';
+import type {
+  RoverGoal,
+  RoverPhase,
+  RoverRules,
+  RoverTask,
+} from '../state/RoverState';
+import type { ColonistActivity, ColonistOrder } from '../lifesupport';
+import type { StormCell, StormKind, StormKindReal, WeatherRadar } from '../weather';
+
+/** One rover as the HUD / renderer may see it — nested bags are owned copies. */
+export interface RoverView {
+  readonly id: number;
+  readonly kind: RoverKind;
+  readonly label: string;
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly heading: number;
+  readonly battery: number;
+  readonly cargo: Readonly<ResourceAmounts>;
+  readonly phase: RoverPhase;
+  readonly command: Readonly<RoverTask>;
+  readonly pending: ReadonlyArray<Readonly<RoverTask>>;
+  readonly goal: RoverGoal;
+  readonly gx: number;
+  readonly gz: number;
+  readonly gid: number;
+  readonly recharge: boolean;
+  readonly lowBatteryNotified: boolean;
+  readonly chargeSat: number;
+  readonly autoTask: boolean;
+  readonly condition: number;
+  readonly rules: Readonly<RoverRules>;
+  readonly routePaused: boolean;
+  readonly blockNotified: boolean;
+  readonly sheltered: boolean;
+  readonly lightsOn: boolean;
+  readonly lightsActive: boolean;
+  readonly navPath: ReadonlyArray<{ readonly x: number; readonly z: number }>;
+  readonly navI: number;
+}
+
+/** One building as presentation reads it. */
+export interface BuildingView {
+  readonly id: number;
+  readonly kind: BuildingKind;
+  readonly x: number;
+  readonly z: number;
+  readonly rot: number;
+  readonly state: 'site' | 'building' | 'online';
+  readonly remainingCost: Readonly<ResourceAmounts>;
+  readonly needsMaterials: boolean;
+  readonly progress: number;
+  readonly buildTime: number;
+  readonly workerId: number | null;
+  readonly enabled: boolean;
+  readonly powerSat: number;
+  readonly throughput: number;
+  readonly genKw: number;
+  readonly loadKw: number;
+  readonly idleReason: string;
+  readonly health: number;
+  readonly cleanliness: number;
+  readonly damaged: boolean;
+  readonly assembly: Readonly<{ kind: RoverKind; progress: number }> | null;
+  readonly level: number;
+}
+
+/** The colonist as presentation reads them. */
+export interface ColonistView {
+  readonly id: number;
+  readonly name: string;
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly heading: number;
+  readonly health: number;
+  readonly suitO2: number;
+  readonly inside: boolean;
+  readonly shelterId: number;
+  readonly activity: ColonistActivity;
+  readonly order: Readonly<ColonistOrder>;
+  readonly gx: number;
+  readonly gz: number;
+  readonly starved: Readonly<{ oxygen: boolean; water: boolean; food: boolean }>;
+  readonly dead: boolean;
+}
+
+/**
+ * Storage / economy presentation slice — the amounts and pool capacities the
+ * HUD vitals strip reads. Kept as an intersection onto SimFields so existing
+ * `view.storage` / `view.pools` accessors stay identical.
+ */
+export interface ResourceView {
+  readonly storage: Readonly<ResourceAmounts>;
+  readonly pools: {
+    readonly amounts: Readonly<Record<FluidId, number>>;
+    readonly capacity: Readonly<Record<FluidId, number>>;
+  };
+  readonly flows: Readonly<Record<FluidId, Readonly<FluidFlow>>>;
+  readonly lastFlows: Readonly<Record<FluidId, Readonly<FluidFlow>>>;
+  readonly history: ReadonlyArray<Readonly<HistorySample>>;
+  readonly storedKWh: number;
+}
+
+/** One active alert on the board (plain data). */
+export type AlertView = Readonly<Alert>;
+
+/** The alert board, read-only — raising/clearing is sim-internal. */
+export interface AlertsView {
+  list(): ReadonlyArray<AlertView>;
+  history(): ReadonlyArray<LogEvent>;
+  worst(): Severity | null;
+  isActive(key: string): boolean;
+}
+
+/**
+ * Weather as a snapshot of the sky. Explicit interface (not Pick of Weather)
+ * because the mirror is not a Weather instance.
+ */
+export interface WeatherView {
+  readonly time: number;
+  readonly windSpeed: number;
+  readonly windDirRad: number;
+  readonly dust: number;
+  readonly visibility: number;
+  readonly storm: StormKind;
+  readonly stormIntensity: number;
+  readonly solarTransmission: number;
+  readonly radar: Readonly<WeatherRadar>;
+  readonly lightning: { readonly x: number; readonly z: number; readonly t: number } | null;
+  readonly rollsSuppressed: boolean;
+  forecast(): { kind: StormKind; label: string; arrivesIn: number } | null;
+  current(): StormCell | null;
+  threat(): {
+    kind: StormKindReal;
+    label: string;
+    distKm: number;
+    bearingRad: number;
+    arrivesIn: number;
+    radiusKm: number;
+  } | null;
+  passesIn(): number;
+}

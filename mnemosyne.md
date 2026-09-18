@@ -746,6 +746,18 @@ Persistent notes for future coding sessions.
   roadmap's Phase 12 block.
 
 
+## Refactor Phase 20 (Strengthen SimView) — immutable presentation boundary
+
+- **View models:** `RoverView`, `BuildingView`, `ColonistView`, `ResourceView`,
+  `WeatherView`, `AlertView` / `AlertsView` in `src/sim/host/viewModels.ts`.
+- **Both hosts project:** `LocalSimHost` refreshes a `ColonyMirror` via
+  `projectView` (same surface as `WorkerSimHost`); live `Simulation` is never
+  the presentation `SimView`. Nested bags (cargo, pending, rules, …) are
+  owned copies — mutating a view field does not mutate sim state.
+- **Move-not-redesign:** types/projection only; no gameplay, tick-order,
+  domain events, or command-architecture changes.
+- Gate on completion (2026-09-18): see roadmap Phase 20 Recorded block.
+
 ## Refactor Phase 19 (Game controllers) — composition root
 
 - **`Game.ts` is a composition root.** Controllers under `src/app/` own the
