@@ -45,7 +45,6 @@ export type RoverGoal =
   | 'move'
   | 'mine'
   | 'toDepot'
-  | 'unload'
   | 'toSite'
   | 'build'
   | 'toCharge'
@@ -78,7 +77,6 @@ export interface Rover {
   gid: number;
   recharge: boolean;
   lowBatteryNotified: boolean;
-  statusText: string;
   chargeSat: number;
   autoTask: boolean;
   condition: number;
@@ -90,6 +88,44 @@ export interface Rover {
   lightsActive: boolean;
   navPath: Array<{ x: number; z: number }>;
   navI: number;
+}
+
+/**
+ * Execution state: the rover is at its target, doing `goal` (roadmap Phase 11).
+ * The one implementation of the `goal` + `phase` pairs documented in
+ * `docs/design/ROVER-STATE.md` §3 — the task bodies and the construction
+ * system enter work through here instead of assigning the pair by hand.
+ */
+export type RoverWorkGoal = 'mine' | 'build' | 'service' | 'salvage' | 'recover';
+
+/** Execution state: on the road to `goal` (every travel goal has one phase). */
+export function enterTravel(r: Pick<Rover, 'goal' | 'phase'>, goal: RoverGoal): void {
+  r.goal = goal;
+  r.phase = 'moving';
+}
+
+/** Execution state: parked on a charger (or sheltering on a pad). */
+export function enterCharge(r: Pick<Rover, 'goal' | 'phase'>): void {
+  r.goal = 'charge';
+  r.phase = 'charging';
+}
+
+/** Execution state: flat pack — stranded until a rescue lands. */
+export function enterDisabled(r: Pick<Rover, 'goal' | 'phase'>): void {
+  r.goal = 'idle';
+  r.phase = 'disabled';
+}
+
+/** Execution state: at the target, working. */
+export function enterWork(r: Pick<Rover, 'goal' | 'phase'>, goal: RoverWorkGoal): void {
+  r.goal = goal;
+  r.phase = 'working';
+}
+
+/** Execution state: nothing in hand — parked. */
+export function enterIdle(r: Pick<Rover, 'goal' | 'phase'>): void {
+  r.goal = 'idle';
+  r.phase = 'idle';
 }
 
 export function cargoMass(r: Pick<Rover, 'cargo'>): number {
@@ -109,9 +145,8 @@ export function roverStatusText(r: Pick<Rover, 'phase' | 'sheltered' | 'routePau
     case 'move':
       return 'Moving';
     case 'mine':
-      return r.command.type === 'mine' && (r.command as any).repeat ? 'Hauling route' : 'Mining';
+      return r.command.type === 'mine' && r.command.repeat ? 'Hauling route' : 'Mining';
     case 'toDepot':
-    case 'unload':
       return 'Hauling to storage';
     case 'toSite':
       return 'Heading to build site';

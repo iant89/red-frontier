@@ -1437,6 +1437,138 @@ where possible during the transition.
 
 No renderer or UI code should be required by RoverSystem.
 
+## Recorded (Phase 10 complete — 2026-09-18)
+
+Implemented on `arena/01a0b437-red-frontier`.
+
+**What was built**
+
+- `src/sim/systems/RoverSystem.ts` (1,548 lines) — the fleet's behavior, moved
+  verbatim from `Simulation` behind a state-consuming static API (51 statics):
+  - **Commands**, one per `rover/*` SimCommand: `issueMove` / `issueMine` /
+    `issueUnload` / `issueWait` / `issueConstruct` / `stopRover` /
+    `setRepeatRoute` / `setRoverRule` / `setChargeFloor` / `setRoverLights` /
+    `issueRecover` / `issueClean` / `issueRepair` / `issueSalvage` /
+    `dispatchMaintenance`. Every one is still reachable as a `Simulation.*`
+    thin delegate, so `applyCommand`, the HUD, `Transcript` and every existing
+    test call exactly what they called before.
+  - **Task lifecycle**: `giveTask` / `autoAssign` / `finishTask` and the
+    deposit reservations (`claimDeposit` / `releaseDeposit` /
+    `releaseReservations` / `rescueTargeted`).
+  - **Execution**: `updateRover` (storm recall → seal wear → ride-home floor →
+    command switch) and `moveRover` (path stepping, proximity crawl, pack and
+    condition burn, flat-battery strand), the task bodies (`doMoveTo` /
+    `goIdle` / `doRecharge` / `unloadWhileCharging` / `doMine` / `beginUnload`
+    / `tryUnload` / `doService` / `doSalvage` / `recoverSiteCells` /
+    `doRecover` / `doUnload`), the movement helpers (`setTravel` and its
+    keep-the-in-flight-path guard, `onArrive`, `inColonyYard`,
+    `nearestObstacleClearance`, `proximitySpeedMul`, `disable`, `lerpAngle`,
+    `ARRIVE_EPS`) and the energy queries (`travelKWh` / `chargeRateKwAt` /
+    `nearestChargerPoint` / `roverWorkMul` / `nearDepot` / `nearCharger` /
+    `lightsNeeded` / `tickLights`).
+  - `spawn(state, kind, x, z, heading)` — the one rover factory, now used by
+    the garage assembly line, `assembleRover` and `devSpawnRover`.
+- `RoverHostHooks` is the **fifth instance of the host-hooks pattern**:
+  `constructSite` is ConstructionSystem's (Phase 9) and `canDeliverCargo` is
+  LogisticsSystem's (Phase 13). Simulation implements both against the
+  machinery it already has, so no rule crossed the seam.
+- **Phase 9's rover-side implementors are absorbed.** The
+  `ConstructionHostHooks` five (`setTravel` / `finishTask` / `autoAssign` /
+  `disableRover` / `roverWorkMul`) and `WeatherHostHooks.disableRover` now
+  call RoverSystem statics. The *contracts* are unchanged, so the Phase 8/9
+  suites that stub them still pass; `constructionHooks` itself stays in
+  Simulation as the wiring. The Phase 9 double-claim quirk is unchanged, still
+  pinned, and still Phase 12's decision.
+- **What deliberately stayed in Simulation**: `assignMaintenance` /
+  `assignRescues` / `assignSupplyRuns` (scheduler policy → Phase 12
+  FleetAutomationSystem), `canDeliverAny` (the haul question → Phase 13),
+  `tickGarages` / `servicingRover` / `maintenancePending` / `assembleRover`
+  (the garage line consumes power and produces rovers; it is not rover
+  behavior), the dev backdoors, and snapshot/restore. Nothing was redesigned:
+  this phase is the move. Phase 11 is where rover *state* gets simplified.
+- **Deleted from Simulation.ts** (~1,250 lines): the rover behavior above, the
+  constants and helpers that became RoverSystem-private (the `ROVER_*` family,
+  `RECOVER_TRANSFER_KW`, `ROUTE_RESUME_ROOM_KG`, `LIGHTS_AUTO_*`, the `STORM_*`
+  work multipliers, `takeSalvage` / `salvageRateKgS`, `emptyFluids`,
+  `mulberry32`, `PowerTier`, `RoverCommand`, `RoverRules`, `ARRIVE_EPS`,
+  `lerpAngle`), and two dead privates that only rover code had called
+  (`spawnStart`, `allocId` — the starters come from `createColonyState` since
+  Phase 2 and `spawn` allocates ids). The file is 2,082 lines, from 3,328.
+- **Two pre-existing dead accessors left alone and logged here instead**:
+  `Simulation.stormAnnounced` and `Simulation.remainder` are unused private
+  getter/setter pairs — `WeatherSystem` and `ClockSystem` mutate
+  `state.stormAnnounced` / `state.remainder` directly. They predate this phase
+  and are not rover code, so Golden Rule 2 keeps them out of this diff (a
+  cleanup phase can take them; `--noUnusedLocals` reports 27 such hits
+  repository-wide, none of them gate the build today).
+- `tests/sim/rover-system.test.ts` (24 checks, linked in `full.test.ts`):
+  the queue/reservation rules (a shift order queues, a plain order replaces,
+  automation only fills idle time, a player order bumps an auto run off the
+  seam, `finishTask` promotion and the cargo-keeps-auto flag, `stopRover`
+  releasing the claim); movement maths against measured steps (cruise speed,
+  `movePowerKw × hours`, wear per second, the proximity crawl in the open and
+  the slower colony-yard crawl, a flat pack stranding mid-drive and releasing
+  its seam); the ride-home floor turning a parked rover for the pad; storm
+  recall preserving the orders underneath and releasing them when the sky
+  clears; position lights at night billed to the pack; one isolated check per
+  task body (mine at the plate rate + claim + wear, the auto run's
+  silo-appetite target, the stuck-route pause and resume, unload with a
+  blocked hold warning, clean and repair at their plate rates, construct
+  handing off through the hook and clearing a stale worker, salvage's
+  full-hold-before-distance guard and a stripped site's cells landing in the
+  grid store, jump-start energy conservation, and the "can't spare enough
+  charge" refusal); and two-same-seed determinism.
+
+**Behavior preservation evidence**
+
+A scripted rover scenario was hashed **before** the extraction and re-run
+after: **byte-identical output** at **36 StateHash checkpoints plus 38
+per-tick sampled traces** (84 lines total), across two seeds. Checkpoints kept
+the whole roster moving — fresh, a long move, a queued order, mining a seam
+with the hold filling, a repeating haul route, the ride-home floor and
+return-to-charge, two rovers in each other's proximity bubble, storm recall
+with the shelter rule on, a daredevil rover keeping the shelter rule off,
+storm clearance, cleaning, repair, salvage, a stranded rover, an issued
+recovery, night lights — and then a `structuredClone` snapshot restored into a
+second simulation, whose 600 ticks had to match the first (they do), plus a
+seed-912 determinism pair (2,400 ticks, equal hashes).
+
+The traces are the point, exactly as in Phase 9: each is an FNV-1a hash of a
+per-rover sample every 4 ticks (position, heading, battery, condition, phase,
+goal, nav index, recharge, sheltered, route paused, lights, cargo), so a
+changed *rate* — driving speed, wear per second, dig rate — moves the trace
+even when an endpoint hash happens to land on the same value.
+
+One recipe is worth keeping: stranding a rover for the recovery lane needs
+`stopRover` on both machines, a real drive away from the chargers, and a
+battery set **below a tick of driving**. Setting a near-zero battery on a
+rover that is still beside the pad does not strand it — the ride-home floor
+re-enters recharge and the machine recovers itself.
+
+**Gate results** (Node 22.22.3)
+
+| Gate | Result |
+| --- | --- |
+| `npm run typecheck` | green |
+| `npm test` (59 suites / 645 checks; was 58/621) | green — 184.8 s wall clock |
+| `npm run test:check` | green — 59 suites, all linked, all declare `@covers` |
+| `npm run build` | green — `index.js` 1,045.64 kB (304.76 kB gz), `sim.worker` 226.73 kB (was 1,044.18 / 304.49 and 225.38) |
+| pre/post extraction hash baseline | identical — 36 checkpoints + 38 sampled traces per seed pair |
+| `mobile-smoke` | green |
+| `worker-smoke` (`?worker=1`) | green |
+| `worker-smoke` (`?worker=0`) | green |
+| `update-check-smoke` | green |
+
+Phase 10's gate holds by construction: the new file imports only
+`../state/*`, `../World`, `../defs`, `../pois`, `../alerts` (type),
+`../config`, `./PowerSystem` and `../../lib/rng` — no DOM, no three.js, no
+`app/`, no `ui/`, and `Simulation`'s public rover surface is unchanged for
+every existing caller.
+
+The next phase per §51 is **Phase 11 — Simplify Rover State**, which is the
+first phase allowed to *change* rover behavior; §14's move-first rule ends
+there.
+
 
 # 15. Phase 11 — Simplify Rover State
 
@@ -1507,6 +1639,111 @@ This is preferable to encoding both concepts in one state variable.
 Do not perform this redesign until RoverSystem extraction is complete.
 
 Otherwise the extraction and behavioral redesign become impossible to debug independently.
+
+
+## Recorded (Phase 11 complete — 2026-09-18)
+
+Implemented on `arena/01a0b437-red-frontier`.
+
+**Document first** — the deliverable §15 asks for before any redesign:
+`docs/design/ROVER-STATE.md`. It states the four layers (Task = `command` +
+`pending`, persisted and hashed; execution state = `goal` + `phase`,
+runtime-only and rebuilt on restore; conditions/progress; presentation), the
+legal `(goal, phase)` table, the full transition table
+(CurrentState + Command + Conditions = NextState), the separability verdict with
+its migration plan, and the quirks that were characterized rather than fixed.
+`tests/sim/rover-state.test.ts` (27 checks) and `checkRoverExecution()` in
+`SimulationAssertions.ts` are its executable form: "where this document and the
+code disagree, the code is wrong (or the document is stale) — fix one of them in
+the same change".
+
+**Verdict on the three fields** — two layers plus a projection, not three
+concepts:
+
+- `command` (+ `pending`) is the *Task*: persisted in `RoverSave`, hashed,
+  issued by the `issue*`/`set*` verbs or `autoAssign`. `goal` is the *execution
+  step*: which part of the task the rover is in right now. `phase` is a
+  **projection of the step** that the power grid, the renderer and the HUD ask
+  about (`phase === 'charging' || goal === 'charge'`; `phase === 'disabled'`;
+  wording through `roverStatusText`).
+- `goal` is doing double duty: the task family (`mine`, `build`, `service`,
+  `salvage`, `recover`) *and* the travel/arrived progress within it (`toX` vs
+  `x`). That overlap is the thing §15 is pointing at. The target model is:
+
+      Task           = command (+ pending)        — what to do
+      ExecutionState = { phase, step }            — how far along, and where
+
+- **The split is right but premature.** It touches the hash format (which folds
+  `goal`/`phase`), `PowerSystem`'s charging reader, `ConstructionSystem`'s
+  travel guard, the renderer and the dev overlays — and Phases 12/13 rewrite the
+  schedulers that assign those tasks, so re-doing the split afterwards is
+  cheaper than rebasing it through them. The migration plan (rename `goal` →
+  `execution.step`; derive `phase`; freeze a new baseline *with the split*; only
+  then let Phase 12 change behavior) is design doc §7. §15's own precondition
+  ("do not perform this redesign until RoverSystem extraction is complete") is
+  satisfied; the deferral is scheduling, not doubt.
+
+**What changed in code** — all of it inside the execution-state layer:
+
+1. Deleted `Rover.statusText`. Nothing read it: the HUD calls
+   `roverStatusText(r)`, `StateHash` excludes wording, and saves never carried
+   it — a write-only field that could go stale after `finishTask` (it kept
+   saying "Building" after the task released).
+2. Deleted the unreachable `'unload'` goal from `RoverGoal` (`unload` is a
+   *task*; no code path ever assigned the goal) and its `roverStatusText` case.
+3. `goal`/`phase` now enter through named transitions in
+   `src/sim/state/RoverState.ts`: `enterTravel(r, goal)`, `enterWork(r, goal)`,
+   `enterCharge(r)`, `enterIdle(r)`, `enterDisabled(r)`. Every hand-written pair
+   in `RoverSystem`, `ConstructionSystem` and `host/overlays.ts` was replaced.
+   The single-field writes that remain are deliberate and commented:
+   `moveRover`'s transient `phase='working'` immediately before `onArrive`,
+   `goIdle`'s pad top-up (an idle rover with no charge task, `(idle, charging)`),
+   and `rehydrate`'s charger check.
+4. Restore-time rehydration moved out of `Simulation.restore` into
+   `RoverSystem.rehydrate(state)`, next to the tick rules it must agree with: a
+   save carries the *task*, never `goal`/`phase`, so a restored rover resumes at
+   rest except for the one rule already true before the first tick (a partially
+   charged rover parked on a charger comes back `charging`).
+5. `checkRoverExecution()` runs with the other invariants: every
+   `(goal, phase, command)` triple must be in the table. It caught two on its
+   first run — `onArrive`'s defensive "the site is gone" branch left
+   `phase='working'` behind a `goal='idle'` (unreachable today because
+   `demolish` releases crews; now `enterIdle`), and a construction-suite fixture
+   stranded a rover by hand-writing `phase` instead of `RoverSystem.disable`.
+6. `tests/sim/rover-state.test.ts` pins the table end to end: every task's entry
+   state, the travel→work arrivals, the ride-home floor and storm recall
+   preempting a task *without losing it*, the wording table (now wording's only
+   producer), rehydration, the violation codes, and the quirks below. Linked in
+   `tests/full.test.ts`; the runner is at 60 suites / 672 checks.
+
+**Quirks characterized, not fixed** (Golden Rule 1 — the current behavior is the
+behavior):
+
+- **A queued order behind a `moveTo` is stranded.** `onArrive`'s `move` case
+  sets the command to `{ type: 'idle' }` directly instead of going through
+  `finishTask`, so `pending` is never promoted; the queued order waits until the
+  next player order replaces it. `tests/sim/rover-state.test.ts` pins it.
+  Fixing it changes *which orders execute*, so it belongs with Phase 12's queue
+  rewrite or a dedicated pass.
+- **`autoAssign` does not clear `recharge`.** A task auto-assigned while a rover
+  is driving home waits for the charge run; `giveTask` clears it for player
+  orders. Recorded in design doc §8.
+
+**Gate results**
+
+| Gate | Result |
+| --- | --- |
+| `npm run typecheck` | green |
+| `npm test` | green — 60 suites / 672 checks (was 59/645), 198.3 s |
+| `npm run test:check` | green — 60 suites, all linked, all declare `@covers` |
+| `npm run build` | green — `index.js` 1,044.48 kB (304.50 kB gz), `sim.worker` 224.65 kB |
+| pre/post behavior baseline | **byte-identical** — Phase 11 is the first phase *allowed* to change rover behavior (§14's move-first rule ends here) and deliberately did not use the permission: `/home/user/phase11-baseline.txt` diffs clean against the Phase 10 frozen output (36 StateHash checkpoints + 38 sampled traces, two seeds, restore-equality and determinism pairs) |
+| `mobile-smoke` | green |
+| `worker-smoke` (`?worker=1`) | green |
+| `worker-smoke` (`?worker=0`) | green |
+| `update-check-smoke` | green |
+
+The next phase per §51 is **Phase 12 — Extract FleetAutomationSystem**.
 
 
 # 16. Phase 12 — Extract FleetAutomationSystem
@@ -1598,6 +1835,113 @@ Create scenarios:
 Automation behavior remains equivalent before optimization.
 
 
+## Recorded (Phase 12 complete — 2026-09-18)
+
+Implemented on `arena/01a0b437-red-frontier`.
+
+**The job model** — §16 asked for an explicit one, and it is now written down in
+`src/sim/systems/FleetAutomationSystem.ts`'s header and its exported types, with
+`tests/sim/fleet-automation.test.ts` (23 checks) as the executable form:
+
+    evaluate (pure)   priority + urgency + requirements
+        ↓
+    filter            the shelter order, "someone is already on it"
+        ↓
+    order             TDD §8 band, then the job's own urgency key
+        ↓
+    reserve           the rover or the seam is claimed
+        ↓
+    assign            `RoverSystem.autoAssign`
+
+Evaluators are plain functions, not classes (`maintenanceJobs`, `rescueJobs`,
+`haulDemand`, `pickHaul`, `waitingSite`) — §16's "pure functions are preferable"
+line. The model's fields:
+
+| Field | Where it lives |
+| --- | --- |
+| type | `kind`: `'repair' \| 'clean' \| 'rescue' \| 'haul'` |
+| target | the building, stranded rover or seam the job acts on |
+| priority | `JOB_PRIORITY` — survival 0, construction 1, routine 2 (TDD §8's band) |
+| urgency | the *pre-existing* sort key: health, cleanliness, fleet order, seam score |
+| energy cost | `rescueJobs`'s gift kWh, `pickHaul`'s round trip; `null` for chores |
+| requirements | the per-rover `rule` (autoService / autoRescue / autoHaul) |
+| risk / deadline | not modelled — the sim has no risk estimate and no task deadline, and inventing empty fields would be scaffolding, not a model |
+
+**Every evaluator is fleet-major except the haul one.** A seam's score is
+`distance ÷ demand`, so the best seam for one rover is not the best for another;
+`pickHaul` therefore scores *for a given rover*, exactly as the pre-extraction
+code did. Documented rather than "fixed": this phase's gate is that automation
+behavior stays equivalent, and unifying the scorers is the optimization that
+follows it.
+
+**What moved** (verbatim from `Simulation.ts`, deleting 190 lines):
+
+- `assignMaintenance` → `dispatchMaintenance` — damaged structures first
+  (survival), then solar arrays past `AUTO_CLEAN_THRESHOLD`, one job per idle
+  rover; repairs ignore the auto-service opt-out.
+- `assignRescues` → `dispatchRescues` — stranded rovers nobody is on the way to,
+  nearest volunteer that can hand over the gift *and* still get home
+  (`rescueFeasible`, the same arithmetic `RoverSystem.doRecover` re-derives).
+- `assignSupplyRuns` → `dispatchSupplyRuns` — `haulDemand` (build shortfall +
+  the weighted standing ice order), `haulWanted`, `pickHaul` (unclaimed seam
+  first, shared seam as the fallback that never idles a capable rover,
+  `canMakeRun` energy gate), and the two hold-backs that reserve a rover for
+  construction and maintenance (`waitingSite`, `reserveForHigherPriority`).
+- `maintenancePending` / `servicingRover` → public helpers.
+
+**What deliberately stayed in `RoverSystem`**: charging (the ride-home floor) and
+storm shelter, per-rover. §16 lists them among this system's responsibilities;
+the *fleet* half of both is in `FleetAutomationSystem` — the dispatch pools skip
+charging and sheltering rovers, and the storm order cancels the maintenance and
+rescue passes (`filterJobs`). The per-rover rule itself stays next to the task
+loop that obeys it: moving it would mean duplicating the floor maths, i.e. two
+sources of truth for "when does this rover break off". Site crew choice stays
+with `ConstructionSystem.assignBuilders` (Phase 9); this system only *reserves* a
+rover for it.
+
+**New seam**: `FleetAutomationHostHooks.canDeliverCargo`. The haul ledger is
+Phase 13's; until then `Simulation.canDeliverAny` answers it for all three seams
+(construction hooks, rover hooks, fleet hooks) — one answer, three callers.
+
+**New repo tool**: `scripts/behavior-baseline.ts`. The scratch baseline scripts
+used for Phases 5–11 kept being thrown away with their temp directories, so the
+A/B is now a checked-in script: a scripted colony (sites, a storm, a flat pack
+the rescue pass must answer, a new site, dust, a damaged structure, a
+dust-caked array, then a quiet stretch with nobody under orders), six
+`StateHash` checkpoints and a 2,400-sample per-tick trace per seed, plus a
+restore pair and a determinism pair. Run it with `--write before.txt` before a
+refactor and `--check before.txt` after.
+
+**Gate results**
+
+| Gate | Result |
+| --- | --- |
+| `npm run typecheck` | green |
+| `npm test` | green — 61 suites / 695 checks (was 60/672), 219.8 s |
+| `npm run test:check` | green — 61 suites, all linked, all declare `@covers` |
+| `npm run build` | green — `index.js` 1,045.63 kB (304.80 kB gz), `sim.worker` 225.79 kB |
+| behavior A/B | **identical** — `scripts/behavior-baseline.ts` run against `HEAD` (pre-Phase-10) and against today's tree: 12 checkpoint hashes, 2 trace digests, 4 equality pairs, byte-identical. Phases 10, 11 and 12 together moved nothing on the automation scenario |
+| `mobile-smoke` | green |
+| `worker-smoke` (`?worker=1`) | green |
+| `worker-smoke` (`?worker=0`) | green |
+| `update-check-smoke` | green |
+
+The §48 checklist, item by item: the responsibility has one owner
+(`FleetAutomationSystem`, with per-rover charging/shelter explicitly documented
+as staying in `RoverSystem`); its imports are `state/*`, `./RoverSystem`,
+`../World` (type), `../defs`, `../config`, `../alerts` (type) and `../../lib/rng`
+— no DOM, no three.js, no `app/`, no `ui/`; behavior is intact and proven by the
+A/B above; the extracted behavior has its own suite; determinism, both worker
+transports and the production build are green; and no second source of truth was
+introduced — the one new seam (`canDeliverCargo`) is the same implementor the
+construction and rover hooks already use.
+
+`Simulation.ts`: 2,082 → 1,799 lines. The next phase per §51 is **Phase 13 —
+Extract LogisticsSystem** (hauling, cargo, depot transfers, reservations,
+delivery, pickup, resource availability), which takes `canDeliverAny` and the
+storage ledger with it.
+
+
 # 17. Phase 13 — Extract LogisticsSystem
 
 Goal:
@@ -1647,6 +1991,125 @@ Avoid allowing:
 
 to independently manipulate the same resource reservation rules.
 
+
+## Recorded (Phase 13 complete — 2026-09-18)
+
+Implemented on `arena/01a0b437-red-frontier`.
+
+**One owner for resource accounting.** §17's design rule is now a module and a
+test. `src/sim/systems/LogisticsSystem.ts` (319 lines) is the only place in
+`src/sim` that writes storage: `tests/sim/logistics-system.test.ts` walks the
+tree and asserts that the set of modules writing `storage[res]` is exactly
+`LogisticsSystem` plus `ColonyState`'s capacity clamp, and that the set writing
+`storage = …` wholesale is exactly `Simulation`'s accessor/save path. Before this
+phase three systems moved the same kilograms with their own arithmetic.
+
+**What moved, and where it came from**
+
+| Now in `LogisticsSystem` | Came from | Was |
+| --- | --- | --- |
+| `store` / `take` / `refund` / `room` / `capacity` / `total` / `totalCapacity` / `isFull` / `fullResources` | `Simulation`'s public storage surface + every ad-hoc `+`/`-` | six accessors and three inline `Math.max(0, …)` clamps |
+| `unloadCargo` | `RoverSystem` | three copies of "pour the hold into the silos" (`goIdle`'s parked pour, `unloadWhileCharging`, `tryUnload`), two of which logged and one of which was silent |
+| `loadCargo` | `RoverSystem` | the hold clamp in `doMine` / `doSalvage` / the route-load path |
+| `canDeliver` | `Simulation.canDeliverAny` | the one haul question three seams (construction, rover, fleet hooks) asked |
+| `deliverToSite` | `ConstructionSystem.commitAvailableMaterials` | site commits |
+| `hasMaterials` / `consumeMaterials` / `missingList` | `ConstructionSystem` | the garage's spend and the "40 kg Regolith" list |
+| `refund` | `ConstructionSystem.demolish` | the demolish refund, the ledger's one deliberate over-fill |
+| `claimDeposit` / `releaseDeposit` / `releaseReservations` / `reservationOf` / `rescueTargeted` | `RoverSystem` | the seam reservation table |
+| — | `ProductionSystem.runProcess` | the solid-input draw (`state.storage[res] = Math.max(0, … - take)`) is now `LogisticsSystem.take` |
+| — | `FleetAutomationSystem` | its haul/supply scorer's `storageRoom(...)` and `state._storageCapacity` reads |
+
+Not a redesign: every method is the arithmetic that was already there, with its
+comment. The *names* the rest of the code calls survive as delegates —
+`Simulation.storageRoom/storageTotal/storageFull/fullResources/canDeliverAny`,
+`ConstructionSystem.commitAvailableMaterials/hasMaterials/consumeMaterials/missingList`,
+`RoverSystem.claimDeposit/releaseDeposit/releaseReservations/rescueTargeted` — so
+hosts, UI and the existing suites keep their call sites, exactly as the rover
+command verbs did after Phase 10.
+
+**The model** (in the file's header, with a diagram): storage is the ledger, and
+every arrow into or out of it is a method. Cargo is the rover's hold, with
+`loadCargo`/`unloadCargo` as the two movable ends; the hold's *capacity* is a
+rover property (`ROVERS[kind].capacityKg`) and the rover's own rules about what
+to pick up stay in `RoverSystem`. Site material is production-style demand, not a
+claim.
+
+**Reservations are asymmetric, and it is written down rather than smoothed
+over.** Only deposits are reserved: a seam is claimed by the run working it
+(`claimDeposit`) and released when the task is replaced, cancelled, or the rover
+strands. A starving site uses a different mechanism entirely — its lowered
+`remainingCost` — and the fleet's "held against a second rover" rule is a *scorer*
+tier (`pickHaul`), not a lock. Unifying the two would change which rover gets
+which job: a behavior change, so it is documented as the boundary of this phase.
+The user-visible consequence is pinned by tests: a claim steers a second hauler
+to the other seam, cancelling hands the seam back, and a claim on a seam that
+runs dry pins nobody.
+
+**What deliberately does not live here**
+
+- **Fluid pools** (`state.pools`, `lifesupport.ts`'s `addFluid`/`takeFluid`):
+  Phase 7's, clamped on both sides. A future "fluids are a resource like any
+  other" pass folds them in; doing it here would collide with that system's
+  balance constants.
+- **`recomputeCapacitiesState`** (Phase 2's): deciding how big storage is stays
+  with the state module. The ledger reads the result and enforces it.
+- **Charging and storm recall**: per-rover, `RoverSystem`'s (Phase 12's split).
+
+**Quirks preserved, not fixed** (Golden Rule 1; each is pinned by a test):
+
+- The refund's guarantee is conditional: it lands in full, but
+  `recomputeCapacitiesState` clamps the over-fill away on the next recompute, so
+  a refund into an *already full* silo is silently lost. Phase 9 found it, Phase
+  13 moved the rule into `refund`'s docstring and left the behaviour alone.
+- `unloadCargo`'s `blocked` flag means "a silo was already full when the pour
+  started", not "some of the hold is still stuck" — the three pre-extraction
+  copies all behaved that way, and the *callers* decide what to say about it
+  (which is why the method reports instead of logging).
+- A finished task does not release its claim: `finishTask` takes no state, so
+  the release happens on the next `giveTask`/`stopRover`/`disable`. Preserved.
+- `devSetRoverCargo` clamps through the hold's capacity rule, i.e. the dev panel
+  cannot overfill a hopper either.
+
+**Tests** — `tests/sim/logistics-system.test.ts`, 25 checks, §17's list mapped
+onto cases: *reservation* (`a claim holds the seam…`, `claims follow the task…`),
+*pickup* and *delivery* (`pickup then delivery: the seam shrinks by exactly what
+storage gains`), *cancellation* (the site refund, the claim release, a cancelled
+site's committed material), *failed delivery* (`a failed delivery keeps the load
+and says why`), *storage full* (`the silo is full, so the route parks and resumes`
+plus the ledger-level `isFull`/`fullResources`/`canDeliver` cases), *competing
+haulers* (`competing haulers: a claim steers the fleet apart…`) and *destroyed
+destination* (a warehouse dismantled mid-haul, and a seam that runs dry under a
+claim). Plus the ledger's own contract: clamping, the floor at zero, the refund
+being the one over-fill, negative/NaN pours being no-ops, and the sim's storage
+surface agreeing with the ledger it delegates to. The suite ends with the §48
+"no duplicate source of truth" item as an executable guard.
+
+**Gate results**
+
+| Gate | Result |
+| --- | --- |
+| `npm run typecheck` | green |
+| `npm test` | green — 62 suites / 720 checks (was 61/695), 209.2 s |
+| `npm run test:check` | green — 62 suites, all linked, all declare `@covers` |
+| `npm run build` | green — `index.js` 1,046.78 kB (305.10 kB gz), `sim.worker` 226.88 kB, 87 modules |
+| behavior A/B | **identical** — `scripts/behavior-baseline.ts` run against `HEAD` (pre-Phase-13) and against today's tree: 12 checkpoint hashes, 2 trace digests, 4 equality pairs, byte-identical; the trace digests are the same ones Phase 12 recorded (`17b0526f`, `32b26160`), so Phases 10–13 together moved nothing on the automation scenario |
+| `mobile-smoke` / `worker-smoke` (`?worker=1`, `?worker=0`) / `update-check-smoke` | green |
+
+The §48 checklist, item by item: the responsibility has one owner
+(`LogisticsSystem`, with fluids and the capacity computation explicitly named as
+living elsewhere); its imports are `state/*` (types + `cargoMass`),
+`../state/ResourceState`'s `storageRoom` helper, `../defs` — no DOM, no three.js,
+no `app/`, no `ui/`, no `render/`; behavior is intact and proven by the A/B
+above; the extracted behavior has its own 25-check suite; determinism, both
+worker transports and the production build are green; no presentation dependency
+leaked; and no duplicate source of truth was introduced — the guard test above is
+the proof, and the new `LogisticsHostHooks.finishTask` is the same task-lifecycle
+hook the rover and fleet hooks already use. Documentation: this record, the
+Phase 13 entry in `mnemosyne.md`, and the `docs/design/TDD.md` layout/testing
+rows.
+
+`Simulation.ts`: 1,799 → 1,790 lines. The next phase per §51 is **Phase 14 —
+Extract ExplorationSystem**.
 
 # 18. Phase 14 — Extract ExplorationSystem
 

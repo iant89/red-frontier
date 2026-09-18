@@ -34,6 +34,7 @@ import { BUILDINGS, ALL_RESOURCES, ALL_FLUIDS, RESOURCES, FLUIDS } from '../defs
 import { addFluid, takeFluid, fluidHeadroom } from '../lifesupport';
 import { clamp } from '../../lib/rng';
 import { SIM_TICK, HOURS_PER_SEC, SOLS_PER_SEC, devLevelMul } from '../config';
+import { LogisticsSystem } from './LogisticsSystem';
 
 export class ProductionSystem {
   /**
@@ -129,8 +130,8 @@ export class ProductionSystem {
       for (const res of ALL_RESOURCES) {
         const r = p.solidIn[res];
         if (!r) continue;
-        const take = r * mul * rate * hours;
-        state.storage[res] = Math.max(0, state.storage[res] - take);
+        // Phase 13: solid inputs are the storage ledger's to move.
+        LogisticsSystem.take(state, res, r * mul * rate * hours);
       }
     }
     if (p.fluidIn) {

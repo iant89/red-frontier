@@ -39,7 +39,7 @@ Status tags match the GDD: **IN** / **PARTIAL** / **OUT**.
 
 **Hard gates that exist today**
 
-- `npm test` — 58 suites / 621 checks (unit, integration, determinism, load, HUD)
+- `npm test` — 62 suites / 720 checks (unit, integration, determinism, load, HUD)
 - `scripts/worker-smoke.mjs` — both transports on every PR
 - `scripts/mobile-smoke.mjs` — headless Chromium play path
 - `scripts/update-check-smoke.mjs` — in-play save-and-reload update flow
@@ -118,7 +118,7 @@ src/
     navgrid.ts       walk/build grid, reachability flood
     rules.ts         siting + maintenance verdicts (shared by ghost + sim)
     World.ts         seeded terrain handle + deposits + scattered sites
-    Simulation.ts    orchestration: entities, tick order, rover task dispatch
+    Simulation.ts    orchestration: entities, tick order, cross-system seams
     difficulty.ts    Settler/Pioneer/Survivor + world sizes/options
     state/           ColonyState + entity/record shapes (data, no behavior)
     systems/         extracted tick responsibilities, each a static API over state
@@ -128,6 +128,13 @@ src/
       ProductionSystem.ts  process want / idle reason / mass moved
       LifeSupportSystem.ts fluid draw, colonist needs, EVA orders
       ConstructionSystem.ts siting, site materials, crews, progress, completion
+      RoverSystem.ts       fleet commands, task lifecycle, movement, task bodies
+      FleetAutomationSystem.ts  the job model + autonomous dispatch (maintenance,
+                           rescue, supply runs); see its header for the
+                           evaluate → filter → order → reserve → assign pipeline
+      LogisticsSystem.ts   the storage ledger, cargo transfers, site material,
+                           deposit reservations — the one owner of resource
+                           accounting (Phase 13)
     persistence/     versioned saves: schema, codec, validator, v1…v7 migrations
     debug/           invariant checks, state hash, profiler, command transcripts
     host/            the seam
@@ -149,9 +156,9 @@ src/
   ui/                HUD, menus, wizard, save store, globe picker
   lib/               deterministic RNG + simplex noise
   style.css          play HUD + menu theme
-tests/               58 suites: sim/*, hud/*, render/*, ui/*, app/*
-scripts/             test runner, Playwright smokes, screenshots
-docs/design/         this GDD + TDD
+tests/               62 suites: sim/*, hud/*, render/*, ui/*, app/*
+scripts/             test runner, Playwright smokes, screenshots, behavior-baseline
+docs/design/         this GDD + TDD + ROVER-STATE.md (rover state model)
 ```
 
 **Original PDF folders not present (and why):**
@@ -160,7 +167,7 @@ docs/design/         this GDD + TDD
 |---|---|---|
 | `sim/ecs/` | **not used** | Entities are typed objects on `Simulation` (rovers, buildings, colonist, POIs). Data-oriented enough for the current scale; a formal ECS is not required until entity counts demand it. |
 | `sim/utilities/` | **OUT** | Only power is a network; fluids are tank pools on buildings. |
-| `sim/ai/` | **split** between `Simulation.ts` and `sim/systems/` | Rover task queue, reservations and auto-dispatch still sit next to the entities they drive (Phases 10–13); construction's crew auto-dispatch moved to `ConstructionSystem`. |
+| `sim/ai/` | **`sim/systems/`** | Rover commands, task lifecycle and reservations moved to `RoverSystem` (Phase 10); its execution state (`goal`/`phase`) is runtime-only, machine-checked and documented in `docs/design/ROVER-STATE.md` (Phase 11); the *scheduler* — maintenance, rescue, supply-run auto-dispatch, behind an explicit job model (evaluators → filter → order → reserve → assign) — moved to `FleetAutomationSystem` (Phase 12); resource accounting — the storage ledger, cargo, depot transfers, site delivery and deposit reservations — moved to `LogisticsSystem` (Phase 13), with `Simulation`'s public storage surface kept as a delegate, while site crew choice stays in `ConstructionSystem`. Per-rover charging and storm recall remain in `RoverSystem`'s tick by design — the fleet-side of both lives in `FleetAutomationSystem` (dispatch pools and the storm filter). |
 | `sim/research/` | **OUT** | |
 | `sim/save/` | **extracted to** `sim/persistence/` | Schema, codec, validator and the v1…v7 migrations; `Simulation.snapshot/restore` are thin delegates. |
 | `input/` | **folded into** `app/Game.ts` | |
@@ -406,7 +413,7 @@ Matches the PDF categories and is **IN**:
 | Category | Suites (representative) |
 |---|---|
 | Unit | `sim/power`, `sim/clock`, `sim/alerts`, `sim/weather`, `sim/host` |
-| Integration | `sim/life-support`, `sim/colony`, `sim/build`, `sim/grid`, `sim/storms`, `sim/rovers`, `sim/fleet`, `sim/garage`, `sim/lights`, `sim/pois`, `sim/persistence` |
+| Integration | `sim/life-support`, `sim/colony`, `sim/build`, `sim/grid`, `sim/storms`, `sim/rovers`, `sim/rover-system`, `sim/rover-state`, `sim/fleet`, `sim/fleet-automation`, `sim/logistics-system`, `sim/garage`, `sim/lights`, `sim/pois`, `sim/persistence` |
 | Determinism | `sim/determinism`, weather/pois persistence hashes |
 | Load | `sim/soak` (20 sols) |
 | HUD | `hud/*` under jsdom |

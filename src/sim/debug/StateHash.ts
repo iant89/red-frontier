@@ -19,7 +19,7 @@
  *    rather than `snapshot()`, so a persistence bug and a simulation bug
  *    don't hide behind each other, and Phase 3's codec rework can't perturb
  *    the tool that's supposed to police it.
- *  - **Wording is excluded.** `statusText`, `idleReason` and rover labels
+ *  - **Wording is excluded.** `idleReason`, entity labels and other wording
  *    are presentation strings; hashing them would make the hash churn on a
  *    reword that changes no behavior. Everything that can steer a future
  *    tick is in.
@@ -124,7 +124,7 @@ function project(sim: Simulation): unknown {
     flows: sim.flows,
 
     nextDropSol: sim.nextDropSol,
-    // `name` is wording, not state — deliberately left out like statusText.
+    // `name` is wording, not state — deliberately left out, like rover labels.
     colonist: {
       id: sim.colonist.id,
       x: sim.colonist.x,

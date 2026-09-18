@@ -175,7 +175,6 @@ export function createColonyState(params: ColonyStateParams): ColonyState {
       gid: 0,
       recharge: false,
       lowBatteryNotified: false,
-      statusText: 'Idle',
       chargeSat: 1,
       autoTask: false,
       condition: 100,
