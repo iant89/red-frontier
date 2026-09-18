@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Simulation } from '../../src/sim/Simulation';
 import { HistorySystem } from '../../src/sim/systems/HistorySystem';
-import { emptyFlows } from '../../src/sim/state/HistoryState';
+import { emptyFlows } from '../../src/sim/state/ResourceState';
 import {
   HISTORY_SAMPLES,
   HISTORY_INTERVAL_S,

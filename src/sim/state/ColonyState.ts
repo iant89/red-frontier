@@ -53,9 +53,8 @@ import { makePools, makeColonist, type Colonist, type FluidPools } from '../life
 import { DROP_FIRST_SOL_MIN, DROP_FIRST_SOL_MAX } from '../config';
 import { defaultRoverRules, type Rover, type RoverTask } from './RoverState';
 import type { Building } from './BuildingState';
-import type { FluidFlow } from './ResourceState';
 import type { HistorySample } from './HistoryState';
-import { emptyFlows } from './HistoryState';
+import { emptyFlows, type FluidFlow } from './ResourceState';
 import type { Poi } from '../pois';
 
 export interface ColonyState {

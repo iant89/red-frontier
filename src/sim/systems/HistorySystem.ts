@@ -64,7 +64,7 @@
  */
 
 import type { ColonyState } from '../state/ColonyState';
-import { emptyFlows } from '../state/HistoryState';
+import { emptyFlows } from '../state/ResourceState';
 import {
   HISTORY_SAMPLES,
   HISTORY_INTERVAL_S,

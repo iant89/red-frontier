@@ -11,6 +11,15 @@ export interface FluidFlow {
   consumed: number;
 }
 
+/** Zeroed per-tick fluid accumulators (live production bookkeeping). */
+export function emptyFlows(): Record<FluidId, FluidFlow> {
+  return {
+    water: { produced: 0, consumed: 0 },
+    oxygen: { produced: 0, consumed: 0 },
+    food: { produced: 0, consumed: 0 },
+  };
+}
+
 export function storageTotal(storage: ResourceAmounts): number {
   let t = 0;
   for (const r of ALL_RESOURCES) t += storage[r];
