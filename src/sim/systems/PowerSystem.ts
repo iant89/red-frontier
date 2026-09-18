@@ -21,8 +21,8 @@
  *     happens when it runs are *production* questions (Phase 8); the system
  *     only needs the answers, so they cross a context interface implemented
  *     by Simulation. No second source of truth.
- *   - `tickGarages` (service + assembly, which *consume* powerSat) stays in
- *     Simulation until its owning phase extracts it.
+ *   - Garage bay service + assembly (consumes `powerSat`) lives in
+ *     GarageSystem (Phase 18); Simulation calls it right after this tick.
  *
  * Determinism: no RNG, no wall clock — the same state and sun always resolve
  * to the same grid. The per-tick `PowerResult` is stored on `state.power`

@@ -277,6 +277,7 @@ test('gameOver= and BuildingTripped damaged= writers are FailureSystem (+ restor
     'systems/FailureSystem.ts',
     'state/ColonyState.ts',
     'Simulation.ts',
+    'persistence/ColonyPersistence.ts', // Phase 18: restore body moved here
   ]);
   for (const f of gameOverWriters) {
     assert.ok(allowedGameOver.has(f), `unexpected gameOver= writer: ${f}`);
@@ -289,6 +290,7 @@ test('gameOver= and BuildingTripped damaged= writers are FailureSystem (+ restor
   const allowedDamaged = new Set([
     'systems/FailureSystem.ts',
     'Simulation.ts',
+    'DevBackdoors.ts', // Phase 18: devSetBuildingHealth body moved here
   ]);
   for (const f of damagedAssign) {
     assert.ok(allowedDamaged.has(f), `unexpected damaged=true writer: ${f}`);

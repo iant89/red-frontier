@@ -2597,6 +2597,54 @@ The actual goal is:
 > Simulation should coordinate systems, not implement all their behavior.
 
 
+## Recorded (Phase 18 complete — 2026-09-18)
+
+Implemented on the shared computer (`refactor/phase-18-simulation-orchestrator`).
+
+**Simulation coordinates; it does not implement remaining domain bodies.**
+§22's slim-down is a set of move-not-redesign extractionsions — no tick-order
+change, no new product systems, no save/UI redesign:
+
+| Now outside Simulation | Came from | Was |
+| --- | --- | --- |
+| `GarageSystem.tick` / `assemble` | `Simulation.tickGarages` / `assembleRover` | private + public domain bodies |
+| `snapshotColony` / `restoreColony` | `Simulation.snapshot` / `restoreFromState` | persistence field mapping |
+| `DevBackdoors.*` | `Simulation.dev*` mutation bodies | developer-panel writes |
+| `HistorySystem.netRatePerSol` / `instantRatePerSol` / `reserveSols` | same-named Simulation methods | arithmetic over History windows |
+
+Simulation keeps the public host/command/view/lifecycle surface as thin
+delegates, owns cross-system hooks, and advances systems in the **identical**
+Phase 17 tick order:
+
+    Clock → Weather → Exploration → Power → Garage → LifeSupport →
+    Construction (site mats + builders) → FleetAutomation →
+    Rover (lights / update / move) → Colonist → Failure→Alert → History
+
+**What deliberately does not live here**
+
+- Tick-order redesign, AlertBus→History event-log, SimView redesign, Game.ts
+  extraction (Phase 19+).
+- New product systems beyond naming the existing garage bay.
+
+**Tests** — `tests/sim/simulation-orchestrator.test.ts`: garage / persistence /
+rate ownership guards, round-trip snapshot parity, public rate delegates, and a
+source-order pin of every system call inside `private tick()`. Prior phase
+architecture allowlists updated for ColonyPersistence / DevBackdoors writers.
+
+**Gate results**
+
+| Gate | Result |
+| --- | --- |
+| `npm run typecheck` | green |
+| `npm test` | green — 67 suites / 786 checks (was 66/778), ~81 s |
+| `npm run test:check` | green — 67 suites, all linked, all declare `@covers` |
+| `npm run build` | green — `index.js` ~1,050.60 kB (305.08 kB gz), `sim.worker` 230.68 kB, 94 modules |
+| behavior A/B | **identical** — `scripts/behavior-baseline.ts` vs Phase 17 tip (`6d3053e`) |
+| smokes | skipped on this host (Playwright not installed); unit/integration + A/B cover the slim-down |
+
+`Simulation.ts`: 1,361 → ~733 lines. The next phase per §51 is **Phase 19 — Extract Game.ts Responsibilities**.
+
+
 # 23. Phase 19 — Extract Game.ts Responsibilities
 
 Only after simulation refactoring is stable.

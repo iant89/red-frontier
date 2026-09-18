@@ -98,12 +98,12 @@ function checkTime(sim: Simulation, out: InvariantViolation[]): void {
       message: `simTime must be finite and >= 0, found ${sim.simTime}`,
     });
   }
-  const t = sim as unknown as { ticksRun: number };
-  if (!Number.isFinite(t.ticksRun) || t.ticksRun < 0) {
+  // ticksRun lives on ColonyState; do not reintroduce Simulation private proxies.
+  if (!Number.isFinite(sim.state.ticksRun) || sim.state.ticksRun < 0) {
     out.push({
       code: 'time-finite',
       subject: 'simulation clock',
-      message: `ticksRun must be finite and >= 0, found ${t.ticksRun}`,
+      message: `ticksRun must be finite and >= 0, found ${sim.state.ticksRun}`,
     });
   }
 }

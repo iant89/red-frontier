@@ -613,7 +613,8 @@ const ELEMENT_WRITERS = new Set([
 
 /** Who may replace the whole ledger (`storage = …`) — the boundary, not accounting. */
 const WHOLE_WRITERS = new Set([
-  'src/sim/Simulation.ts', // the accessor and the save/restore path
+  'src/sim/Simulation.ts', // the accessor (set storage)
+  'src/sim/persistence/ColonyPersistence.ts', // Phase 18: restore body
 ]);
 
 test('no module outside the ledger writes storage — §17\'s design rule', () => {

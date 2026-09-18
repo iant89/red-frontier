@@ -1,7 +1,7 @@
 /**
  * @suite sim/garage
  * @group integration
- * @covers src/sim/config.ts src/sim/defs.ts src/sim/Simulation.ts
+ * @covers src/sim/config.ts src/sim/defs.ts src/sim/Simulation.ts src/sim/systems/GarageSystem.ts
  * @desc The rover garage: the assembly line, bay servicing and 32 kW fast charging.
  */
 

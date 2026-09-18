@@ -47,9 +47,9 @@
  *     `unloadWhileCharging`, and the silent parked one in `goIdle`), the
  *     route's room check and `claimDeposit`/`releaseDeposit` all forward to it,
  *     which is why they cannot drift apart any more.
- *   - `assembleRover` + `tickGarages` — the garage line spends materials and
- *     consumes `powerSat` while *producing* a rover; Phases 6, 8 and 9 each
- *     left it where it was, and this phase does not change that call.
+ *   - Garage bay `assemble` + `tick` — GarageSystem (Phase 18). The line
+ *     spends materials via ConstructionSystem and spawns via RoverSystem.spawn;
+ *     this module does not own the bay.
  *
  * Determinism: no RNG, no wall clock. Every draw the rover makes is from
  * state the simulation already owns, and the tie-breaks (deposit claims, the
