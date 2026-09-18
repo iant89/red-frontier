@@ -2734,6 +2734,55 @@ regression that used to surface as the save-failed prompt) and the
 `tests/app/pause-save.test.ts`, `tests/hud/pause-menu.test.ts` and
 `scripts/pause-smoke.mjs` (both transports).
 
+## Recorded (Phase 19 complete — 2026-09-18)
+
+Implemented on the shared computer (`refactor/phase-19-game-controllers`).
+
+**Game is a composition root.** §23's extraction is move-not-redesign — no new
+product features, no save/UI redesign, no change to onDone-ordered teardown or
+`saveContext` phrasing/visibility:
+
+| Now outside Game | Came from | Was |
+| --- | --- | --- |
+| `GameLoop` | `loop` / `resize` | rAF, host.step, render scheduling |
+| `InputController` | `attachInput` / pointer* / `keyDown` / `uiCoversPoint` | keyboard, pointer, touch, camera |
+| `SelectionController` | `primaryTap` / `contextTap` / selection fields / `updateSelectionVisual` / `centerOnSelected` / `handleAction` | selection + command initiation taps |
+| `BuildController` | `setPendingBuild` / `placeBuild` / `updateGhost` | build mode + placement *request* (validity stays on sim/host) |
+| `SaveController` | `save` / `onSaveFailure` / `manualSave` / `retrySave` / `saveAsNew` / `abandonToMenu` / `returnToMenu` / `leaveToMenu` | save + autosave UI state + onDone teardown |
+| `MenuController` | `openPauseMenu` / `closePauseMenu` / `pauseSettings` / `buildColonyStats` / `applyGraphics` | pause menu |
+| `UpdateController` | `onNewBuild` / `updateNoticeSave` / `updateNoticeReload` / `updateNoticeLater` | in-play update notice |
+
+Game keeps lifecycle (main menu / new game / load / launch), developer mode,
+HUD `syncUI`, and thin private delegates so the pause-save pin surface
+(`(game as any).returnToMenu()` etc.) and smoke field aliases
+(`saveContext` / `saveInFlight` / `lastSave` / `autosaveSec` / `pauseMenu`)
+stay identical.
+
+**What deliberately does not live here**
+
+- SimView redesign (Phase 20+), tick-order or host-boundary changes.
+- Redesigning save/menu UX — only the extraction.
+- Final placement validity inside BuildController (still `sim.canPlace` /
+  host `requestPlacement` ack).
+
+**Tests** — `tests/app/game-controllers.test.ts`: controller import + Game
+wiring + ownership guards (save onDone path, menu/update/input/selection/
+build/loop). Prior pins unchanged: `tests/app/pause-save.test.ts`,
+`tests/hud/pause-menu.test.ts`.
+
+**Gate results**
+
+| Gate | Result |
+| --- | --- |
+| `npm run typecheck` | green |
+| `npm test` | green — 68 suites / 795 checks (was 67/786), ~80 s |
+| `npm run test:check` | green — 68 suites, all linked, all declare `@covers` |
+| `npm run build` | green — `index.js` ~1,056.34 kB (306.46 kB gz), `sim.worker` 230.15 kB, 101 modules |
+| behavior | **identical** — move-not-redesign; pause-save pins green |
+| smokes | `scripts/pause-smoke.mjs` green on both `?worker=1` and `?worker=0` |
+
+`Game.ts`: 1,904 → 868 lines. The next phase per §51 is **Phase 20 — Strengthen SimView**.
+
 
 # 24. Phase 20 — Strengthen SimView
 
