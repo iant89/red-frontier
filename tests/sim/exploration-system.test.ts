@@ -15,7 +15,6 @@ import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Simulation } from '../../src/sim/Simulation';
 import { ExplorationSystem } from '../../src/sim/systems/ExplorationSystem';
-import { RoverSystem } from '../../src/sim/systems/RoverSystem';
 import {
   POI_DISCOVER_M,
 } from '../../src/sim/config';
@@ -183,16 +182,6 @@ test('recoverSiteCells hands surviving charge to the grid and zeros the site', (
   );
 });
 
-test('RoverSystem.recoverSiteCells is a one-line forward to ExplorationSystem', () => {
-  const sim = fresh();
-  const rng = mulberry32(4);
-  const p = makePoi(7, 'wreckRover', 0, 0, rng);
-  p.energyKWh = 20;
-  const before = sim.state.storedKWh;
-  RoverSystem.recoverSiteCells(sim.state, p);
-  assert.equal(p.energyKWh, 0);
-  assert.ok(sim.state.storedKWh >= before);
-});
 
 test('a full grid store still clears the site cells and warns about the loss', () => {
   const sim = fresh();

@@ -1373,14 +1373,6 @@ export class RoverSystem {
     RoverSystem.finishTask(r);
   }
 
-  /**
-   * Hand surviving cells to the grid store once the bulk cargo is stripped.
-   * Phase 14: the reward itself is ExplorationSystem's; this name survives as
-   * a one-line forward so existing call sites (and tests) keep working.
-   */
-  static recoverSiteCells(state: ColonyState, p: Poi): void {
-    ExplorationSystem.recoverSiteCells(state, p);
-  }
 
   /**
    * The RECOVER task (TDD §8): drive out to a battery-flat rover, hook up the
