@@ -1,7 +1,7 @@
 /**
  * @suite sim/pois
  * @group integration
- * @covers src/sim/pois.ts src/sim/World.ts src/sim/Simulation.ts src/sim/config.ts
+ * @covers src/sim/pois.ts src/sim/World.ts src/sim/Simulation.ts src/sim/systems/ExplorationSystem.ts src/sim/config.ts
  * @desc Exploration: seeded site scatter, discovery radius, the salvage task and
  * its refusals, Earth supply drops on a schedule, dust burying a container
  * faster inside a storm, and all of it surviving a save/restore.

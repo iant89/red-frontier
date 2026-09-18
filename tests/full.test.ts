@@ -47,6 +47,7 @@ import './sim/fleet-automation.test';
 import './sim/garage.test';
 import './sim/lights.test';
 import './sim/determinism.test';
+import './sim/exploration-system.test';
 import './sim/pois.test';
 import './sim/persistence.test';
 import './sim/devtools.test';

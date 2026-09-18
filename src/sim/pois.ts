@@ -244,7 +244,7 @@ export function salvageTotalKg(p: Poi): number {
  *
  * This asks about **bulk salvage only** — what a rover can cut free and carry.
  * Surviving cells are deliberately not part of it: they are handed over by
- * `recoverSiteCells` at the moment the bulk runs out, and gating on them too
+ * `ExplorationSystem.recoverSiteCells` at the moment the bulk runs out, and gating on them too
  * would mean a container with 60 kWh of cells could never
  * be declared empty, because the cells are only taken once it is.
  */
@@ -318,7 +318,7 @@ export function makePoi(
 /**
  * Build one supply drop. Manifest choice and amounts come from `rng`; the
  * burial clock starts at `DROP_BURY_SOLS` and the storm multiplier is applied by
- * the simulation, which is the only thing that knows the sky.
+ * ExplorationSystem (Phase 14), which is the only thing that knows the sky.
  */
 export function makeSupplyDrop(
   id: number,

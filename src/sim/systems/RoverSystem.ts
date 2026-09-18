@@ -73,7 +73,6 @@ import {
   enterWork,
 } from '../state/RoverState';
 import { LogisticsSystem, type LogisticsHostHooks } from './LogisticsSystem';
-import { batteryCapacityKWh } from '../state/PowerState';
 import type { Deposit } from '../World';
 import type { ResourceId, RoverKind } from '../defs';
 import { ALL_RESOURCES, BUILDINGS, RESOURCES, ROVERS, emptyAmounts } from '../defs';
@@ -83,9 +82,8 @@ import {
   POI_KINDS,
   isPickedClean,
   salvageRateKgS,
-  salvageTotalKg,
-  takeSalvage,
 } from '../pois';
+import { ExplorationSystem } from './ExplorationSystem';
 import { clamp } from '../../lib/rng';
 import { PowerSystem } from './PowerSystem';
 import {
@@ -1351,7 +1349,7 @@ export class RoverSystem {
 
     const room = def.capacityKg - cargoMass(r);
     const rate = salvageRateKgS(p.kind) * state.weather.workMultiplierAt(r.x, r.z) * RoverSystem.roverWorkMul(r);
-    const { takenKg, perResource } = takeSalvage(p, room, rate, SIM_TICK);
+    const { takenKg, perResource } = ExplorationSystem.takeSalvage(p, room, rate, SIM_TICK);
     for (const res of ALL_RESOURCES) {
       const kg = perResource[res];
       if (kg && kg > 0) r.cargo[res] += kg;
@@ -1363,7 +1361,7 @@ export class RoverSystem {
     if (!isPickedClean(p)) {
       return;
     }
-    RoverSystem.recoverSiteCells(state, p);
+    ExplorationSystem.recoverSiteCells(state, p);
     const label = POI_KINDS[p.kind].label;
     log(
       state,
@@ -1375,24 +1373,13 @@ export class RoverSystem {
     RoverSystem.finishTask(r);
   }
 
-  /** Hand surviving cells to the grid store once the bulk cargo is stripped. */
+  /**
+   * Hand surviving cells to the grid store once the bulk cargo is stripped.
+   * Phase 14: the reward itself is ExplorationSystem's; this name survives as
+   * a one-line forward so existing call sites (and tests) keep working.
+   */
   static recoverSiteCells(state: ColonyState, p: Poi): void {
-    if (p.energyKWh <= 0.5) return;
-    const cap = batteryCapacityKWh(state);
-    const took = Math.max(0, Math.min(p.energyKWh, cap - state.storedKWh));
-    const lost = p.energyKWh - took;
-    state.storedKWh += took;
-    p.energyKWh = 0;
-    if (took > 0.5) {
-      log(state, 'ok', `Recovered from the site: ${Math.round(took)} kWh of cells.`);
-    }
-    if (lost > 0.5) {
-      log(
-        state,
-        'warn',
-        `${Math.round(lost)} kWh of the site's cells would not fit — the batteries were already full.`,
-      );
-    }
+    ExplorationSystem.recoverSiteCells(state, p);
   }
 
   /**

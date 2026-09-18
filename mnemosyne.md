@@ -747,6 +747,36 @@ Persistent notes for future coding sessions.
   pre-Phase-10 `HEAD`. `Simulation.ts` 2,082 → 1,799 lines. Recorded in the
   roadmap's Phase 12 block.
 
+## Refactor Phase 14 (ExplorationSystem) — discovery vs the planet
+
+- **`src/sim/systems/ExplorationSystem.ts` owns what the player has found.**
+  Discovery radius, the Earth supply-drop schedule and burial clock, and the
+  site-side of salvage (`takeSalvage` / `recoverSiteCells`) live here.
+  `World.generatePois` still scatters the planet; the salvage *task* body stays
+  in `RoverSystem`. That is §18's distinction as code, not a comment.
+- **Delegate, don't move the call sites.** `Simulation.pois` / `poiById` and
+  `RoverSystem.recoverSiteCells` keep their names as one-line forwards — same
+  pattern as Phase 13's storage accessors and Phase 10's command verbs. The
+  existing `tests/sim/pois.test.ts` suite did not need call-site edits.
+- **No hooks required.** Exploration only writes `state.world.pois`,
+  `state.nextDropSol` / `dropRng`, `state.storedKWh` (cell reward) and
+  `state.alerts` — all already on `ColonyState`. Cross-domain seams that needed
+  `*HostHooks` in weather/construction/rover do not appear here.
+- **Architecture guard:** `.discovered=` and `.buried=` writers under `src/sim`
+  are exactly `ExplorationSystem.ts`. Object-literal constructors (`discovered:
+  false` in `makePoi`) and save restore (`world.setPois`) are whole-object
+  writes, deliberately not matched — same split Phase 13 used for storage.
+- **dropRng stays a dedicated stream.** Landing a container consumes
+  `state.dropRng` alone; never the world / deposit / weather streams (roadmap
+  §9 Important). A divergence still surfaces as a real `nextDropSol` / POI-id
+  mismatch in the behavior baseline.
+- Gate on completion (2026-09-18): 63 suites / 733 checks green
+  (`tests/sim/exploration-system.test.ts` +13), typecheck and `test:check` green,
+  production build green (`index.js` 1,046.93 kB / 303.80 gz, `sim.worker`
+  227.03 kB), behavior A/B byte-identical against pre-Phase-14 tree. Smokes
+  skipped (no Playwright on this host). `Simulation.ts` 1,790 → 1,652 lines.
+  Recorded in the roadmap's Phase 14 block.
+
 ## Refactor Phase 13 (LogisticsSystem) — one owner for resource accounting
 
 - **`src/sim/systems/LogisticsSystem.ts` is now the only module in `src/sim` that
