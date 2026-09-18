@@ -80,7 +80,7 @@ export interface Shelter {
 
 /**
  * Cross-domain effects life support triggers but does not own. Implemented
- * by Simulation; ConstructionSystem (Phase 9) / FailureSystem (Phase 15)
+ * by Simulation (wired to ConstructionSystem / FailureSystem);
  * will absorb the implementor, not the contract.
  */
 export interface LifeSupportHostHooks {

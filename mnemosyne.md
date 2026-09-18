@@ -747,6 +747,34 @@ Persistent notes for future coding sessions.
   pre-Phase-10 `HEAD`. `Simulation.ts` 2,082 → 1,799 lines. Recorded in the
   roadmap's Phase 12 block.
 
+## Refactor Phase 15 (FailureSystem) — failures without AlertSystem
+
+- **`src/sim/systems/FailureSystem.ts` owns failure outcomes and checks.**
+  `tripDamaged` / `endMission` (the WeatherHostHooks / LifeSupportHostHooks
+  implementors) and the former `Simulation.evaluateAlerts` body live here as
+  `evaluate` → domain events → interim `applyAlerts` bridge. AlertBus mechanics
+  and HUD objects stay out; AlertSystem is Phase 16.
+- **Domain events are the existing modes only:** `RoverDisabled`, `RoverWear`,
+  `BuildingFailed`, `BuildingTripped`, `PowerShortage`, `BatteryLow`,
+  `FluidReserve` (OxygenCritical et al.), `ColonistHealth`, `SuitOxygen`,
+  `StorageFull`, `StormActive`, `PanelsDirty`, `MissionLost`. No new product
+  failure modes.
+- **Rover disable stays in RoverSystem.** FailureSystem *observes*
+  `phase === 'disabled'` and emits `RoverDisabled`; weather/construction still
+  call `RoverSystem.disable` via hooks.
+- **`FailureHostHooks.finishTask`** releases a builder when a structure trips —
+  same host-hooks pattern as ConstructionSystem. `FailureSystemContext` answers
+  `reserveSols` / `runnable` without owning those ledgers.
+- **Delegate, don't move call sites.** `Simulation.evaluateAlerts` is a one-line
+  `FailureSystem.tick` forward; weather/life-support hooks point at
+  FailureSystem. Existing `tests/sim/alerts.test.ts` kept working.
+- Gate on completion (2026-09-18): 64 suites / 750 checks green
+  (`tests/sim/failure-system.test.ts` +18), typecheck and `test:check` green,
+  production build green (`index.js` 1,049.69 kB / 304.64 gz, `sim.worker`
+  229.80 kB), behavior A/B byte-identical against pre-Phase-15 tree. Smokes
+  skipped (no Playwright on this host). `Simulation.ts` 1,652 → 1,410 lines.
+  Recorded in the roadmap's Phase 15 block.
+
 ## Refactor Phase 14 (ExplorationSystem) — discovery vs the planet
 
 - **`src/sim/systems/ExplorationSystem.ts` owns what the player has found.**
