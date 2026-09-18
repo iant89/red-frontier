@@ -25,6 +25,7 @@ import type { FluidFlow, HistorySample } from '../Simulation';
 import type { Poi } from '../pois';
 import type { FluidPools } from '../lifesupport';
 import type { Alert, LogEvent, Severity } from '../alerts';
+import type { DomainEvent } from '../domainEvents';
 import type { SunState } from '../clock';
 import type { BuildingKind, FluidId, ResourceAmounts } from '../defs';
 import type { PowerResult } from '../power';
@@ -73,6 +74,7 @@ export class ColonyMirror implements SimView {
   private readonly ground: World;
   private readonly log: LogEvent[] = [];
   private unread: LogEvent[] = [];
+  private unreadDomain: DomainEvent[] = [];
   private payload: ViewPayload;
   /** Rebuilt PowerResult; invalidated on apply() so frames can re-read cheaply. */
   private powerCache: PowerResult | null = null;
@@ -204,6 +206,9 @@ export class ColonyMirror implements SimView {
         if (this.log.length > HISTORY_LIMIT) this.log.shift();
       }
     }
+    if (payload.domainEvents.length > 0) {
+      this.unreadDomain = this.unreadDomain.concat(payload.domainEvents);
+    }
   }
 
   /**
@@ -215,6 +220,14 @@ export class ColonyMirror implements SimView {
     const out = this.unread;
     this.unread = [];
     return out;
+  }
+
+  /** Domain events since the last drain (Phase 21). Separate from HUD log lines. */
+  drainDomainEvents(): ReadonlyArray<DomainEvent> {
+    if (this.unreadDomain.length === 0) return Object.freeze([]);
+    const out = this.unreadDomain;
+    this.unreadDomain = [];
+    return Object.freeze(out);
   }
 
   /** The overlay grips the world is actually running, echoed back. */

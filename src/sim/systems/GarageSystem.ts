@@ -94,7 +94,15 @@ export class GarageSystem {
       for (const r of state.rovers) {
         if (r.phase === 'disabled' || r.condition >= 100) continue;
         if (Math.hypot(b.x - r.x, b.z - r.z) <= reach) {
+          const before = r.condition;
           r.condition = Math.min(100, r.condition + service);
+          if (before < 100 && r.condition >= 100) {
+            state.domainEvents.push({
+              type: 'rover/repaired',
+              roverId: r.id,
+              reason: 'garage-service',
+            });
+          }
         }
       }
       if (b.assembly) {

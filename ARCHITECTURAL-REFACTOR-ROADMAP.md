@@ -2917,6 +2917,46 @@ Example:
 This gives future systems a clean way to communicate without directly importing each other.
 
 
+## Recorded (Phase 21 complete — 2026-09-18)
+
+Implemented on the shared computer (`refactor/phase-21-domain-events`).
+
+**Plain serializable domain events + per-tick collector.** New
+`src/sim/domainEvents.ts`:
+
+| Piece | Role |
+| --- | --- |
+| `DomainEvent` | Discriminated union (`type: 'rover/disabled'`, …) |
+| `DomainEventLog` | `push` / `drain`/`take` (clears) / `snapshot` |
+| `ColonyState.domainEvents` | Systems emit without importing each other |
+| `Simulation.drainDomainEvents()` | Host/API surface, separate from AlertBus |
+
+**Catalog wired at natural transitions** (no gameplay change): RoverMoved /
+Disabled / Repaired, BuildingPlaced / Completed / Failed, ResourceProduced /
+Consumed, PowerShortage, StormStarted / Ended, POIDiscovered, SalvageRecovered,
+ColonistCritical, GameOver.
+
+**Hosts.** `LocalSimHost` and `WorkerSimHost` expose `drainDomainEvents()`.
+Worker payloads carry `domainEvents` (mirrored like AlertBus log lines).
+`drainEvents()` / AlertBus HUD toasts unchanged.
+
+**Move-not-redesign.** No event bus, pub/sub, middleware, or async listeners.
+No Phase 22 command work. FailureEvent / AlertSystem mapping preserved.
+
+**Tests** — `tests/sim/domain-events.test.ts` (collector, transitions, AlertBus
+pin, Local/Worker surface).
+
+**Gate results**
+
+| Gate | Result |
+| --- | --- |
+| `npm run typecheck` | green |
+| `npm test` | 69 suites / 809 checks green |
+| `npm run test:check` | 69 suites / 809 checks linked |
+| `npm run build` | green (`index.js` 1,061.92 kB / 307.96 gz, `sim.worker` 232.75 kB) |
+
+
+
 # 26. Phase 22 — Improve Command Architecture
 
 The existing command protocol should remain.

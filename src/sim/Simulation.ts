@@ -50,6 +50,7 @@ import {
   type FluidPools,
 } from './lifesupport';
 import { AlertBus, type Severity } from './alerts';
+import type { DomainEvent } from './domainEvents';
 import { assertInvariants, invariantChecksEnabled } from './debug/SimulationAssertions';
 import { getProfiler, profilerEnabled } from './debug/Profiler';
 import { decodeSave } from './persistence/SaveCodec';
@@ -703,6 +704,14 @@ export class Simulation {
 
   drainEvents() {
     return this.alerts.drain();
+  }
+
+  /**
+   * Structured domain events since the last drain (Phase 21). Separate from
+   * {@link drainEvents} / AlertBus HUD toasts.
+   */
+  drainDomainEvents(): ReadonlyArray<DomainEvent> {
+    return this.state.domainEvents.drain();
   }
 
   // ------------------------------------------------------- persistence ----

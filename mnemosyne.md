@@ -746,6 +746,18 @@ Persistent notes for future coding sessions.
   roadmap's Phase 12 block.
 
 
+## Refactor Phase 21 (Domain Events) — per-tick structured channel
+
+- **`DomainEvent` + `DomainEventLog`** in `src/sim/domainEvents.ts`. String
+  `type` discriminants (`rover/disabled`, `building/placed`, …). Collector is
+  push/drain only — not a bus.
+- **Wired on `ColonyState.domainEvents`.** Systems emit at existing transition
+  sites beside AlertBus / FailureSystem calls. Gameplay outcomes unchanged.
+- **Host API:** `drainDomainEvents()` on Simulation / LocalSimHost /
+  WorkerSimHost. Worker `ViewPayload.domainEvents` for parity. AlertBus
+  `drainEvents` stays the HUD toast channel.
+- Gate on completion (2026-09-18): see roadmap Phase 21 Recorded block.
+
 ## Refactor Phase 20 (Strengthen SimView) — immutable presentation boundary
 
 - **View models:** `RoverView`, `BuildingView`, `ColonistView`, `ResourceView`,

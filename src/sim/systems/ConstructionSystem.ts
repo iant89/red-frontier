@@ -130,6 +130,13 @@ export class ConstructionSystem {
     const def = BUILDINGS[kind];
     const b = ConstructionSystem.newBuilding(state, kind, x, z);
     state.buildings.push(b);
+    state.domainEvents.push({
+      type: 'building/placed',
+      buildingId: b.id,
+      kind,
+      x,
+      z,
+    });
     ConstructionSystem.log(state, 'info', `${def.label} sited — assigning a builder.`);
     return b;
   }
@@ -385,6 +392,11 @@ export class ConstructionSystem {
     b.progress = 1;
     b.workerId = null;
     recomputeCapacitiesState(state);
+    state.domainEvents.push({
+      type: 'building/completed',
+      buildingId: b.id,
+      kind: b.kind,
+    });
     const def = BUILDINGS[b.kind];
     const extras: string[] = [];
     if (def.storagePerResourceKg) extras.push(`+${def.storagePerResourceKg} kg per silo`);

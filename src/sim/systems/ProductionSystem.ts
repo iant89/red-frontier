@@ -131,7 +131,16 @@ export class ProductionSystem {
         const r = p.solidIn[res];
         if (!r) continue;
         // Phase 13: solid inputs are the storage ledger's to move.
-        LogisticsSystem.take(state, res, r * mul * rate * hours);
+        const amount = r * mul * rate * hours;
+        const took = LogisticsSystem.take(state, res, amount);
+        if (took > 1e-9) {
+          state.domainEvents.push({
+            type: 'resource/consumed',
+            resource: res,
+            amount: took,
+            buildingId: b.id,
+          });
+        }
       }
     }
     if (p.fluidIn) {
@@ -140,6 +149,14 @@ export class ProductionSystem {
         if (!r) continue;
         const got = takeFluid(state.pools, f, r * mul * rate * hours);
         state.flows[f].consumed += got;
+        if (got > 1e-9) {
+          state.domainEvents.push({
+            type: 'resource/consumed',
+            resource: f,
+            amount: got,
+            buildingId: b.id,
+          });
+        }
       }
     }
     if (p.fluidOut) {
@@ -148,6 +165,14 @@ export class ProductionSystem {
         if (!r) continue;
         const made = addFluid(state.pools, f, r * mul * rate * hours);
         state.flows[f].produced += made;
+        if (made > 1e-9) {
+          state.domainEvents.push({
+            type: 'resource/produced',
+            resource: f,
+            amount: made,
+            buildingId: b.id,
+          });
+        }
       }
     }
   }

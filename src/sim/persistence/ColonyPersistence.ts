@@ -286,6 +286,7 @@ export function restoreColony(state: ColonyState, data: SaveState): void {
   WeatherSystem.refreshRadar(state);
 
   state.alerts.reset();
+  state.domainEvents.clear();
   if (data.alerts) state.alerts.restore(data.alerts);
   HistorySystem.clear(state);
 

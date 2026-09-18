@@ -23,6 +23,7 @@ import { SolClock } from '../clock';
 import { createWeatherState } from './WeatherState';
 import type { Weather } from '../weather';
 import { AlertBus } from '../alerts';
+import { DomainEventLog } from '../domainEvents';
 import { mulberry32 } from '../../lib/rng';
 import {
   BASE_STORAGE_PER_RESOURCE,
@@ -69,6 +70,8 @@ export interface ColonyState {
   clock: SolClock;
   weather: Weather;
   alerts: AlertBus;
+  /** Per-tick domain event collector (Phase 21). Ephemeral — not saved. */
+  domainEvents: DomainEventLog;
 
   rovers: Rover[];
   buildings: Building[];
@@ -131,6 +134,7 @@ export function createColonyState(params: ColonyStateParams): ColonyState {
 
   const clock = new SolClock();
   const alerts = new AlertBus();
+  const domainEvents = new DomainEventLog();
   const colonist = makeColonist(1, 'Cmdr. Vega', SPAWN_X, world.heightAt(SPAWN_X, SPAWN_Z), SPAWN_Z + 3);
   const storage = emptyAmounts();
   const pools = makePools();
@@ -218,6 +222,7 @@ export function createColonyState(params: ColonyStateParams): ColonyState {
     clock,
     weather,
     alerts,
+    domainEvents,
     rovers,
     buildings: [],
     colonist,

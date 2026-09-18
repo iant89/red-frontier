@@ -83,6 +83,14 @@ export class AlertSystem {
       switch (e.kind) {
         case 'PowerShortage': {
           if (e.level === 'critical') {
+            if (!A.isActive('brownout-critical')) {
+              state.domainEvents.push({
+                type: 'power/shortage',
+                level: 'critical',
+                generationKw: e.generationKw,
+                demandKw: e.demandKw,
+              });
+            }
             A.raise(
               'brownout-critical',
               'crit',
@@ -94,6 +102,14 @@ export class AlertSystem {
           } else {
             A.clear('brownout-critical', t, stamp, 'Critical loads are powered again.');
             if (e.level === 'warn') {
+              if (!A.isActive('brownout')) {
+                state.domainEvents.push({
+                  type: 'power/shortage',
+                  level: 'warn',
+                  generationKw: e.generationKw,
+                  demandKw: e.demandKw,
+                });
+              }
               A.raise(
                 'brownout',
                 'warn',
@@ -162,6 +178,14 @@ export class AlertSystem {
         }
         case 'ColonistHealth': {
           if (e.level === 'crit') {
+            const prior = A.list().find((a) => a.key === 'colonist-health');
+            if (!prior || prior.severity !== 'crit') {
+              state.domainEvents.push({
+                type: 'colonist/critical',
+                colonistId: e.colonistId,
+                health: e.health,
+              });
+            }
             A.raise(
               'colonist-health',
               'crit',

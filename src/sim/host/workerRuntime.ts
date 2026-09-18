@@ -78,7 +78,8 @@ export function createSimRuntime(sendRaw: (reply: HostReply) => void): SimRuntim
     s.step(dt);
     runOverlays(s, overlays);
     const events = s.drainEvents();
-    send({ kind: 'view', view: projectView(s, 'worker', overlays, events) });
+    const domainEvents = s.drainDomainEvents();
+    send({ kind: 'view', view: projectView(s, 'worker', overlays, events, domainEvents) });
   }
 
   return {
@@ -99,7 +100,7 @@ export function createSimRuntime(sendRaw: (reply: HostReply) => void): SimRuntim
               kind: 'ready',
               id: message.id,
               terrain: terrainOf(s),
-              view: projectView(s, 'worker', overlays, s.drainEvents()),
+              view: projectView(s, 'worker', overlays, s.drainEvents(), s.drainDomainEvents()),
             });
             return;
           }
@@ -115,7 +116,7 @@ export function createSimRuntime(sendRaw: (reply: HostReply) => void): SimRuntim
               kind: 'ready',
               id: message.id,
               terrain: terrainOf(s),
-              view: projectView(s, 'worker', overlays, s.drainEvents()),
+              view: projectView(s, 'worker', overlays, s.drainEvents(), s.drainDomainEvents()),
             });
             return;
           }
@@ -161,7 +162,7 @@ export function createSimRuntime(sendRaw: (reply: HostReply) => void): SimRuntim
              * refusal's log line arrives with the refusal.
              */
             if (applied > 0) {
-              send({ kind: 'view', view: projectView(s, 'worker', overlays, s.drainEvents()) });
+              send({ kind: 'view', view: projectView(s, 'worker', overlays, s.drainEvents(), s.drainDomainEvents()) });
             }
             return;
           }
@@ -169,7 +170,7 @@ export function createSimRuntime(sendRaw: (reply: HostReply) => void): SimRuntim
             const s = world(message.id);
             if (!s) return;
             send({ kind: 'placement', id: message.id, ack: applyCommand(s, message.command) });
-            send({ kind: 'view', view: projectView(s, 'worker', overlays, s.drainEvents()) });
+            send({ kind: 'view', view: projectView(s, 'worker', overlays, s.drainEvents(), s.drainDomainEvents()) });
             return;
           }
           case 'overlays':
@@ -191,7 +192,7 @@ export function createSimRuntime(sendRaw: (reply: HostReply) => void): SimRuntim
             send({
               kind: 'loaded',
               id: message.id,
-              view: projectView(s, 'worker', overlays, s.drainEvents()),
+              view: projectView(s, 'worker', overlays, s.drainEvents(), s.drainDomainEvents()),
             });
             return;
           }

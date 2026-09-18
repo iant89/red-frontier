@@ -812,6 +812,7 @@ export class RoverSystem {
       r.x = r.gx;
       r.z = r.gz;
       r.phase = 'working';
+      state.domainEvents.push({ type: 'rover/moved', roverId: r.id, x: r.x, z: r.z });
       RoverSystem.onArrive(state, r);
       return;
     }
@@ -837,6 +838,11 @@ export class RoverSystem {
     r.routePaused = false;
     r.lightsActive = false; // nothing left to power them; the yellow strobe takes over
     RoverSystem.releaseReservations(state, r);
+    state.domainEvents.push({
+      type: 'rover/disabled',
+      roverId: r.id,
+      reason: 'battery-depleted',
+    });
     log(state, 'crit', `${r.label} is stranded — battery flat. Another rover can jump-start it.`);
   }
 
@@ -1363,6 +1369,12 @@ export class RoverSystem {
     }
     ExplorationSystem.recoverSiteCells(state, p);
     const label = POI_KINDS[p.kind].label;
+    state.domainEvents.push({
+      type: 'salvage/recovered',
+      poiId: p.id,
+      roverId: r.id,
+      kg: takenKg,
+    });
     log(
       state,
       'ok',
@@ -1441,6 +1453,11 @@ export class RoverSystem {
       s.pending = [];
       s.recharge = true;
       s.lowBatteryNotified = true; // it *is* low; don't warn again on the way in
+      state.domainEvents.push({
+        type: 'rover/repaired',
+        roverId: s.id,
+        reason: 'jump-start',
+      });
       log(
         state,
         'ok',
