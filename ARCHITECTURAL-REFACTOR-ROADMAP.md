@@ -2991,6 +2991,33 @@ not:
 
     commands = direct state mutation
 
+## Recorded (Phase 22 complete — 2026-09-19)
+
+Implemented on `arena/01a0bab6-red-frontier`.
+
+**Formalized PlayerCommand and DevCommand sub-unions.** In `src/sim/host/protocol.ts`:
+- `RoverCommand` (14 rover commands), `BuildingCommand` (5 building commands), `ColonistCommand` (`colonist/order`)
+- `PlayerCommand = RoverCommand | BuildingCommand | ColonistCommand`
+- `DevCommand` (20 developer backdoors)
+- `SimCommand = PlayerCommand | DevCommand`
+- Exhaustive arrays: `PLAYER_COMMAND_TYPES` (20) and `DEV_COMMAND_TYPES` (20); `COMMAND_TYPES = [...PLAYER_COMMAND_TYPES, ...DEV_COMMAND_TYPES]`
+- Type guards: `isPlayerCommand`, `isDevCommand`, `isPlayerCommandType`, `isDevCommandType`
+
+**Separated command application.** In `src/sim/host/applyCommand.ts`:
+- `applyPlayerCommand(sim, cmd)` executes player intent
+- `applyDevCommand(sim, cmd)` executes developer mutations
+- `applyCommand(sim, cmd)` records profiler command counter and cleanly delegates via `isDevCommand`
+
+**Architecture guards.** Added tests in `tests/sim/host.test.ts`:
+- Verified `PLAYER_COMMAND_TYPES` and `DEV_COMMAND_TYPES` strictly partition `COMMAND_TYPES` without overlap
+- Type guards verified on all sample commands
+- Architecture guard ensures non-dev controllers in `src/app` and `src/ui` never issue `DevCommand`s
+
+**Gate results**
+- `npm run typecheck`: green
+- `npm test`: 70 suites / 824 checks green
+- `behavior-baseline`: byte-identical
+
 
 # 27. Phase 23 — Improve Navigation
 
@@ -3047,6 +3074,31 @@ Consider path caching for repeated routes.
 
 Consider hierarchical navigation only if profiling demonstrates a need.
 
+## Recorded (Phase 23 complete — 2026-09-19)
+
+Implemented on `arena/01a0bab6-red-frontier`.
+
+**Reusable NavWorkspace with generation stamping.** In `src/sim/navgrid.ts`:
+- Preallocated workspace sized to grid dimensions ($N = n \times n$)
+- Generation stamping via `nextSearch()`: resets `stamp` and avoids clearing $O(N)$ arrays on each search
+- Zero per-pathfinding typed array allocations (previously 3 large typed arrays allocated per search)
+
+**Indexed Binary Min-Heap Priority Queue.** In `src/sim/navgrid.ts`:
+- Replaced $O(K)$ linear minimum search in the open set with $O(\log K)$ push, pop, and decrease-key operations
+- Heap indices tracked in `heapPos` array with generation stamp validation (`inOpenStamp`)
+- Fully deterministic search order, string-pulling preserved
+
+**Comprehensive Profiler Instrumentation.** In `src/sim/debug/Profiler.ts`:
+- Added metrics: `pathfindTimeMs`, `avgPathfindMs`, `worstPathfindMs`, `nodesExpanded`, `avgNodesExpanded`, `lastPathLength`, `pathfindAllocations` (0), and `pathfindsPerSec`
+- Exposed in profiler snapshot, summary, and dev table
+
+**Tests.** `tests/sim/navigation.test.ts` (7 checks) covers heap ordering, decreaseKey, stamp rollover, flat/cliff pathing, and profiler instrumentation.
+
+**Gate results**
+- `npm run typecheck`: green
+- `npm test`: 71 suites / 831 checks green
+- `behavior-baseline`: byte-identical (2,400 ticks, two seeds)
+
 
 # 28. Phase 24 — Worker/View Performance
 
@@ -3095,6 +3147,31 @@ Example:
 
 Do not implement this until profiling shows full snapshots are actually a bottleneck.
 
+## Recorded (Phase 24 complete — 2026-09-19)
+
+Implemented on `arena/01a0bab6-red-frontier`.
+
+**Performance Instrumentation.** In `src/sim/debug/Profiler.ts`, `WorkerSimHost.ts`, `workerRuntime.ts`, and `mirror.ts`:
+- Tracked view generation time (`viewTimeMs`, `avgViewMs`)
+- Tracked structured clone time (`structuredCloneTimeMs`, `avgStructuredCloneMs`, `worstStructuredCloneMs`)
+- Tracked worker message payload size (`workerMessageBytes`, `avgWorkerMessageBytes`, `lastWorkerMessageBytes`)
+- Tracked main-thread mirror apply time (`mainThreadApplyTimeMs`, `avgMainThreadApplyMs`, `worstMainThreadApplyMs`)
+
+**Empirical Profiling Baseline:**
+- View generation: ~0.2–0.5 ms
+- Structured clone: < 0.15 ms
+- Worker message payload: ~4.5–7.5 KB
+- Main-thread apply: < 0.08 ms
+- Full snapshots are confirmed to be well within the 60 FPS frame budget (< 1 ms combined overhead vs 16.6 ms frame budget), validating the roadmap guidance that delta complexity is unnecessary at current colony scale.
+
+**Tests.** `tests/sim/worker-performance.test.ts` (3 checks) validates profiling coverage and frame budget invariants.
+
+**Gate results**
+- `npm run typecheck`: green
+- `npm test`: 72 suites / 834 checks green
+- `scripts/worker-smoke.mjs`: green on worker (`?worker=1`) and in-process (`?worker=0`)
+- `behavior-baseline`: byte-identical
+
 
 # 29. Phase 25 — Property-Based Simulation Testing
 
@@ -3131,6 +3208,21 @@ Example invariant set:
     reservations remain valid
 
     no invalid references exist
+
+## Recorded (Phase 25 complete — 2026-09-19)
+
+Implemented on `arena/01a0bab6-red-frontier`.
+
+**Property-Based Simulation Testing Suite (`tests/sim/property-testing.test.ts`):**
+- **Fuzzing randomized command streams:** Continuous generation of valid player commands (`rover/move`, `mine`, `unload`, `wait`, `construct`, `clean`, `repair`, `recover`, `salvage`, `stop`, `building/place`, `toggle`, `maintain`, `colonist/order`) executed against seeded simulations across varying step deltas.
+- **Per-step invariant assertions:** Every step verifies `assertInvariants(sim)` checking id uniqueness, battery bounds, cargo bounds, non-negative storage, fluid ranges, grid capacity, building progress/health in [0, 1] / [0, 100], and task reference integrity.
+- **Stress scenarios:** Verified invariant preservation under rapid building placement and demolition, and during severe environmental storms with continuous rover orders.
+- **Deterministic replay property:** Replay of identical pseudo-random command sequences yields byte-identical `StateHash` signatures.
+
+**Gate results**
+- `npm run typecheck`: green
+- `npm test`: 73 suites / 838 checks green
+- `behavior-baseline`: byte-identical (2,400 ticks, two seeds)
 
 
 # 30. Phase 26 — Deterministic Replay Testing
@@ -3173,6 +3265,28 @@ Potential future uses:
     debugging
     multiplayer
     desync detection
+
+## Recorded (Phase 26 complete — 2026-09-19)
+
+Implemented on `arena/01a0bab6-red-frontier`.
+
+**Transcript infrastructure unified (`src/sim/debug/Transcript.ts`):**
+- Dropped inlined 150-line command dispatcher in favor of direct `applyCommand(sim, cmd)` delegation, eliminating the second source of truth for command execution.
+- Added `replayAndHash(transcript)` convenience runner returning both `ReplayResult` and computed `StateHash`.
+- Added `encodeTranscript` and `decodeTranscript` with full shape validation for JSON export/import.
+
+**Pinned Canonical Scenario Regression Hashes (`tests/sim/transcript.test.ts`):**
+- **Scenario 1 (Colony Foundation, seed 101):** Warehouse and solar placement, initial rover movement:
+  `rf1-00d64469b1f8ed-045301f4e9a064`
+- **Scenario 2 (Logistics Haul Loop, seed 2026):** Iron mining, automated repeat-route hauling to silos:
+  `rf1-1b403011c4e077-15884ea6a10eb6`
+- **Scenario 3 (Severe Storm Protocol, seed 303):** Severe storm onset, rover shelter rules, colonist EVA recall, storm clearance:
+  `rf1-050d43576ad423-12a3abe54893ea`
+
+**Gate results**
+- `npm run typecheck`: green
+- `npm test`: 73 suites / 842 checks green
+- `behavior-baseline`: byte-identical (2,400 ticks, two seeds)
 
 
 # 31. Phase 27 — Simulation State Hashing
@@ -4019,15 +4133,18 @@ The order matters.
     Domain Events
         ↓
     PHASE 22
-    Navigation Optimization
+    Command Architecture
         ↓
     PHASE 23
-    Worker/View Optimization
+    Navigation Optimization
         ↓
     PHASE 24
-    Property Testing
+    Worker/View Optimization
         ↓
     PHASE 25
+    Property Testing
+        ↓
+    PHASE 26
     Replay Testing
         ↓
     PHASE 26

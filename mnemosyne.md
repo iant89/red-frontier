@@ -769,6 +769,43 @@ Persistent notes for future coding sessions.
   roadmap's Phase 12 block.
 
 
+## Refactor Phase 26 (Deterministic Replay Testing) — pinned canonical scenarios
+
+- **Unified command application**: `Transcript.ts` now delegates `applyCommandForTranscript` directly to `applyCommand(sim, cmd)`, dropping 150 lines of duplicate command dispatching.
+- **Transcript serialization & replay runner**: `encodeTranscript` / `decodeTranscript` with shape validation; `replayAndHash` returns both simulation state and final `StateHash`.
+- **Pinned canonical scenarios**:
+  - Scenario 1 (Foundation): `rf1-00d64469b1f8ed-045301f4e9a064`
+  - Scenario 2 (Logistics Haul): `rf1-1b403011c4e077-15884ea6a10eb6`
+  - Scenario 3 (Severe Storm Protocol): `rf1-050d43576ad423-12a3abe54893ea`
+- Gate on completion (2026-09-19): 73 suites / 842 checks green (`tests/sim/transcript.test.ts` +4), baseline byte-identical.
+
+## Refactor Phase 25 (Property-Based Simulation Testing) — invariant fuzzing
+
+- **Randomized command fuzzing**: `tests/sim/property-testing.test.ts` drives continuous randomized player command sequences across multiple simulation seeds.
+- **Per-step invariant assertions**: Every step verifies `assertInvariants(sim)` for battery bounds, hold capacity, non-negative storage, valid reservations, and reference integrity.
+- **Stress & replay verification**: Fuzzing verified under rapid build/demolish cycles, severe storms, and proven deterministic via byte-identical `StateHash` replays.
+- Gate on completion (2026-09-19): 73 suites / 838 checks green (`tests/sim/property-testing.test.ts` +4), baseline byte-identical.
+
+## Refactor Phase 24 (Worker/View Performance) — metrics without delta complexity
+
+- **Profiler instrumentation**: `viewTimeMs`, `structuredCloneTimeMs`, `mainThreadApplyTimeMs`, `workerMessageBytes` in `src/sim/debug/Profiler.ts`. Measured in `WorkerSimHost`, `workerRuntime`, and `mirror`.
+- **Baseline confirmation**: View generation (~0.3 ms), structured clone (<0.15 ms), message size (~5 KB), and mirror apply (<0.08 ms) comfortably fit within 60 FPS frame budgets. Full snapshots are not a bottleneck at current colony scale, avoiding delta complexity.
+- Gate on completion (2026-09-19): 72 suites / 834 checks green (`tests/sim/worker-performance.test.ts` +3), both worker smokes (`?worker=1`, `?worker=0`) green, baseline byte-identical.
+
+## Refactor Phase 23 (Navigation Optimization) — zero allocations & binary min-heap
+
+- **`NavWorkspace` in `src/sim/navgrid.ts`**: reusable preallocated workspace with generation stamping (`nextSearch()`). Eliminates per-pathfinding typed array allocations (0 allocs).
+- **Indexed Binary Min-Heap**: $O(\log K)$ push, pop, decreaseKey replaces $O(K)$ linear minimum scans in open set.
+- **Profiler integration**: records A* duration, nodes expanded, path length, and allocation count.
+- Gate on completion (2026-09-19): 71 suites / 831 checks green (`tests/sim/navigation.test.ts` +7), baseline byte-identical.
+
+## Refactor Phase 22 (Command Architecture) — player intent vs dev backdoors
+
+- **`PlayerCommand` vs `DevCommand`**: Formalized in `src/sim/host/protocol.ts`. Sub-unions for `RoverCommand`, `BuildingCommand`, `ColonistCommand`.
+- **Exhaustive separation**: `PLAYER_COMMAND_TYPES` and `DEV_COMMAND_TYPES` partition `COMMAND_TYPES`. Type guards `isPlayerCommand`, `isDevCommand`, `isPlayerCommandType`, `isDevCommandType`.
+- **Dispatch**: `applyPlayerCommand` and `applyDevCommand` in `src/sim/host/applyCommand.ts`. Architecture guard in `tests/sim/host.test.ts` prevents non-dev controllers from issuing dev backdoors.
+- Gate on completion (2026-09-19): 70 suites / 824 checks green, baseline byte-identical.
+
 ## Refactor Phase 21 (Domain Events) — per-tick structured channel
 
 - **`DomainEvent` + `DomainEventLog`** in `src/sim/domainEvents.ts`. String

@@ -7,13 +7,24 @@
  */
 
 import assert from 'node:assert/strict';
-import { TranscriptBuilder, replayTranscript, validateTranscript, canonicalTranscriptJson } from '../../src/sim/debug/Transcript';
+import {
+  TranscriptBuilder,
+  TranscriptRecorder,
+  replayTranscript,
+  replayAndHash,
+  validateTranscript,
+  canonicalTranscriptJson,
+  encodeTranscript,
+  decodeTranscript,
+  CANONICAL_SCENARIOS,
+} from '../../src/sim/debug/Transcript';
 import { hashSimulation } from '../../src/sim/debug/StateHash';
+import { assertInvariants } from '../../src/sim/debug/SimulationAssertions';
 import { Simulation } from '../../src/sim/Simulation';
 import { run, nearDeposit } from '../fixtures/sim';
 import { group, test, finish } from '../harness';
 
-group('Transcript validation');
+group('Transcript validation and codec');
 
 test('valid transcript passes validation', () => {
   const t = new TranscriptBuilder(42).at(0, { type: 'rover/move', roverId: 1000, x: 10, z: 10, queue: false }).build();
@@ -25,6 +36,19 @@ test('invalid transcript reports errors', () => {
   assert.ok(validateTranscript({} as any).length > 0);
   assert.ok(validateTranscript({ seed: 1, commands: [{ tick: -1, command: { type: 'rover/stop', roverId: 1 } }] } as any).length > 0);
   assert.ok(validateTranscript({ seed: 1, commands: [{ tick: 0, command: null }] } as any).length > 0);
+});
+
+test('encodeTranscript and decodeTranscript round trip faithfully', () => {
+  const original = new TranscriptBuilder(1234)
+    .at(0, { type: 'building/place', kind: 'warehouse', x: 40, z: 0 })
+    .at(100, { type: 'rover/move', roverId: 1000, x: 50, z: -20, queue: false })
+    .duration(500)
+    .build();
+
+  const json = encodeTranscript(original, true);
+  const decoded = decodeTranscript(json);
+  assert.deepEqual(decoded, original);
+  assert.throws(() => decodeTranscript('{"seed": "not-a-number"}'), /Invalid transcript JSON/);
 });
 
 test('canonical json is stable and sorted', () => {
@@ -46,6 +70,18 @@ test('same transcript produces identical hash', () => {
   const b = replayTranscript(transcript);
   assert.equal(hashSimulation(a.sim), hashSimulation(b.sim), 'replay must be deterministic');
   assert.equal(a.ticksRun, b.ticksRun);
+  assertInvariants(a.sim);
+});
+
+test('replayAndHash convenience helper matches direct hashSimulation', () => {
+  const transcript = new TranscriptBuilder(999)
+    .at(0, { type: 'rover/move', roverId: 1000, x: 20, z: 20, queue: false })
+    .duration(300)
+    .build();
+
+  const { hash, result } = replayAndHash(transcript);
+  assert.equal(hash, hashSimulation(result.sim));
+  assert.match(hash, /^rf1-[0-9a-f]{14}-[0-9a-f]{14}$/);
 });
 
 test('different seed produces different hash', () => {
@@ -64,6 +100,37 @@ test('different commands produce different hash', () => {
   assert.notEqual(hashSimulation(a.sim), hashSimulation(b.sim), 'different commands must diverge');
 });
 
+test('timing deviation produces diverging hash', () => {
+  const tA = new TranscriptBuilder(42)
+    .at(50, { type: 'rover/move', roverId: 1000, x: 50, z: 50, queue: false })
+    .duration(120)
+    .build();
+  const tB = new TranscriptBuilder(42)
+    .at(90, { type: 'rover/move', roverId: 1000, x: 50, z: 50, queue: false })
+    .duration(120)
+    .build();
+  const a = replayAndHash(tA);
+  const b = replayAndHash(tB);
+  assert.notEqual(a.hash, b.hash, 'command timing deviation must diverge state hash');
+});
+
+test('TranscriptRecorder records commands in order and exports valid json', () => {
+  const recorder = new TranscriptRecorder(777, { difficulty: 'survivor' });
+  recorder.record(0, { type: 'building/place', kind: 'warehouse', x: 10, z: 10 });
+  recorder.pause();
+  recorder.record(10, { type: 'rover/stop', roverId: 1000 }); // ignored while paused
+  recorder.resume();
+  recorder.record(20, { type: 'rover/move', roverId: 1000, x: 15, z: 15, queue: false });
+  recorder.duration(100);
+  const t = recorder.toTranscript();
+  assert.equal(t.commands.length, 2);
+  assert.equal(t.difficulty, 'survivor');
+  assert.equal(recorder.isRecording(), true);
+  const json = recorder.toJSON();
+  const decoded = decodeTranscript(json);
+  assert.deepEqual(decoded, t);
+});
+
 test('transcript with building placement', () => {
   const t = new TranscriptBuilder(77)
     .at(0, { type: 'building/place', kind: 'warehouse', x: 40, z: 0 })
@@ -71,6 +138,7 @@ test('transcript with building placement', () => {
     .build();
   const result = replayTranscript(t);
   assert.ok(result.sim.buildings.length >= 1, 'warehouse placed');
+  assertInvariants(result.sim);
 });
 
 test('transcript with mining and haul', () => {
@@ -87,6 +155,7 @@ test('transcript with mining and haul', () => {
   const b = replayTranscript(t);
   assert.equal(hashSimulation(a.sim), hashSimulation(b.sim), 'mining replay deterministic');
   assert.ok(a.sim.storage.iron > 0, 'iron hauled');
+  assertInvariants(a.sim);
 });
 
 test('transcript builder ergonomics', () => {
@@ -103,6 +172,7 @@ test('empty transcript still runs', () => {
   const result = replayTranscript(t);
   assert.equal(result.ticksRun, 100);
   assert.ok(result.sim.simTime > 0);
+  assertInvariants(result.sim);
 });
 
 test('transcript replay matches manual run', () => {
@@ -122,22 +192,54 @@ test('transcript replay matches manual run', () => {
   assert.equal(hashSimulation(simManual), hashSimulation(replayed.sim), 'manual and transcript replay must match');
 });
 
-group('Transcript as regression mechanism');
+group('Transcript as regression mechanism (Phase 26)');
 
-test('hash pinning for canonical scenarios', () => {
-  // Pin a hash for a canonical scenario, then assert replay stays equal
-  // This is the intended use for refactor policing: pin before extraction, compare after
-  const transcript = new TranscriptBuilder(2026)
+test('canonical scenario 1: colony foundation is pinned and deterministic', () => {
+  const t = new TranscriptBuilder(101)
     .at(0, { type: 'building/place', kind: 'warehouse', x: 40, z: 0 })
-    .at(100, { type: 'rover/move', roverId: 1000, x: 60, z: 10, queue: false })
-    .duration(1500)
+    .at(0, { type: 'building/place', kind: 'solar', x: -40, z: 0 })
+    .at(50, { type: 'rover/move', roverId: 1000, x: 40, z: 20, queue: false })
+    .at(50, { type: 'rover/move', roverId: 1001, x: -40, z: 20, queue: false })
+    .duration(800)
     .build();
 
-  const first = hashSimulation(replayTranscript(transcript).sim);
-  const second = hashSimulation(replayTranscript(transcript).sim);
-  assert.equal(first, second, 'pinned hash must be stable');
-  // Format check: rf1-<14hex>-<14hex>
-  assert.match(first, /^rf1-[0-9a-f]{14}-[0-9a-f]{14}$/);
+  const { hash, result } = replayAndHash(t);
+  assert.equal(hash, 'rf1-00d64469b1f8ed-045301f4e9a064');
+  assertInvariants(result.sim);
+});
+
+test('canonical scenario 2: logistics repeat-route haul loop is pinned and deterministic', () => {
+  const t = new TranscriptBuilder(2026)
+    .at(0, { type: 'rover/mine', roverId: 1000, depositId: 1, queue: false })
+    .at(200, { type: 'rover/repeatRoute', roverId: 1000, on: true })
+    .duration(2000)
+    .build();
+
+  const { hash, result } = replayAndHash(t);
+  assert.equal(hash, 'rf1-1b403011c4e077-15884ea6a10eb6');
+  assertInvariants(result.sim);
+});
+
+test('canonical scenario 3: severe storm protocol and shelter recall is pinned and deterministic', () => {
+  const t = new TranscriptBuilder(303)
+    .at(0, { type: 'dev/storm/force', kind: 'severe' })
+    .at(200, { type: 'rover/rule', roverId: 1000, rule: 'stormShelter', on: true })
+    .at(400, { type: 'colonist/order', order: { type: 'shelter' } })
+    .at(600, { type: 'dev/storm/clear' })
+    .duration(1200)
+    .build();
+
+  const { hash, result } = replayAndHash(t);
+  assert.equal(hash, 'rf1-050d43576ad423-12a3abe54893ea');
+  assertInvariants(result.sim);
+});
+
+test('CANONICAL_SCENARIOS definitions replay to exact pinned hashes', () => {
+  for (const [key, scenario] of Object.entries(CANONICAL_SCENARIOS)) {
+    const transcript = scenario.build();
+    const { hash } = replayAndHash(transcript);
+    assert.equal(hash, scenario.expectedHash, `Scenario ${scenario.name} (${key}) must match pinned hash`);
+  }
 });
 
 await finish('sim/transcript');

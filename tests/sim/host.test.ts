@@ -15,13 +15,21 @@ import { Simulation } from '../../src/sim/Simulation';
 import {
   COMMAND_SHAPES,
   COMMAND_TYPES,
+  PLAYER_COMMAND_TYPES,
+  DEV_COMMAND_TYPES,
   LocalSimHost,
   applyCommand,
+  applyPlayerCommand,
+  applyDevCommand,
   createLocalHost,
   decodeCommand,
+  isPlayerCommand,
+  isDevCommand,
+  isPlayerCommandType,
+  isDevCommandType,
   projectView,
 } from '../../src/sim/host';
-import type { SimCommand, SimHost } from '../../src/sim/host';
+import type { DevCommand, PlayerCommand, SimCommand, SimHost } from '../../src/sim/host';
 import { DevMode } from '../../src/dev/DevMode';
 import { ROVERS } from '../../src/sim/defs';
 import { DEFAULT_WORLD_OPTIONS } from '../../src/sim/difficulty';
@@ -557,6 +565,67 @@ test('Local and projected payloads match for entity presentation fields', () => 
     host.view.rovers.map((r) => r.id),
     payload.rovers.map((r) => r.id),
   );
+});
+
+// ------------------------------------------------ Phase 22 command architecture ----
+
+group('Phase 22 — Command architecture');
+
+test('PlayerCommand and DevCommand partition COMMAND_TYPES strictly and exhaustively', () => {
+  const all = new Set(COMMAND_TYPES);
+  const player = new Set(PLAYER_COMMAND_TYPES);
+  const dev = new Set(DEV_COMMAND_TYPES);
+
+  assert.equal(player.size + dev.size, all.size, 'player and dev command types must sum to total');
+  for (const p of player) {
+    assert.ok(all.has(p), `player command ${p} must be in COMMAND_TYPES`);
+    assert.ok(!dev.has(p as unknown as typeof DEV_COMMAND_TYPES[number]), `player command ${p} cannot be in DEV_COMMAND_TYPES`);
+  }
+  for (const d of dev) {
+    assert.ok(all.has(d), `dev command ${d} must be in COMMAND_TYPES`);
+    assert.ok(!player.has(d as unknown as typeof PLAYER_COMMAND_TYPES[number]), `dev command ${d} cannot be in PLAYER_COMMAND_TYPES`);
+  }
+});
+
+test('type guards isPlayerCommand and isDevCommand classify every command sample accurately', () => {
+  for (const type of COMMAND_TYPES) {
+    const cmd = SAMPLES[type];
+    const isP = isPlayerCommand(cmd);
+    const isD = isDevCommand(cmd);
+    assert.notEqual(isP, isD, `command ${type} must be either player or dev, never both or neither`);
+    assert.equal(isP, isPlayerCommandType(type));
+    assert.equal(isD, isDevCommandType(type));
+  }
+});
+
+test('applyPlayerCommand and applyDevCommand directly handle their respective command sets', () => {
+  for (const type of PLAYER_COMMAND_TYPES) {
+    const sim = freshSim();
+    const cmd = SAMPLES[type] as PlayerCommand;
+    const ack = applyPlayerCommand(sim, cmd);
+    assert.equal(typeof ack.ok, 'boolean', `applyPlayerCommand(${type}) returned a shapeless ack`);
+  }
+  for (const type of DEV_COMMAND_TYPES) {
+    const sim = freshSim();
+    const cmd = SAMPLES[type] as DevCommand;
+    const ack = applyDevCommand(sim, cmd);
+    assert.equal(typeof ack.ok, 'boolean', `applyDevCommand(${type}) returned a shapeless ack`);
+  }
+});
+
+test('non-dev controllers do not issue dev commands', () => {
+  const nonDevDirs = ['src/app', 'src/ui'];
+  for (const dir of nonDevDirs) {
+    for (const file of tsFiles(fileURLToPath(new URL(`../../${dir}`, import.meta.url)))) {
+      const source = readFileSync(file, 'utf8');
+      for (const devType of DEV_COMMAND_TYPES) {
+        assert.ok(
+          !source.includes(`type: '${devType}'`) && !source.includes(`type: "${devType}"`),
+          `${file} must not issue dev command "${devType}"`,
+        );
+      }
+    }
+  }
 });
 
 await finish('sim/host');

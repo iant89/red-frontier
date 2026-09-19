@@ -35,12 +35,9 @@ export type RoverRule = 'autoHaul' | 'autoService' | 'stormShelter' | 'autoRescu
 // -------------------------------------------------------------- commands ----
 
 /**
- * The union of every legal write. `type` is the discriminator so a dispatcher
- * can switch on it, and every payload is primitives-only (numbers, booleans,
- * strings, and the two plain-data records `ColonistOrder` allows).
+ * Rover orders (TDD §8).
  */
-export type SimCommand =
-  // --- rover orders (TDD §8) ---
+export type RoverCommand =
   | { type: 'rover/move'; roverId: number; x: number; z: number; queue: boolean }
   | { type: 'rover/mine'; roverId: number; depositId: number; queue: boolean }
   | { type: 'rover/unload'; roverId: number; queue: boolean }
@@ -54,16 +51,34 @@ export type SimCommand =
   | { type: 'rover/repeatRoute'; roverId: number; on: boolean }
   | { type: 'rover/rule'; roverId: number; rule: RoverRule; on: boolean }
   | { type: 'rover/chargeFloor'; roverId: number; pct: number }
-  | { type: 'rover/lights'; roverId: number; on: boolean }
-  // --- structures (TDD §7) ---
+  | { type: 'rover/lights'; roverId: number; on: boolean };
+
+/**
+ * Structure commands (TDD §7).
+ */
+export type BuildingCommand =
   | { type: 'building/place'; kind: BuildingKind; x: number; z: number }
   | { type: 'building/toggle'; buildingId: number; enabled: boolean }
   | { type: 'building/demolish'; buildingId: number }
   | { type: 'building/maintain'; buildingId: number }
-  | { type: 'building/assemble'; buildingId: number; kind: RoverKind }
-  // --- the human ---
-  | { type: 'colonist/order'; order: ColonistOrder }
-  // --- developer backdoors (TDD §22) — never persisted, never implicit ---
+  | { type: 'building/assemble'; buildingId: number; kind: RoverKind };
+
+/**
+ * Colonist orders (TDD §14).
+ */
+export type ColonistCommand =
+  | { type: 'colonist/order'; order: ColonistOrder };
+
+/**
+ * Player commands: legitimate in-game player intent (rover, structure, colonist).
+ */
+export type PlayerCommand = RoverCommand | BuildingCommand | ColonistCommand;
+export type PlayerCommandType = PlayerCommand['type'];
+
+/**
+ * Developer backdoors (TDD §22) — never persisted, never implicit.
+ */
+export type DevCommand =
   | { type: 'dev/time'; sol: number; frac: number }
   | { type: 'dev/storm/force'; kind: StormKindReal }
   | { type: 'dev/storm/clear' }
@@ -85,10 +100,20 @@ export type SimCommand =
   | { type: 'dev/colonist/health'; pct: number }
   | { type: 'dev/colonist/suit' };
 
+export type DevCommandType = DevCommand['type'];
+
+/**
+ * The union of every legal write. Formalized into PlayerCommand | DevCommand
+ * (Phase 22). `type` is the discriminator so a dispatcher can switch on it,
+ * and every payload is primitives-only (numbers, booleans, strings, and the
+ * two plain-data records `ColonistOrder` allows).
+ */
+export type SimCommand = PlayerCommand | DevCommand;
+
 export type SimCommandType = SimCommand['type'];
 
-/** Every command the protocol accepts — the allow-list `decodeCommand` checks. */
-export const COMMAND_TYPES: readonly SimCommandType[] = [
+/** Every player-intent command the protocol accepts. */
+export const PLAYER_COMMAND_TYPES: readonly PlayerCommandType[] = [
   'rover/move',
   'rover/mine',
   'rover/unload',
@@ -109,6 +134,10 @@ export const COMMAND_TYPES: readonly SimCommandType[] = [
   'building/maintain',
   'building/assemble',
   'colonist/order',
+];
+
+/** Every developer backdoor command the protocol accepts. */
+export const DEV_COMMAND_TYPES: readonly DevCommandType[] = [
   'dev/time',
   'dev/storm/force',
   'dev/storm/clear',
@@ -130,6 +159,28 @@ export const COMMAND_TYPES: readonly SimCommandType[] = [
   'dev/colonist/health',
   'dev/colonist/suit',
 ];
+
+/** Every command the protocol accepts — the allow-list `decodeCommand` checks. */
+export const COMMAND_TYPES: readonly SimCommandType[] = [
+  ...PLAYER_COMMAND_TYPES,
+  ...DEV_COMMAND_TYPES,
+];
+
+export function isPlayerCommand(cmd: SimCommand): cmd is PlayerCommand {
+  return isPlayerCommandType(cmd.type);
+}
+
+export function isDevCommand(cmd: SimCommand): cmd is DevCommand {
+  return isDevCommandType(cmd.type);
+}
+
+export function isPlayerCommandType(type: string): type is PlayerCommandType {
+  return (PLAYER_COMMAND_TYPES as readonly string[]).includes(type);
+}
+
+export function isDevCommandType(type: string): type is DevCommandType {
+  return (DEV_COMMAND_TYPES as readonly string[]).includes(type);
+}
 
 const ROVER_RULES: readonly string[] = ['autoHaul', 'autoService', 'stormShelter', 'autoRescue'];
 const STORM_KINDS: readonly string[] = ['devil', 'regional', 'severe', 'planetary'];

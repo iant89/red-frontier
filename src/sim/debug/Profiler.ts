@@ -48,12 +48,29 @@ export interface ProfilerSnapshot {
   /** Timing (ms). */
   stepTimeMs: number;
   viewTimeMs: number;
+  pathfindTimeMs: number;
+  structuredCloneTimeMs: number;
+  mainThreadApplyTimeMs: number;
   /** Averages. */
   avgStepMs: number;
   avgViewMs: number;
+  avgPathfindMs: number;
+  avgStructuredCloneMs: number;
+  avgMainThreadApplyMs: number;
+  worstPathfindMs: number;
+  worstStructuredCloneMs: number;
+  worstMainThreadApplyMs: number;
+  nodesExpanded: number;
+  avgNodesExpanded: number;
+  pathfindAllocations: number;
+  lastPathLength: number;
+  workerMessageBytes: number;
+  avgWorkerMessageBytes: number;
+  lastWorkerMessageBytes: number;
   /** Derived rates. */
   ticksPerSec: number;
   pathfindsPerTick: number;
+  pathfindsPerSec: number;
 }
 
 export interface ProfilerReport extends ProfilerSnapshot {
@@ -75,6 +92,24 @@ class SimProfiler {
 
   private stepTimeMs = 0;
   private viewTimeMs = 0;
+  private pathfindTimeMs = 0;
+  private worstPathfindMs = 0;
+  private nodesExpanded = 0;
+  private pathLengthSum = 0;
+  private pathfindAllocations = 0;
+  private lastPathLength = 0;
+
+  private structuredCloneTimeMs = 0;
+  private worstStructuredCloneMs = 0;
+  private structuredCloneCount = 0;
+
+  private mainThreadApplyTimeMs = 0;
+  private worstMainThreadApplyMs = 0;
+  private mainThreadApplyCount = 0;
+
+  private workerMessageBytes = 0;
+  private workerMessageCount = 0;
+  private lastWorkerMessageBytes = 0;
 
   private lastStepMs = 0;
   private lastViewMs = 0;
@@ -101,6 +136,21 @@ class SimProfiler {
     this.viewGenerations = 0;
     this.stepTimeMs = 0;
     this.viewTimeMs = 0;
+    this.pathfindTimeMs = 0;
+    this.worstPathfindMs = 0;
+    this.nodesExpanded = 0;
+    this.pathLengthSum = 0;
+    this.pathfindAllocations = 0;
+    this.lastPathLength = 0;
+    this.structuredCloneTimeMs = 0;
+    this.worstStructuredCloneMs = 0;
+    this.structuredCloneCount = 0;
+    this.mainThreadApplyTimeMs = 0;
+    this.worstMainThreadApplyMs = 0;
+    this.mainThreadApplyCount = 0;
+    this.workerMessageBytes = 0;
+    this.workerMessageCount = 0;
+    this.lastWorkerMessageBytes = 0;
     this.lastStepMs = 0;
     this.lastViewMs = 0;
   }
@@ -118,14 +168,51 @@ class SimProfiler {
     this.pathfinds++;
   }
 
+  recordPathfind(durationMs: number, nodes: number, pathLen: number, allocs = 0): void {
+    if (!this.enabled) return;
+    this.pathfinds++;
+    this.pathfindTimeMs += durationMs;
+    if (durationMs > this.worstPathfindMs) this.worstPathfindMs = durationMs;
+    this.nodesExpanded += nodes;
+    this.pathLengthSum += pathLen;
+    this.pathfindAllocations += allocs;
+    this.lastPathLength = pathLen;
+  }
+
   recordCommand(): void {
     if (!this.enabled) return;
     this.commands++;
   }
 
-  recordWorkerMessage(): void {
+  recordWorkerMessage(bytes = 0): void {
     if (!this.enabled) return;
     this.workerMessages++;
+    if (bytes > 0) {
+      this.workerMessageBytes += bytes;
+      this.workerMessageCount++;
+      this.lastWorkerMessageBytes = bytes;
+    }
+  }
+
+  recordWorkerMessagePayload(bytes: number): void {
+    if (!this.enabled) return;
+    this.workerMessageBytes += bytes;
+    this.workerMessageCount++;
+    this.lastWorkerMessageBytes = bytes;
+  }
+
+  recordStructuredClone(durationMs: number): void {
+    if (!this.enabled) return;
+    this.structuredCloneTimeMs += durationMs;
+    if (durationMs > this.worstStructuredCloneMs) this.worstStructuredCloneMs = durationMs;
+    this.structuredCloneCount++;
+  }
+
+  recordMainThreadApply(durationMs: number): void {
+    if (!this.enabled) return;
+    this.mainThreadApplyTimeMs += durationMs;
+    if (durationMs > this.worstMainThreadApplyMs) this.worstMainThreadApplyMs = durationMs;
+    this.mainThreadApplyCount++;
   }
 
   recordViewGeneration(durationMs: number): void {
@@ -155,8 +242,17 @@ class SimProfiler {
     const ticks = this.ticks;
     const avgStep = ticks > 0 ? this.stepTimeMs / ticks : 0;
     const avgView = this.viewGenerations > 0 ? this.viewTimeMs / this.viewGenerations : 0;
+    const avgPathfindMs = this.pathfinds > 0 ? this.pathfindTimeMs / this.pathfinds : 0;
+    const avgNodesExpanded = this.pathfinds > 0 ? this.nodesExpanded / this.pathfinds : 0;
+    const avgStructuredCloneMs =
+      this.structuredCloneCount > 0 ? this.structuredCloneTimeMs / this.structuredCloneCount : 0;
+    const avgMainThreadApplyMs =
+      this.mainThreadApplyCount > 0 ? this.mainThreadApplyTimeMs / this.mainThreadApplyCount : 0;
+    const avgWorkerMessageBytes =
+      this.workerMessageCount > 0 ? this.workerMessageBytes / this.workerMessageCount : 0;
     const ticksPerSec = realMs > 0 ? (ticks / realMs) * 1000 : 0;
     const pathfindsPerTick = ticks > 0 ? this.pathfinds / ticks : 0;
+    const pathfindsPerSec = realMs > 0 ? (this.pathfinds / realMs) * 1000 : 0;
 
     return {
       realMs,
@@ -175,10 +271,27 @@ class SimProfiler {
       viewGenerations: this.viewGenerations,
       stepTimeMs: this.stepTimeMs,
       viewTimeMs: this.viewTimeMs,
+      pathfindTimeMs: this.pathfindTimeMs,
+      structuredCloneTimeMs: this.structuredCloneTimeMs,
+      mainThreadApplyTimeMs: this.mainThreadApplyTimeMs,
       avgStepMs: avgStep,
       avgViewMs: avgView,
+      avgPathfindMs,
+      avgStructuredCloneMs,
+      avgMainThreadApplyMs,
+      worstPathfindMs: this.worstPathfindMs,
+      worstStructuredCloneMs: this.worstStructuredCloneMs,
+      worstMainThreadApplyMs: this.worstMainThreadApplyMs,
+      nodesExpanded: this.nodesExpanded,
+      avgNodesExpanded,
+      pathfindAllocations: this.pathfindAllocations,
+      lastPathLength: this.lastPathLength,
+      workerMessageBytes: this.workerMessageBytes,
+      avgWorkerMessageBytes,
+      lastWorkerMessageBytes: this.lastWorkerMessageBytes,
       ticksPerSec,
       pathfindsPerTick,
+      pathfindsPerSec,
     };
   }
 
@@ -189,7 +302,7 @@ class SimProfiler {
     world: { deposits: unknown[]; pois: unknown[] };
   }): ProfilerReport {
     const snap = this.snapshot(sim);
-    const summary = `tick ${snap.ticks} · ${snap.simTime.toFixed(1)}s sim · ${snap.realMs.toFixed(0)}ms real · ${snap.rovers} rovers ${snap.buildings} bldgs ${snap.activeTasks} active · ${snap.pathfinds} pathfinds · ${snap.commands} cmds · step ${snap.avgStepMs.toFixed(3)}ms avg · view ${snap.avgViewMs.toFixed(3)}ms avg`;
+    const summary = `tick ${snap.ticks} · ${snap.simTime.toFixed(1)}s sim · ${snap.realMs.toFixed(0)}ms real · ${snap.rovers} rovers ${snap.buildings} bldgs ${snap.activeTasks} active · ${snap.pathfinds} pathfinds · ${snap.commands} cmds · step ${snap.avgStepMs.toFixed(3)}ms avg · view ${snap.avgViewMs.toFixed(3)}ms avg · pathfind ${snap.avgPathfindMs.toFixed(3)}ms avg (${snap.avgNodesExpanded.toFixed(0)} nodes) · clone ${snap.avgStructuredCloneMs.toFixed(3)}ms · apply ${snap.avgMainThreadApplyMs.toFixed(3)}ms · msg ${snap.avgWorkerMessageBytes.toFixed(0)}B`;
     const table = [
       '┌─────────────────────────────┐',
       '│ SIMULATION PROFILER         │',
@@ -202,6 +315,12 @@ class SimProfiler {
       `│ Buildings:        ${String(snap.buildings).padStart(8)} │`,
       `│ Active tasks:     ${String(snap.activeTasks).padStart(8)} │`,
       `│ Pathfinds:        ${String(snap.pathfinds).padStart(8)} │`,
+      `│ Avg pathfind:     ${snap.avgPathfindMs.toFixed(3).padStart(8)}ms │`,
+      `│ Worst pathfind:   ${snap.worstPathfindMs.toFixed(3).padStart(8)}ms │`,
+      `│ Nodes expanded:   ${String(snap.nodesExpanded).padStart(8)} │`,
+      `│ Avg clone:        ${snap.avgStructuredCloneMs.toFixed(3).padStart(8)}ms │`,
+      `│ Avg apply:        ${snap.avgMainThreadApplyMs.toFixed(3).padStart(8)}ms │`,
+      `│ Avg msg size:     ${String(Math.round(snap.avgWorkerMessageBytes)).padStart(8)} B │`,
       `│ Commands:         ${String(snap.commands).padStart(8)} │`,
       `│ Worker msgs:      ${String(snap.workerMessages).padStart(8)} │`,
       `│ View gens:        ${String(snap.viewGenerations).padStart(8)} │`,

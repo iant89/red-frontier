@@ -19,17 +19,16 @@
  */
 
 import type { Simulation } from '../Simulation';
-import type { SimAck, SimCommand } from './protocol';
+import type { DevCommand, PlayerCommand, SimAck, SimCommand } from './protocol';
+import { isDevCommand } from './protocol';
 import { getProfiler } from '../debug/Profiler';
 /** The ack a command that simply succeeded returns. */
 const ACK: SimAck = { ok: true };
 
 /**
- * Apply one already-validated command. Returns the ack the caller (if any) is
- * waiting for; commands with nothing to report return `{ ok: true }`.
+ * Apply one verified player command (intent execution).
  */
-export function applyCommand(sim: Simulation, cmd: SimCommand): SimAck {
-  getProfiler().recordCommand();
+export function applyPlayerCommand(sim: Simulation, cmd: PlayerCommand): SimAck {
   switch (cmd.type) {
     // ------------------------------------------------------- rover orders ----
     case 'rover/move':
@@ -109,8 +108,14 @@ export function applyCommand(sim: Simulation, cmd: SimCommand): SimAck {
     case 'colonist/order':
       sim.orderColonist(cmd.order);
       return ACK;
+  }
+}
 
-    // ------------------------------------------------------ dev backdoors ----
+/**
+ * Apply one developer backdoor command.
+ */
+export function applyDevCommand(sim: Simulation, cmd: DevCommand): SimAck {
+  switch (cmd.type) {
     case 'dev/time':
       sim.devSetTime(cmd.sol, cmd.frac);
       return ACK;
@@ -161,4 +166,16 @@ export function applyCommand(sim: Simulation, cmd: SimCommand): SimAck {
       sim.devRefillSuit();
       return ACK;
   }
+}
+
+/**
+ * Apply one already-validated command. Returns the ack the caller (if any) is
+ * waiting for; commands with nothing to report return `{ ok: true }`.
+ */
+export function applyCommand(sim: Simulation, cmd: SimCommand): SimAck {
+  getProfiler().recordCommand();
+  if (isDevCommand(cmd)) {
+    return applyDevCommand(sim, cmd);
+  }
+  return applyPlayerCommand(sim, cmd);
 }
