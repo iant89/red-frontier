@@ -3325,6 +3325,21 @@ Then:
 
 This can detect subtle behavioral regressions that ordinary tests miss.
 
+## Recorded (Phase 27 complete — 2026-09-19)
+
+Implemented on `arena/01a0bab6-red-frontier`.
+
+**StateHash system enhancements (`src/sim/debug/StateHash.ts`):**
+- **Domain-isolated section hashing**: Added `hashSimulationSection(sim, section)` and `hashSimulationSections(sim)` across 7 authoritative domains (`core`, `weather`, `resources`, `rovers`, `buildings`, `colonist`, `world`), allowing rapid pinpointing of which subsystem diverged during replay or desync.
+- **Deep state diffing**: Added `diffSimulationState(simA, simB): StateDiffEntry[]` and `explainStateDivergence(simA, simB)` providing exact dot-paths and value differences when colonies diverge.
+- **Authoritative projection access**: Exported `projectSimulation(sim)` returning canonical plain-data representation.
+
+**Gate results**
+- `npm run typecheck`: green (0 errors)
+- `npm test`: 73 suites / 848 checks green (`tests/sim/state-hash.test.ts` +3 checks)
+- `npm run test:replay`: all canonical scenarios pass and match pinned state hashes
+- `behavior-baseline`: byte-identical (2,400 ticks, two seeds)
+
 
 # 32. Phase 28 — Performance Regression Tests
 

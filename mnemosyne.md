@@ -769,6 +769,13 @@ Persistent notes for future coding sessions.
   roadmap's Phase 12 block.
 
 
+## Refactor Phase 27 (Simulation State Hashing) — domain section hashing & divergence diffing
+
+- **Domain-isolated section hashing**: `hashSimulationSection(sim, section)` and `hashSimulationSections(sim)` across 7 authoritative simulation domains (`core`, `weather`, `resources`, `rovers`, `buildings`, `colonist`, `world`).
+- **Deep structural diffing**: `diffSimulationState(simA, simB)` and `explainStateDivergence(simA, simB)` provide exact path and value differences for regression triage and desync diagnosis.
+- **Authoritative projection export**: `projectSimulation(sim)` exports canonical plain-data representation.
+- Gate on completion (2026-09-19): 73 suites / 848 checks green (`tests/sim/state-hash.test.ts` +3), replay tests green, baseline byte-identical.
+
 ## Refactor Phase 26 (Deterministic Replay Testing) — pinned canonical scenarios
 
 - **Unified command application**: `Transcript.ts` now delegates `applyCommandForTranscript` directly to `applyCommand(sim, cmd)`, dropping 150 lines of duplicate command dispatching.
