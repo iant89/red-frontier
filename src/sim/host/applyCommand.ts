@@ -16,10 +16,19 @@
  *  - **A refusal is data, not an exception.** Anything the sim will not do
  *    comes back as `SimAck.error` for the log — a message crossing a thread
  *    boundary cannot throw at its caller anyway.
+ *
+ * Phase 22 formalized the two halves of the protocol behind two functions:
+ * {@link applyPlayerCommand} owns the game itself (`PlayerCommand`), and
+ * {@link applyDevCommand} owns the developer panel (`DevCommand`). Each switch
+ * is exhaustive over its own union — a command added to one half without a
+ * branch here fails type-checking — and `applyCommand` stays the single entry
+ * point every host, the worker runtime and the transcript replayer call, so the
+ * partition can never route the same intent two different ways.
  */
 
 import type { Simulation } from '../Simulation';
-import type { SimAck, SimCommand } from './protocol';
+import type { DevCommand, PlayerCommand, SimAck, SimCommand } from './protocol';
+import { isDevCommand } from './protocol';
 import { getProfiler } from '../debug/Profiler';
 /** The ack a command that simply succeeded returns. */
 const ACK: SimAck = { ok: true };
@@ -30,6 +39,15 @@ const ACK: SimAck = { ok: true };
  */
 export function applyCommand(sim: Simulation, cmd: SimCommand): SimAck {
   getProfiler().recordCommand();
+  return isDevCommand(cmd) ? applyDevCommand(sim, cmd) : applyPlayerCommand(sim, cmd);
+}
+
+/**
+ * The player half of the dispatch: rover orders, structure requests and the
+ * colonist's orders. Exhaustive over `PlayerCommand` — the `never` default is
+ * the compiler holding that promise.
+ */
+export function applyPlayerCommand(sim: Simulation, cmd: PlayerCommand): SimAck {
   switch (cmd.type) {
     // ------------------------------------------------------- rover orders ----
     case 'rover/move':
@@ -110,6 +128,19 @@ export function applyCommand(sim: Simulation, cmd: SimCommand): SimAck {
       sim.orderColonist(cmd.order);
       return ACK;
 
+    default: {
+      const _exhaustive: never = cmd;
+      return _exhaustive;
+    }
+  }
+}
+
+/**
+ * The developer half of the dispatch: TDD §22's backdoors. Exhaustive over
+ * `DevCommand` — the `never` default is the compiler holding that promise.
+ */
+export function applyDevCommand(sim: Simulation, cmd: DevCommand): SimAck {
+  switch (cmd.type) {
     // ------------------------------------------------------ dev backdoors ----
     case 'dev/time':
       sim.devSetTime(cmd.sol, cmd.frac);
@@ -160,5 +191,10 @@ export function applyCommand(sim: Simulation, cmd: SimCommand): SimAck {
     case 'dev/colonist/suit':
       sim.devRefillSuit();
       return ACK;
+
+    default: {
+      const _exhaustive: never = cmd;
+      return _exhaustive;
+    }
   }
 }

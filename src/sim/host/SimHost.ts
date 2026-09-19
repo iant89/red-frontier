@@ -43,7 +43,12 @@ export interface SimHost {
    */
   step(frameDt: number): void;
 
-  /** Fire-and-forget intent. The common case: orders, toggles, spawns. */
+  /**
+   * Fire-and-forget intent. The common case: orders, toggles, spawns. The wire
+   * carries the whole protocol (`SimCommand`); the player/dev split lives on
+   * the *senders* (`SelectionController` sends `PlayerCommand`, `DevMode`
+   * sends `DevCommand`), not on the transport.
+   */
   send(command: SimCommand): void;
 
   /**

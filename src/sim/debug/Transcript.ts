@@ -31,6 +31,7 @@
  */
 
 import type { SimCommand } from '../host/protocol';
+import { applyCommand } from '../host/applyCommand';
 import { Simulation } from '../Simulation';
 import { SIM_TICK } from '../config';
 import type { DifficultyId, WorldOptions } from '../difficulty';
@@ -112,138 +113,16 @@ export function replayTranscript(transcript: Transcript): ReplayResult {
   return { sim, ticksRun: duration, finalTick: duration };
 }
 
-/** Apply a SimCommand via the sim's own methods (mirrors applyCommand but without host validation). */
+/**
+ * Apply a transcripted command through the same dispatch the hosts use. This
+ * used to be a second copy of the `applyCommand` switch (kept inline over a
+ * feared import cycle that does not exist — `applyCommand` only value-imports
+ * the profiler); Phase 22 deleted the copy, so a replay and a live colony can
+ * no longer disagree about what a command means. Acks are ignored on purpose:
+ * a transcript is a script, not an interaction, so there is nobody to answer.
+ */
 function applyCommandForTranscript(sim: Simulation, cmd: SimCommand): void {
-  // We reuse the same dispatch as host/applyCommand to keep behavior identical
-  // Import dynamically to avoid circular deps — but we can inline the minimal set
-  // needed for transcripts, or import the module. For simplicity, use direct calls
-  // for common commands; fall back to generic apply if available.
-  // To avoid async import, we directly call sim methods for the command types we know.
-
-  switch (cmd.type) {
-    case 'rover/move':
-      sim.issueMove(cmd.roverId, cmd.x, cmd.z, cmd.queue);
-      break;
-    case 'rover/mine':
-      sim.issueMine(cmd.roverId, cmd.depositId, cmd.queue);
-      break;
-    case 'rover/unload':
-      sim.issueUnload(cmd.roverId, cmd.queue);
-      break;
-    case 'rover/wait':
-      sim.issueWait(cmd.roverId, cmd.seconds, cmd.queue);
-      break;
-    case 'rover/construct':
-      sim.issueConstruct(cmd.roverId, cmd.buildingId, cmd.queue);
-      break;
-    case 'rover/clean':
-      sim.issueClean(cmd.roverId, cmd.buildingId, cmd.queue);
-      break;
-    case 'rover/repair':
-      sim.issueRepair(cmd.roverId, cmd.buildingId, cmd.queue);
-      break;
-    case 'rover/recover':
-      sim.issueRecover(cmd.roverId, cmd.strandedId, cmd.queue);
-      break;
-    case 'rover/salvage':
-      sim.issueSalvage(cmd.roverId, cmd.poiId, cmd.queue);
-      break;
-    case 'rover/stop':
-      sim.stopRover(cmd.roverId);
-      break;
-    case 'rover/repeatRoute':
-      sim.setRepeatRoute(cmd.roverId, cmd.on);
-      break;
-    case 'rover/rule':
-      sim.setRoverRule(cmd.roverId, cmd.rule, cmd.on);
-      break;
-    case 'rover/chargeFloor':
-      sim.setChargeFloor(cmd.roverId, cmd.pct);
-      break;
-    case 'rover/lights':
-      sim.setRoverLights(cmd.roverId, cmd.on);
-      break;
-    case 'building/place': {
-      const err = sim.canPlace(cmd.kind, cmd.x, cmd.z);
-      if (!err) sim.placeBuilding(cmd.kind, cmd.x, cmd.z);
-      break;
-    }
-    case 'building/toggle':
-      sim.setBuildingEnabled(cmd.buildingId, cmd.enabled);
-      break;
-    case 'building/demolish':
-      sim.demolish(cmd.buildingId);
-      break;
-    case 'building/maintain':
-      sim.dispatchMaintenance(cmd.buildingId);
-      break;
-    case 'building/assemble':
-      sim.assembleRover(cmd.buildingId, cmd.kind);
-      break;
-    case 'colonist/order':
-      sim.orderColonist(cmd.order);
-      break;
-    case 'dev/time':
-      sim.devSetTime(cmd.sol, cmd.frac);
-      break;
-    case 'dev/storm/force':
-      sim.devForceStorm(cmd.kind);
-      break;
-    case 'dev/storm/clear':
-      sim.devClearStorms();
-      break;
-    case 'dev/storm/scheduler':
-      sim.devSetStormScheduler(cmd.on);
-      break;
-    case 'dev/dust':
-      sim.devSetDust(cmd.frac);
-      break;
-    case 'dev/lightning/strike':
-      sim.devForceLightningStrike();
-      break;
-    case 'dev/spawn/rover':
-      sim.devSpawnRover(cmd.kind, cmd.x, cmd.z);
-      break;
-    case 'dev/spawn/building':
-      sim.devSpawnBuilding(cmd.kind, cmd.x, cmd.z);
-      break;
-    case 'dev/spawn/deposit':
-      sim.devSpawnDeposit(cmd.resource, cmd.x, cmd.z, cmd.kg);
-      break;
-    case 'dev/building/complete':
-      sim.devCompleteBuilding(cmd.buildingId);
-      break;
-    case 'dev/building/level':
-      sim.devSetBuildingLevel(cmd.buildingId, cmd.level);
-      break;
-    case 'dev/building/health':
-      sim.devSetBuildingHealth(cmd.buildingId, cmd.pct);
-      break;
-    case 'dev/building/damaged':
-      sim.devSetBuildingDamaged(cmd.buildingId, cmd.on);
-      break;
-    case 'dev/building/cleanliness':
-      sim.devSetBuildingCleanliness(cmd.buildingId, cmd.frac);
-      break;
-    case 'dev/rover/battery':
-      sim.devSetRoverBatteryFrac(cmd.roverId, cmd.frac);
-      break;
-    case 'dev/rover/cargo':
-      sim.devSetRoverCargo(cmd.roverId, cmd.resource, cmd.kg);
-      break;
-    case 'dev/rover/cargoClear':
-      sim.devClearRoverCargo(cmd.roverId);
-      break;
-    case 'dev/rover/condition':
-      sim.devSetRoverCondition(cmd.roverId, cmd.pct);
-      break;
-    case 'dev/colonist/health':
-      sim.devSetColonistHealth(cmd.pct);
-      break;
-    case 'dev/colonist/suit':
-      sim.devRefillSuit();
-      break;
-  }
+  applyCommand(sim, cmd);
 }
 
 /**

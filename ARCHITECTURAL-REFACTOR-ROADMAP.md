@@ -2992,6 +2992,85 @@ not:
     commands = direct state mutation
 
 
+## Recorded (Phase 22 complete — 2026-09-19)
+
+Implemented on `arena/01a0b9f8-red-frontier`.
+
+**The protocol is the same wire, now with two named halves.** §26's
+"potentially formalize" is done and compiler-enforced:
+
+| Piece | Where | Role |
+| --- | --- | --- |
+| `PlayerCommand` | `protocol.ts` | the 20 intents the game itself may send (14 `rover/*`, 5 `building/*`, `colonist/order`) |
+| `DevCommand` | `protocol.ts` | the 20 TDD §22 backdoors, every one prefixed `dev/` |
+| `SimCommand = PlayerCommand \| DevCommand` | `protocol.ts` | the wire type — hosts, worker messages and transcripts still carry the whole union |
+| `PLAYER_COMMAND_TYPES` / `DEV_COMMAND_TYPES` | `protocol.ts` | the allow-list split; `COMMAND_TYPES` is their concatenation, same order as before |
+| `isPlayerCommand` / `isDevCommand` | `protocol.ts` | the `dev/`-prefix test as type guards |
+| `applyPlayerCommand` / `applyDevCommand` | `applyCommand.ts` | the dispatch split — each switch exhaustive over its own union (`never` default) |
+| `applyCommand` | `applyCommand.ts` | still the single entry point; routes on `isDevCommand` |
+
+**What moved, and what pointedly did not**
+
+- The split is on the *senders*, not the transport. `SimHost.send`/`request`,
+  the worker messages and `decodeCommand` still speak `SimCommand`: validation
+  and delivery do not care which half a command belongs to.
+- `SelectionController.order()` now takes `PlayerCommand` — a gesture cannot
+  construct a backdoor, by type. `DevMode.send()` stays on the whole union on
+  purpose: the panel is the one client allowed both halves (its power switch
+  sends the player's own `building/toggle`, so the switch means exactly what
+  the player's switch means).
+- `Transcript.ts`'s private ~100-line dispatch switch is deleted: the replayer
+  calls the shared `applyCommand`. The copy existed over a feared import cycle
+  that does not exist (`applyCommand` value-imports only the profiler), and a
+  replay and a live colony can no longer disagree about what a command means.
+  The one observable difference is that transcript replays now increment the
+  dev-only profiler command counter like every other command path — sim state
+  is untouched, and no suite asserts profiler counts across a replay.
+- `COMMAND_SHAPES`, `decodeCommand`, `SimAck`, the audio cue table and every
+  `Simulation` delegate are unchanged. `commands = intent` still holds: no
+  payload grew a pre-clamped value or a field assignment.
+
+**Tests** — `tests/sim/command-architecture.test.ts` (9 checks, linked in
+`full.test.ts`): the partition (disjoint, complete, wire order), the `dev/`
+prefix rule naming exactly the dev half, the guards agreeing with the lists on
+a sample of every command, `decodeCommand` accepting both halves, split
+dispatch equalling `applyCommand` (ack *and* resulting snapshot, per command,
+on twin sims), a mixed player+dev transcript replaying deterministically, and
+three architecture guards — only `src/dev` constructs `dev/*` commands (the
+audio cue keys are mentions, not constructions, and the pattern distinguishes
+them), transcripts import the shared dispatch and carry no `case` arm of their
+own, and the gesture path is typed `PlayerCommand`.
+
+**Gate results**
+
+| Gate | Result |
+| --- | --- |
+| `npm run typecheck` | green |
+| `npm test` | green — 71 suites / 829 checks (was 70/820), 221.4 s |
+| `npm run test:check` | green — 71 suites, all linked, all declare `@covers` |
+| `npm run build` | green — `index.js` 1,150.48 kB (334.12 kB gz, +0.17/+0.06 over pre-change), `sim.worker` 232.89 kB (+0.16), 107 modules |
+| behavior A/B | **identical** — `scripts/behavior-baseline.ts` `--check` against the pre-change `--write` |
+| command A/B | **identical** — scratch mixed transcript replays ×3 durations + host tick-by-tick delivery + ordered ack list of all 40 commands, byte-identical pre/post |
+| `worker-smoke` (`?worker=1`, `?worker=0`) | green |
+| `mobile-smoke` | green |
+| `pause-smoke` (`?worker=1`, `?worker=0`) | green |
+| `update-check-smoke` | green |
+
+The §48 checklist, item by item: the protocol has one owner per half
+(`applyPlayerCommand` / `applyDevCommand`, behind the single `applyCommand`
+entry); dependencies point at the protocol, never away from it (no DOM, no
+three.js, no `app/`/`ui/` in the dispatch); behavior is intact and proven by
+both A/B vehicles above; the new surface has its own 9-check suite;
+determinism, both worker transports and the production build are green; no
+presentation dependency leaked; and a duplicate source of truth was *removed* —
+the transcript dispatch — with a guard test keeping it gone. Documentation:
+this record, the Phase 22 entry in `mnemosyne.md`, and the `docs/design/TDD.md`
+§16 / Appendix A rows.
+
+The next phase per the roadmap body is **Phase 23 — Improve Navigation**
+(§27: instrument first, then binary heap, reusable workspaces, path caching).
+
+
 # 27. Phase 23 — Improve Navigation
 
 Do this only after architectural extraction is complete.

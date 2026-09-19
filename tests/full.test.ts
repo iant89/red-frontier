@@ -57,6 +57,7 @@ import './sim/pois.test';
 import './sim/persistence.test';
 import './sim/devtools.test';
 import './sim/host.test';
+import './sim/command-architecture.test';
 import './sim/worker.test';
 import './render/particles.test';
 import './render/selection.test';

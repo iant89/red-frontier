@@ -769,6 +769,45 @@ Persistent notes for future coding sessions.
   roadmap's Phase 12 block.
 
 
+## Refactor Phase 22 (command architecture) — two halves, one dispatcher
+
+- **`SimCommand = PlayerCommand | DevCommand`** in `src/sim/host/protocol.ts`.
+  The split is on the *senders*, not the transport: hosts, worker messages,
+  `decodeCommand` and transcripts still carry the whole union. `COMMAND_TYPES`
+  is `[...PLAYER_COMMAND_TYPES, ...DEV_COMMAND_TYPES]` (same order as before);
+  `isDevCommand`/`isPlayerCommand` test the `dev/` prefix, and a test pins the
+  prefix rule and the unions name the same set.
+- **Dispatch is split behind one entry point.** `applyPlayerCommand` /
+  `applyDevCommand` in `applyCommand.ts` are each exhaustive over their own
+  union (`never` default — a new command without a branch fails type-check);
+  `applyCommand` routes on `isDevCommand` and stays the only caller-side name.
+  Profiler `recordCommand()` lives in `applyCommand` only, so host-path counts
+  are unchanged.
+- **`Transcript.ts` no longer has its own switch.** The replayer calls the
+  shared `applyCommand` (the feared cycle never existed — `applyCommand`
+  value-imports only the profiler). Side effect to know about: replays now bump
+  the dev-only profiler command counter. No suite asserts profiler counts
+  across a replay, and sim state is untouched.
+- **Sender typing:** `SelectionController.order()` takes `PlayerCommand` (all
+  ~20 call sites are player literals — typecheck proves it); `DevMode.send()`
+  deliberately stays `SimCommand` (the panel sends `building/toggle` too, so
+  its power switch means what the player's means). The "only `src/dev`
+  constructs `dev/*`" rule is a grep guard in
+  `tests/sim/command-architecture.test.ts`, matching `type: 'dev/` so the audio
+  cue table's `'dev/...':` keys don't trip it.
+- **A/B vehicles:** the standard `scripts/behavior-baseline.ts` (identical)
+  plus a scratch mixed-transcript/host/ack script (3 replay durations, host
+  tick-by-tick delivery, ordered acks of all 40 commands — byte-identical).
+  The ack script is scratch (`/tmp`, not checked in); the 9-check suite pins
+  the split-dispatch equivalence permanently (twin sims, ack + snapshot per
+  command).
+- Gate on completion (2026-09-19): 71 suites / 829 checks green
+  (`tests/sim/command-architecture.test.ts` +9), typecheck and `test:check`
+  green, build `index.js` 1,150.48 kB (334.12 gz) / `sim.worker` 232.89 kB
+  (+0.17/+0.16 kB over pre-change — the guards and the split), all six browser
+  smokes green on both transports (worker ×2, mobile, pause ×2, update-check).
+  Recorded in the roadmap's Phase 22 block.
+
 ## Refactor Phase 21 (Domain Events) — per-tick structured channel
 
 - **`DomainEvent` + `DomainEventLog`** in `src/sim/domainEvents.ts`. String

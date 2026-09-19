@@ -148,8 +148,11 @@ src/
     debug/           invariant checks, state hash, profiler, command transcripts
     host/            the seam
       protocol.ts      every legal write, as plain serializable data
+                         (PlayerCommand | DevCommand halves + guards)
       view.ts          SimView — read model (Pick'd from Simulation)
-      applyCommand.ts  dispatch table (sim-side, worker-reusable)
+      applyCommand.ts  dispatch table (sim-side, worker-reusable):
+                         applyCommand routes to the exhaustive
+                         applyPlayerCommand / applyDevCommand halves
       overlays.ts      runtime edits as data (name + ids), never closures
       projection.ts    view payload a host answers with
       LocalSimHost.ts  in-process host
@@ -369,6 +372,13 @@ building/place | toggle | demolish | maintain | assemble
 
 - `SimAck{ok, entityId?, value?, error?}` returns from placements and other
   mutating calls so the ghost's verdict **is** the sim's verdict on both transports.
+- The union is split by sender: `SimCommand = PlayerCommand | DevCommand`
+  (Phase 22). Hosts, worker messages and `decodeCommand` still carry the whole
+  union; `SelectionController.order()` takes `PlayerCommand`, only `src/dev`
+  constructs `DevCommand`, and `applyCommand` routes to the exhaustive
+  `applyPlayerCommand` / `applyDevCommand` halves. Transcripts replay through
+  the same shared dispatch — there is exactly one table mapping commands to
+  sim methods.
 - Transferable typed arrays / SAB / OffscreenCanvas — **OUT** (start with structured
   clone + batcheded snapshots; add when measured).
 - View payload spreads entities whole; `satisfaction` as entries (JSON-safe);
@@ -580,8 +590,12 @@ fidelity first.
 ## Appendix A — Protocol surface (quick ref)
 
 See `src/sim/host/protocol.ts` for the schema-of-record. Any new player intent
-adds a variant there, a decoder field table, an `applyCommand` branch, and a
-host test — never a direct `sim.foo()` call from UI.
+adds a variant to the `PlayerCommand` half there (a backdoor goes in
+`DevCommand` with a `dev/`-prefixed type), a decoder field table entry, a
+branch in the matching `applyPlayerCommand` / `applyDevCommand` half (each is
+exhaustive — a missing branch fails type-check), a sample in the host and
+command-architecture suites, and a host test — never a direct `sim.foo()` call
+from UI.
 
 ## Appendix B — What "done" means for the next two slices
 

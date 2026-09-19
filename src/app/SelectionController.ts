@@ -4,7 +4,7 @@
  */
 
 import type { RoverView } from '../sim/host';
-import type { SimCommand, SimHost, SimView } from '../sim/host';
+import type { PlayerCommand, SimHost, SimView } from '../sim/host';
 import type { BuildingKind, RoverKind } from '../sim/defs';
 import { BUILDINGS, ROVERS } from '../sim/defs';
 import type { GameRenderer } from '../render/Renderer';
@@ -43,8 +43,12 @@ export class SelectionController {
 
   constructor(private readonly d: SelectionControllerDeps) {}
 
-  /** The one way gesture handlers write to the colony: an intent to the host. */
-  order(command: SimCommand): void {
+  /**
+   * The one way gesture handlers write to the colony: a *player* intent to the
+   * host. `PlayerCommand`, not `SimCommand`, on purpose — a gesture must never
+   * be able to construct a dev backdoor, and the compiler now holds that.
+   */
+  order(command: PlayerCommand): void {
     const host = this.d.getHost();
     if (!host) return;
     this.d.audio.command(command.type);

@@ -149,6 +149,13 @@ export class DevMode {
    * edit is a command out the front door, which is the whole seam — there is
    * nothing here left to poke, so nothing here can be forgotten when the sim
    * moves off-thread.
+   *
+   * The signature stays the whole `SimCommand` union on purpose: this is the
+   * one client allowed to send *both* halves — `dev/*` backdoors, plus the
+   * player's own `building/toggle` for the panel's power switch, because the
+   * switch should mean exactly what the player's switch means. The complementary
+   * rule — nobody *else* constructs a `dev/*` command — is pinned by
+   * `tests/sim/command-architecture.test.ts`, not by this signature.
    */
   private send(command: SimCommand): SimAck {
     if (!this.host) throw new Error('DevMode is not attached to a SimHost');

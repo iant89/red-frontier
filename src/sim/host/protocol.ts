@@ -35,11 +35,17 @@ export type RoverRule = 'autoHaul' | 'autoService' | 'stormShelter' | 'autoRescu
 // -------------------------------------------------------------- commands ----
 
 /**
- * The union of every legal write. `type` is the discriminator so a dispatcher
- * can switch on it, and every payload is primitives-only (numbers, booleans,
- * strings, and the two plain-data records `ColonistOrder` allows).
+ * Player commands: every intent the game itself can produce — rover orders
+ * (TDD §8), structure requests (TDD §7) and the colonist's orders (TDD §14).
+ * These are the only commands a gesture, a HUD button or the build palette may
+ * construct; `SelectionController.order()` takes exactly this union, so a dev
+ * backdoor smuggled into a player path fails type-checking instead of shipping.
+ *
+ * `type` is the discriminator so a dispatcher can switch on it, and every
+ * payload is primitives-only (numbers, booleans, strings, and the two
+ * plain-data records `ColonistOrder` allows).
  */
-export type SimCommand =
+export type PlayerCommand =
   // --- rover orders (TDD §8) ---
   | { type: 'rover/move'; roverId: number; x: number; z: number; queue: boolean }
   | { type: 'rover/mine'; roverId: number; depositId: number; queue: boolean }
@@ -62,7 +68,18 @@ export type SimCommand =
   | { type: 'building/maintain'; buildingId: number }
   | { type: 'building/assemble'; buildingId: number; kind: RoverKind }
   // --- the human ---
-  | { type: 'colonist/order'; order: ColonistOrder }
+  | { type: 'colonist/order'; order: ColonistOrder };
+
+/**
+ * Developer commands: the backdoors behind TDD §22's panel. Same wire, same
+ * validation gate, same dispatch contract as a player order — but only
+ * `src/dev/` may construct one (pinned by `tests/sim/command-architecture`),
+ * the modifiers among them never reach the save file, and none is ever sent
+ * implicitly by game code. Every member's `type` starts with `dev/`, which is
+ * what `isDevCommand` tests — and a test pins that the prefix rule and this
+ * union name exactly the same set, so neither can drift from the other.
+ */
+export type DevCommand =
   // --- developer backdoors (TDD §22) — never persisted, never implicit ---
   | { type: 'dev/time'; sol: number; frac: number }
   | { type: 'dev/storm/force'; kind: StormKindReal }
@@ -85,10 +102,20 @@ export type SimCommand =
   | { type: 'dev/colonist/health'; pct: number }
   | { type: 'dev/colonist/suit' };
 
-export type SimCommandType = SimCommand['type'];
+/**
+ * The union of every legal write — the wire type. `SimHost.send`/`request`,
+ * the worker messages and transcripts all carry this; the player/dev split
+ * below exists so *senders* can declare which half they belong to, not so the
+ * transport treats them differently.
+ */
+export type SimCommand = PlayerCommand | DevCommand;
 
-/** Every command the protocol accepts — the allow-list `decodeCommand` checks. */
-export const COMMAND_TYPES: readonly SimCommandType[] = [
+export type SimCommandType = SimCommand['type'];
+export type PlayerCommandType = PlayerCommand['type'];
+export type DevCommandType = DevCommand['type'];
+
+/** The player half of the protocol, in wire order. */
+export const PLAYER_COMMAND_TYPES: readonly PlayerCommandType[] = [
   'rover/move',
   'rover/mine',
   'rover/unload',
@@ -109,6 +136,10 @@ export const COMMAND_TYPES: readonly SimCommandType[] = [
   'building/maintain',
   'building/assemble',
   'colonist/order',
+];
+
+/** The developer half of the protocol, in wire order. */
+export const DEV_COMMAND_TYPES: readonly DevCommandType[] = [
   'dev/time',
   'dev/storm/force',
   'dev/storm/clear',
@@ -130,6 +161,27 @@ export const COMMAND_TYPES: readonly SimCommandType[] = [
   'dev/colonist/health',
   'dev/colonist/suit',
 ];
+
+/** Every command the protocol accepts — the allow-list `decodeCommand` checks. */
+export const COMMAND_TYPES: readonly SimCommandType[] = [
+  ...PLAYER_COMMAND_TYPES,
+  ...DEV_COMMAND_TYPES,
+];
+
+/**
+ * Which half of the protocol a command belongs to. The `dev/` prefix is the
+ * test (every `DevCommand` carries it, no `PlayerCommand` does), so a new
+ * backdoor that forgets the prefix fails the partition test rather than
+ * silently joining the player half.
+ */
+export function isDevCommand(command: SimCommand): command is DevCommand {
+  return command.type.startsWith('dev/');
+}
+
+/** The complement of {@link isDevCommand}: an order the game itself may send. */
+export function isPlayerCommand(command: SimCommand): command is PlayerCommand {
+  return !isDevCommand(command);
+}
 
 const ROVER_RULES: readonly string[] = ['autoHaul', 'autoService', 'stormShelter', 'autoRescue'];
 const STORM_KINDS: readonly string[] = ['devil', 'regional', 'severe', 'planetary'];
