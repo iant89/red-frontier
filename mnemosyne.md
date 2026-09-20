@@ -589,7 +589,11 @@ Persistent notes for future coding sessions.
   that GitHub only materialises once the wiki has a page, and which needs the repository permission **“Wikis: Write”**. Both cases answer
   `remote: Repository not found.` over HTTPS — indistinguishable from a missing repo, so `scripts/publish-wiki.mjs` treats "cannot reach it" as "try to create it"
   and prints the two causes with a preserved commit to push by hand. Verify with `git ls-remote https://github.com/<owner>/<repo>.wiki.git` before assuming a bug in
-  the tooling, and note that a *reachable* wiki git repo whose only branch is `master` is still a bootstrap case for us (the publisher pushes `main`).
+  the tooling. A wiki's default branch is **not** always `main` — wikis created before
+  GitHub's rename live on `master`, and pushing `main` beside one produces a branch
+  nobody renders. `publish-wiki.mjs` therefore resolves the target from
+  `git ls-remote --symref <wiki-url> HEAD` (falling back to the source repo's default,
+  then `main`) unless `--branch` is given explicitly.
 
 ## Descent stage (the pod, given a body)
 

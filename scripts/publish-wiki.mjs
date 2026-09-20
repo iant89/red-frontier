@@ -60,7 +60,7 @@ const USAGE = `usage: node scripts/publish-wiki.mjs [--check] [--dry-run] [--no-
   --dry-run    write and commit, but never push; print the plan instead
   --no-push    prepare a commit locally, leave it unpushed
   --url        wiki git url (default: derived from git remote origin)
-  --branch     wiki branch (default: main)
+  --branch     wiki branch (default: whatever the wiki's HEAD points at)
   --dir        where to stage the clone (default: a temp dir, removed afterwards)
   -m, --message commit message (default: generated with the source commit)
 `;
@@ -70,7 +70,22 @@ if (flags.help) {
   process.exit(0);
 }
 
-const BRANCH = flags.branch ?? 'main';
+/**
+ * The wiki branch. `--branch` wins; otherwise ask the remote what its HEAD points
+ * at, because a wiki created before GitHub moved to `main` lives on `master` and a
+ * `main` pushed beside it is a branch nobody will ever see. Fall back to the source
+ * repository's default branch, then `main`, for a wiki that does not exist yet.
+ */
+function resolveBranch(url) {
+  if (flags.branch) return flags.branch;
+  const sym = git(['ls-remote', '--symref', url, 'HEAD'], { allowFail: true, cwd: os.tmpdir() });
+  const m = typeof sym === 'string' && sym.match(/ref:\s*refs\/heads\/(\S+)/);
+  if (m) return m[1];
+  const local = git(['symbolic-ref', 'refs/remotes/origin/HEAD'], { allowFail: true });
+  const lm = typeof local === 'string' && local.match(/origin\/(\S+)/);
+  return lm ? lm[1] : 'main';
+}
+let BRANCH = flags.branch ?? 'main';
 
 function die(msg) {
   console.error(`\x1b[31m✗\x1b[0m ${msg}\n`);
@@ -319,6 +334,8 @@ function prune(dest) {
 
 async function publish() {
   const url = wikiUrl();
+  BRANCH = resolveBranch(url);
+  info(`wiki branch: ${BRANCH}`);
   const sha = git(['rev-parse', '--short', 'HEAD'], { allowFail: true }) ?? 'unknown';
   const dest = flags.dir ? path.resolve(ROOT, flags.dir) : fs.mkdtempSync(path.join(os.tmpdir(), 'rf-wiki-'));
 
