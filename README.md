@@ -32,6 +32,12 @@ audible while the machinery fades out.
 Design & technical specifications live in [`docs/design/GDD.md`](docs/design/GDD.md)
 and [`docs/design/TDD.md`](docs/design/TDD.md).
 
+Narrative documentation for players and contributors lives in the
+**[project wiki](https://github.com/iant89/red-frontier/wiki)** — 24 pages on
+survival, each simulated system, the architecture, persistence, testing and the
+roadmap. Its source is [`wiki/`](wiki/), reviewed like code and published with
+`npm run wiki:publish` (`--check` validates links and numbers first).
+
 ## Running it
 
 ### Game Launchers & Setup Scripts (Ubuntu & Windows 11)
@@ -526,6 +532,8 @@ what stops a brownout producing 200 identical log lines.
 
 ```
 docs/design/        GDD + TDD + the rover state model
+wiki/               project wiki source — one .md per page, published to the
+                    GitHub wiki by scripts/publish-wiki.mjs (npm run wiki:check)
 src/
   main.ts           entry point
   app/              composition root: Game + the controllers it wires (Phase 19)
