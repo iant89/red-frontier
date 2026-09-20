@@ -769,6 +769,13 @@ Persistent notes for future coding sessions.
   roadmap's Phase 12 block.
 
 
+## Refactor Phase 29 (Large-Colony Stress Tests) — 100 rovers, 250+ buildings, sustained storm & logistics
+
+- **Stress scenario generator**: `src/sim/debug/LargeColonyScenario.ts` creates a deterministic high-load colony (100 rovers, 255 buildings, active severe storm, multi-site construction, mining/hauling repeat-routes, and exploration).
+- **Stress invariant assertions**: `assertStressInvariants(sim)` verifies deep invariants, pending queue boundedness (`<=10`), deposit reservation uniqueness, and non-deadlock progression.
+- **Runners & regression suite**: `scripts/large-colony-stress.mjs` (`npm run test:stress`), `tests/sim/large-colony-stress.test.ts` (+6 checks). Pinned 1-day (4,800 ticks) state hash: `rf1-094755f9902a5f-0e05c6b7fcbab0`.
+- Gate on completion (2026-09-20): 75 suites / 860 checks green, typecheck green, baseline byte-identical.
+
 ## Refactor Phase 28 (Performance Regression Tests) — fleet scaling & benchmark thresholds
 
 - **Scaling benchmark harness**: `src/sim/debug/Benchmark.ts` and `scripts/benchmark.mjs` (`npm run test:bench`) measure tick time, pathfinding, view generation, worker transport, and payload size across 10, 25, 50, 100, and 250 rovers.

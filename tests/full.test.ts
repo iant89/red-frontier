@@ -62,6 +62,7 @@ import './sim/worker.test';
 import './sim/worker-performance.test';
 import './sim/property-testing.test';
 import './sim/performance-regression.test';
+import './sim/large-colony-stress.test';
 import './render/particles.test';
 import './render/selection.test';
 import './render/solar.test';
@@ -90,4 +91,4 @@ import './hud/pause-menu.test';
 
 // Each suite prints one line as it runs; `report` prints the total, every
 // failure, and exits non-zero if anything broke.
-report(74);
+report(75);

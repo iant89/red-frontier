@@ -3432,6 +3432,37 @@ Verify:
     no simulation deadlock
     deterministic final state
 
+## Recorded (Phase 29 complete — 2026-09-20)
+
+Implemented on `arena/01a0bab6-red-frontier`.
+
+**Large-Colony Stress Scenario Builder (`src/sim/debug/LargeColonyScenario.ts`):**
+- Automated scenario generator configuring a 100-rover, 250+-building colony with full fleet automation enabled, active severe storm, multi-site construction queue, automated hauling repeat-routes, and outward exploration dispatches.
+- Added `assertStressInvariants(sim)` checking:
+  - Deep simulation invariants (`assertInvariants(sim)`).
+  - Task queue boundedness (`r.pending.length <= 10`).
+  - Strict reservation uniqueness across all deposits.
+  - Active progression without deadlocks.
+- Pinned 1 simulated day (4,800 ticks, seed 1001) state hash:
+  `rf1-094755f9902a5f-0e05c6b7fcbab0`
+
+**CLI Runner (`scripts/large-colony-stress.mjs` / `npm run test:stress`):**
+- Runs configurable stress sessions:
+  - `node scripts/large-colony-stress.mjs --hour` (~195 ticks, ~0.8s)
+  - `node scripts/large-colony-stress.mjs --day` (4,800 ticks, ~12.8s)
+  - `node scripts/large-colony-stress.mjs --days 7` (33,600 ticks)
+
+**Regression Suite (`tests/sim/large-colony-stress.test.ts`):**
+- 6 checks covering scenario generation, 1-hour stress invariants, 1-day day/night cycle survival, queue boundedness, reservation uniqueness, and deterministic repeatability.
+
+**Gate results**
+- `npm run typecheck`: green (0 errors)
+- `npm test`: 75 suites / 860 checks green (`tests/sim/large-colony-stress.test.ts` +6 checks)
+- `npm run test:stress`: green
+- `npm run test:bench`: green
+- `npm run test:replay`: all canonical scenarios pass
+- `behavior-baseline`: byte-identical (2,400 ticks, two seeds)
+
 
 # 34. Phase 30 — Optional Future Network Boundary
 
