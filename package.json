@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.3.0",
   "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
   "description": "Red Frontier - browser Mars survival RTS (Prototype 4 + exploration: weather, rover logistics, POIs, supply drops)",
   "scripts": {
     "dev": "vite",
@@ -25,8 +28,11 @@
     "test:stress": "node scripts/large-colony-stress.mjs",
     "test:smoke": "node scripts/mobile-smoke.mjs",
     "setup:playwright": "node scripts/setup-playwright.mjs",
+    "prewiki:publish": "node scripts/check-node-version.js",
     "wiki:publish": "node scripts/publish-wiki.mjs",
+    "prewiki:check": "node scripts/check-node-version.js",
     "wiki:check": "node scripts/publish-wiki.mjs --check",
+    "prewiki:preview": "node scripts/check-node-version.js",
     "wiki:preview": "node scripts/preview-wiki.mjs"
   },
   "devDependencies": {

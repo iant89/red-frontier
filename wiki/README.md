@@ -38,6 +38,11 @@ wiki/
 
 ## Workflow
 
+The publisher requires Node.js 18 or newer. Prefer the npm commands below: they
+run the repository's Node-version preflight before loading the native ESM
+publisher, so an old installation gets a useful upgrade message instead of an
+`Unexpected token {` parser error.
+
 ```bash
 # 1. edit or add a page here, on a branch
 $EDITOR wiki/Rover-Logistics.md
