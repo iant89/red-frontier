@@ -40,6 +40,9 @@
  * Does NOT know about: Three.js, DOM, renderer, UI, Simulation, hosts.
  */
 
+import { upgradeMul } from '../engineering/upgrades';
+import { effectiveBuildingDef } from '../engineering/upgrades';
+import { MaintenanceSystem } from './MaintenanceSystem';
 import type { ColonyState } from '../state/ColonyState';
 import type { Building } from '../state/BuildingState';
 import {
@@ -53,6 +56,7 @@ import {
   activeProcess,
   recipesFor,
 } from '../defs';
+import { WaterSystem } from './WaterSystem';
 import { ComponentSystem } from './ComponentSystem';
 import type { Severity } from '../alerts';
 import { addFluid, takeFluid, fluidHeadroom } from '../lifesupport';
@@ -66,7 +70,8 @@ export class ProductionSystem {
    * inputs and its output headroom — power is applied separately.
    */
   static desiredThroughput(state: ColonyState, b: Building): number {
-    const def = BUILDINGS[b.kind];
+    if (b.kind === 'repairBay') return MaintenanceSystem.desiredThroughput(state, b);
+    const def = effectiveBuildingDef(b);
     // The line this building is *running* — its fixed process, or whichever
     // recipe the player selected (P5). Everything below reads that, never
     // `def.process`, so a workshop on the board line wants boards.
@@ -75,7 +80,7 @@ export class ProductionSystem {
     const hours = SIM_TICK * HOURS_PER_SEC;
     // An upgraded line moves mul× the mass per hour, so its *want* is gated
     // against the multiplied rates too — the gate and the flow must agree.
-    const mul = devLevelMul(b.level);
+    const mul = devLevelMul(b.level) * upgradeMul(b, 'production');
     let factor = 1;
 
     if (p.solidIn) {
@@ -101,7 +106,7 @@ export class ProductionSystem {
         const rate = p.fluidIn[f];
         if (!rate) continue;
         const need = rate * mul * hours;
-        factor = Math.min(factor, need > 0 ? state.pools.amounts[f] / need : 1);
+        factor = Math.min(factor, need > 0 ? (f === 'water' ? WaterSystem.amount(state, b.id) : state.pools.amounts[f]) / need : 1);
       }
     }
     if (p.fluidOut) {
@@ -109,7 +114,7 @@ export class ProductionSystem {
         const rate = p.fluidOut[f];
         if (!rate) continue;
         const make = rate * mul * hours;
-        factor = Math.min(factor, make > 0 ? fluidHeadroom(state.pools, f) / make : 1);
+        factor = Math.min(factor, make > 0 ? (f === 'water' ? WaterSystem.room(state, b.id) : fluidHeadroom(state.pools, f)) / make : 1);
       }
     }
     if (p.componentOut) {
@@ -151,14 +156,14 @@ export class ProductionSystem {
     }
     if (p.fluidIn) {
       for (const f of ALL_FLUIDS) {
-        if (p.fluidIn[f] && state.pools.amounts[f] <= 1e-6) {
-          return `Out of ${FLUIDS[f].label}`;
+        if (p.fluidIn[f] && (f === 'water' ? WaterSystem.amount(state, b.id) : state.pools.amounts[f]) <= 1e-6) {
+          return f === 'water' && state.water.active ? WaterSystem.blockReason(state, b.id) : `Out of ${FLUIDS[f].label}`;
         }
       }
     }
     if (p.fluidOut) {
       for (const f of ALL_FLUIDS) {
-        if (p.fluidOut[f] && fluidHeadroom(state.pools, f) <= 1e-6) {
+        if (p.fluidOut[f] && (f === 'water' ? WaterSystem.room(state, b.id) : fluidHeadroom(state.pools, f)) <= 1e-6) {
           return `${FLUIDS[f].label} tanks full`;
         }
       }
@@ -179,7 +184,7 @@ export class ProductionSystem {
     const p = activeProcess(b.kind, b.recipe)!;
 
     // A developer-mode upgraded line converts more mass for the same power.
-    const mul = devLevelMul(b.level);
+    const mul = devLevelMul(b.level) * upgradeMul(b, 'production');
 
     /**
      * What the inputs actually handed over, 0..1 — and the fraction the outputs
@@ -218,7 +223,7 @@ export class ProductionSystem {
         const r = p.fluidIn[f];
         if (!r) continue;
         const want = r * mul * rate * hours;
-        const got = takeFluid(state.pools, f, want);
+        const got = f === 'water' ? WaterSystem.take(state, b.id, want) : takeFluid(state.pools, f, want);
         if (want > 0) earned = Math.min(earned, got / want);
         state.flows[f].consumed += got;
         if (got > 1e-9) {
@@ -277,7 +282,8 @@ export class ProductionSystem {
       for (const f of ALL_FLUIDS) {
         const r = p.fluidOut[f];
         if (!r) continue;
-        const made = addFluid(state.pools, f, r * mul * rate * hours * earned);
+        const amount = r * mul * rate * hours * earned;
+        const made = f === 'water' ? WaterSystem.add(state, b.id, amount) : addFluid(state.pools, f, amount);
         state.flows[f].produced += made;
         if (made > 1e-9) {
           state.domainEvents.push({
@@ -308,7 +314,7 @@ export class ProductionSystem {
       ProductionSystem.log(state, 'warn', 'No such structure to reconfigure.');
       return false;
     }
-    const def = BUILDINGS[b.kind];
+    const def = effectiveBuildingDef(b);
     const list = recipesFor(b.kind);
     if (list.length === 0) {
       ProductionSystem.log(state, 'warn', `${def.label} runs a fixed line — there is nothing to switch.`);

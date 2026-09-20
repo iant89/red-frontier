@@ -1,9 +1,12 @@
 /**
- * Current save schema — version 10.
+ * Current save schema — version 13.
  *
  * Phase 3: persistence extraction. This file owns the *shape* of a saved
  * colony. Simulation.ts no longer defines it inline in snapshot().
  */
+
+import type { EngineeringState, UpgradeLevels, UpgradeJob } from '../engineering/upgrades';
+import type { WaterState } from '../state/WaterState';
 
 import type {
   ComponentAmounts,
@@ -16,7 +19,8 @@ import type {
 } from '../defs';
 import type { DifficultyId, WorldOptions } from '../difficulty';
 import type { PoiKind } from '../pois';
-import type { RoverTask, RoverRules } from '../state/RoverState';
+import type { RoverTask, RoverRules, RoverPartHealth } from '../state/RoverState';
+import type { PartReplacement } from '../state/BuildingState';
 import { SAVE_VERSION } from '../config';
 
 // ---- sub-schemas -----------------------------------------------------------
@@ -51,7 +55,7 @@ export interface PoiSave {
   manifest: string;
 }
 
-export interface RoverSave {
+export interface RoverSave extends EngineeringState {
   id: number;
   kind: RoverKind;
   x: number;
@@ -63,6 +67,8 @@ export interface RoverSave {
   command: RoverTask;
   pending: RoverTask[];
   condition: number;
+  /** v11 installed component health. Missing on old colonies means healthy. */
+  parts?: Partial<RoverPartHealth>;
   rules: RoverRules;
   autoTask: boolean;
   recharge: boolean;
@@ -77,7 +83,7 @@ export interface BuildingAssemblySave {
   progress: number;
 }
 
-export interface BuildingSave {
+export interface BuildingSave extends EngineeringState {
   id: number;
   kind: BuildingKind;
   x: number;
@@ -94,6 +100,7 @@ export interface BuildingSave {
   cleanliness: number;
   damaged: boolean;
   assembly: BuildingAssemblySave | null;
+  maintenance?: PartReplacement | null;
   /**
    * Which recipe the building is running (P5) — an index into `RECIPES[kind]`,
    * absent on a v9 save, where it means 0. Ignored by a kind with no recipes.
@@ -174,6 +181,7 @@ export interface SaveState {
   /** Manufactured components on the racks, in whole units (P5). */
   components: ComponentAmounts;
   fluids: FluidAmounts;
+  water?: Pick<WaterState, 'active' | 'links' | 'tanks'>;
   storedKWh: number;
   gameOver: { reason: string; sol: number } | null;
   colonist: ColonistSave;
@@ -187,7 +195,7 @@ export interface SaveState {
 }
 
 /**
- * Loose historical save — used as input to migrations. Version may be <10,
+ * Loose historical save — used as input to migrations. Version may be <11,
  * fields may be missing. This is intentionally `any`-like but typed as unknown
  * record for migration functions to narrow.
  */

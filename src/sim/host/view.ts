@@ -20,6 +20,7 @@
  *    true right now".
  */
 
+import type { WaterNetworkView } from '../utilities/WaterNetwork';
 import type { Simulation } from '../Simulation';
 import type { World } from '../World';
 import type { AlertBus } from '../alerts';
@@ -84,6 +85,7 @@ export type SimFields = ResourceView & {
   readonly difficulty: DifficultyId;
   readonly worldOptions: WorldOptions;
   readonly simTime: number;
+  readonly waterNetwork: WaterNetworkView;
   // entities — immutable view models
   readonly rovers: ReadonlyArray<RoverView>;
   readonly buildings: ReadonlyArray<BuildingView>;

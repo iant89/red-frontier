@@ -2,10 +2,17 @@
  * Phase 2 — Building state (extracted from Simulation.ts).
  */
 
-import type { ComponentAmounts, ResourceAmounts, BuildingKind, RoverKind } from '../defs';
+import type { EngineeringState } from '../engineering/upgrades';
+import type { RoverPartId, ComponentAmounts, ResourceAmounts, BuildingKind, RoverKind } from '../defs';
 import { ALL_COMPONENTS, ALL_RESOURCES } from '../defs';
 
-export interface Building {
+export interface PartReplacement {
+  roverId: number;
+  component: RoverPartId;
+  progress: number;
+}
+
+export interface Building extends EngineeringState {
   id: number;
   kind: BuildingKind;
   x: number;
@@ -28,6 +35,8 @@ export interface Building {
   damaged: boolean;
   assembly: { kind: RoverKind; progress: number } | null;
   level: number;
+  /** Repair Bay job; parts are paid for atomically on completion, never per tick. */
+  maintenance: PartReplacement | null;
   /**
    * Which recipe this building is running (P5): an index into
    * `RECIPES[kind]`, ignored by a kind with no recipe list. Persisted and

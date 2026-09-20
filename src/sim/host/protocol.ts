@@ -24,6 +24,7 @@
  * the shape is declared once and used for both.
  */
 
+import { UPGRADE_IDS, PAINTS, type UpgradeId } from '../engineering/upgrades';
 import type { BuildingKind, MineableResourceId, ResourceId, RoverKind } from '../defs';
 import { BUILDINGS, MINEABLE_RESOURCES, RESOURCES, ROVERS } from '../defs';
 import type { ColonistOrder } from '../lifesupport';
@@ -69,6 +70,12 @@ export type BuildingCommand =
    */
   | { type: 'building/recipe'; buildingId: number; recipe: number };
 
+/** Water utility construction and the explicit shared-to-local transition. */
+export type WaterCommand =
+  | { type: 'water/connect'; a: number; b: number }
+  | { type: 'water/disconnect'; a: number; b: number }
+  | { type: 'water/commission' };
+
 /**
  * Colonist orders (TDD §14).
  */
@@ -78,7 +85,11 @@ export type ColonistCommand =
 /**
  * Player commands: legitimate in-game player intent (rover, structure, colonist).
  */
-export type PlayerCommand = RoverCommand | BuildingCommand | ColonistCommand;
+export type EngineeringCommand =
+  | { type: 'engineering/upgrade'; entity: 'rover' | 'building'; id: number; upgrade: UpgradeId }
+  | { type: 'engineering/cancel'; entity: 'rover' | 'building'; id: number }
+  | { type: 'engineering/paint'; entity: 'rover' | 'building'; id: number; paint: string };
+export type PlayerCommand = RoverCommand | BuildingCommand | WaterCommand | ColonistCommand | EngineeringCommand;
 export type PlayerCommandType = PlayerCommand['type'];
 
 /**
@@ -140,6 +151,12 @@ export const PLAYER_COMMAND_TYPES: readonly PlayerCommandType[] = [
   'building/maintain',
   'building/assemble',
   'building/recipe',
+  'water/connect',
+  'water/disconnect',
+  'water/commission',
+  'engineering/upgrade',
+  'engineering/cancel',
+  'engineering/paint',
   'colonist/order',
 ];
 
@@ -246,6 +263,7 @@ type FieldKind =
   | 'stormKind'
   | 'rule'
   | 'order'
+  | 'entity' | 'upgrade' | 'paint'
   | 'index'; // non-negative integer list position (a recipe), bounded — not an id
 
 interface CommandShape {
@@ -279,6 +297,12 @@ export const COMMAND_SHAPES: Record<SimCommandType, CommandShape> = {
   'building/maintain': { buildingId: 'id' },
   'building/assemble': { buildingId: 'id', kind: 'roverKind' },
   'building/recipe': { buildingId: 'id', recipe: 'index' },
+  'water/connect': { a: 'id', b: 'id' },
+  'water/disconnect': { a: 'id', b: 'id' },
+  'water/commission': {},
+  'engineering/upgrade': { entity: 'entity', id: 'id', upgrade: 'upgrade' },
+  'engineering/cancel': { entity: 'entity', id: 'id' },
+  'engineering/paint': { entity: 'entity', id: 'id', paint: 'paint' },
   'colonist/order': { order: 'order' },
   'dev/time': { sol: 'id', frac: 'unit' },
   'dev/storm/force': { kind: 'stormKind' },
@@ -312,6 +336,9 @@ function bad(what: string): DecodeResult {
 
 function fieldOk(value: unknown, kind: FieldKind): boolean {
   switch (kind) {
+    case 'entity': return value === 'rover' || value === 'building';
+    case 'upgrade': return typeof value === 'string' && (UPGRADE_IDS as readonly string[]).includes(value);
+    case 'paint': return value === '' || (typeof value === 'string' && (PAINTS as readonly string[]).includes(value));
     case 'id':
       return typeof value === 'number' && Number.isInteger(value) && value >= 0;
     case 'coord':

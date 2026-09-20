@@ -32,6 +32,9 @@
  * Does NOT know about: Three.js, DOM, renderer, UI, Simulation, hosts.
  */
 
+import { upgradeMul } from '../engineering/upgrades';
+import { effectiveBuildingDef } from '../engineering/upgrades';
+import { effectiveRoverDef } from '../engineering/upgrades';
 import { resolvePower, idlePower, type PowerDemand } from '../power';
 import { batteryCapacityKWh } from '../state/PowerState';
 import type { ColonyState } from '../state/ColonyState';
@@ -83,7 +86,7 @@ export class PowerSystem {
     for (const b of state.buildings) {
       b.genKw = 0;
       if (b.state !== 'online' || !b.enabled || b.damaged) continue;
-      const def = BUILDINGS[b.kind];
+      const def = effectiveBuildingDef(b);
       if (!def.generation || def.powerProduceKw <= 0) continue;
       /**
        * TDD §11/§12's solar chain: irradiance x atmospheric dust x panel
@@ -112,7 +115,7 @@ export class PowerSystem {
         b.powerSat = 1;
         continue;
       }
-      const def = BUILDINGS[b.kind];
+      const def = effectiveBuildingDef(b);
       if (b.damaged) {
         b.powerSat = 1;
         b.idleReason = 'Damaged — needs repair';
@@ -132,7 +135,7 @@ export class PowerSystem {
 
     // Rover charging is the lowest-priority load on the grid.
     for (const r of state.rovers) {
-      const def = ROVERS[r.kind];
+      const def = effectiveRoverDef(r);
       const wantsCharge =
         r.phase !== 'disabled' &&
         r.battery < def.maxBatteryKWh - 1e-6 &&
@@ -157,7 +160,7 @@ export class PowerSystem {
     // ---- output: apply ----------------------------------------------------
     for (const b of state.buildings) {
       if (b.state !== 'online' || !b.enabled || b.damaged) continue;
-      const def = BUILDINGS[b.kind];
+      const def = effectiveBuildingDef(b);
       const sat = result.satisfaction.get(b.id) ?? 1;
       b.powerSat = sat;
       const want = desired.get(b.id) ?? 0;
@@ -173,7 +176,7 @@ export class PowerSystem {
     }
 
     for (const r of state.rovers) {
-      const def = ROVERS[r.kind];
+      const def = effectiveRoverDef(r);
       const sat = result.satisfaction.get(r.id);
       if (sat === undefined) continue;
       r.chargeSat = sat;
@@ -190,8 +193,8 @@ export class PowerSystem {
     if (Math.hypot(SPAWN_X - x, SPAWN_Z - z) < POD_RADIUS + 6) return true;
     for (const b of state.buildings) {
       if (b.state !== 'online' || b.damaged || !b.enabled) continue;
-      if (!BUILDINGS[b.kind].providesCharge) continue;
-      if (Math.hypot(b.x - x, b.z - z) < BUILDINGS[b.kind].radius + 5) return true;
+      if (!effectiveBuildingDef(b).providesCharge) continue;
+      if (Math.hypot(b.x - x, b.z - z) < effectiveBuildingDef(b).radius + 5) return true;
     }
     return false;
   }
@@ -201,7 +204,7 @@ export class PowerSystem {
     for (const b of state.buildings) {
       if (b.kind !== 'garage' || b.state !== 'online' || b.damaged || !b.enabled) continue;
       if (Math.hypot(b.x - x, b.z - z) < BUILDINGS.garage.radius + 5) {
-        return GARAGE_CHARGE_RATE_KW * devLevelMul(b.level);
+        return GARAGE_CHARGE_RATE_KW * devLevelMul(b.level) * upgradeMul(b, 'service');
       }
     }
     return ROVER_CHARGE_RATE_KW;

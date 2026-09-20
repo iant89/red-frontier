@@ -36,6 +36,8 @@
  * tripDamaged and endMission — the contract is unchanged.
  */
 
+import { effectiveBuildingDef } from '../engineering/upgrades';
+import { effectiveRoverDef } from '../engineering/upgrades';
 import { BUILDINGS, ROVERS } from '../defs';
 import { lightningVulnerability } from '../state/BuildingState';
 import type { Building } from '../state/BuildingState';
@@ -85,7 +87,7 @@ export class WeatherSystem {
     let advanced = false;
     for (const b of state.buildings) {
       if (b.state !== 'online' || !b.enabled || b.damaged || b.powerSat < 0.5) continue;
-      const def = BUILDINGS[b.kind];
+      const def = effectiveBuildingDef(b);
       if (!def.weatherRadarRangeKm) continue;
       rangeKm = Math.max(rangeKm, def.weatherRadarRangeKm);
       advanced ||= !!def.advancedForecast;
@@ -159,7 +161,7 @@ export class WeatherSystem {
     const sols = SIM_TICK * SOLS_PER_SEC;
     for (const b of state.buildings) {
       if (b.state !== 'online') continue;
-      const def = BUILDINGS[b.kind];
+      const def = effectiveBuildingDef(b);
       if (def.generation !== 'solar') continue;
       if (b.cleanliness > CLEANLINESS_FLOOR) {
         const dirt = wx.localDust(b.x, b.z) * PANEL_DIRT_PER_SOL * sols;
@@ -174,7 +176,7 @@ export class WeatherSystem {
       if (b.state !== 'online' || b.damaged) continue;
       const rate = wx.damageRateAt(b.x, b.z);
       if (rate <= 0) continue;
-      const def = BUILDINGS[b.kind];
+      const def = effectiveBuildingDef(b);
       const before = b.health;
       b.health = Math.max(0, b.health - rate * def.exposure * SIM_TICK);
       if (b.health <= DAMAGED_HEALTH && before > DAMAGED_HEALTH) {
@@ -212,7 +214,7 @@ export class WeatherSystem {
     const out: Array<{ x: number; z: number; w: number }> = [];
     for (const b of state.buildings) {
       if (b.state !== 'online' || b.damaged) continue;
-      const def = BUILDINGS[b.kind];
+      const def = effectiveBuildingDef(b);
       out.push({ x: b.x, z: b.z, w: def.exposure * lightningVulnerability(def) });
     }
     for (const r of state.rovers) {
@@ -275,7 +277,7 @@ export class WeatherSystem {
     let tripped = false;
     for (const b of state.buildings) {
       if (b.state !== 'online') continue;
-      const def = BUILDINGS[b.kind];
+      const def = effectiveBuildingDef(b);
       const d = Math.hypot(b.x - x, b.z - z);
       const reach = LIGHTNING_STRIKE_RADIUS + def.radius;
       if (d > reach) continue;
@@ -302,7 +304,7 @@ export class WeatherSystem {
       // A near-direct hit can flash a chunk of the pack away; a flat battery
       // strands the rover exactly like the ride home would.
       if (d <= LIGHTNING_CORE_RADIUS) {
-        r.battery = Math.max(0, r.battery - ROVERS[r.kind].maxBatteryKWh * LIGHTNING_ROVER_BATTERY_FRAC);
+        r.battery = Math.max(0, r.battery - effectiveRoverDef(r).maxBatteryKWh * LIGHTNING_ROVER_BATTERY_FRAC);
         if (r.battery <= 0) hooks.disableRover(r);
       }
     }

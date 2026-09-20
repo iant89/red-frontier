@@ -3,6 +3,7 @@
  * selection visualization. Move-not-redesign from Game.ts.
  */
 
+import type { EntityTarget } from '../sim/engineering/upgrades';
 import type { RoverView } from '../sim/host';
 import type { SimCommand, SimHost, SimView } from '../sim/host';
 import type { BuildingKind, RoverKind } from '../sim/defs';
@@ -35,6 +36,7 @@ export interface SelectionControllerDeps {
   hasArmedSpawn: () => boolean;
   placeDevSpawn: (x: number, z: number) => void;
   syncUI: (force: boolean) => void;
+  openEngineering?: (target: EntityTarget) => void;
 }
 
 export class SelectionController {
@@ -58,6 +60,13 @@ export class SelectionController {
     if (this.d.uiCoversPoint(x, y)) return;
     if (this.d.getPendingBuild()) {
       this.d.setPendingBuild(null);
+      return;
+    }
+    const pick = renderer.pickTargetAt(x, y);
+    if (pick && (pick.type === 'rover' || pick.type === 'building')) {
+      this.selected = { type: pick.type, id: pick.id };
+      this.d.syncUI(true);
+      this.d.openEngineering?.({ entity: pick.type, id: pick.id });
       return;
     }
     const pt = renderer.raycastTerrain(x, y);
@@ -342,6 +351,19 @@ export class SelectionController {
             type: 'building/assemble',
             buildingId: this.selected.id,
             kind: arg as RoverKind,
+          });
+        }
+        break;
+      case 'water-commission':
+        this.order({ type: 'water/commission' });
+        break;
+      case 'water-connect':
+      case 'water-disconnect':
+        if (this.selected.type === 'building' && arg !== undefined) {
+          const b = Number(arg);
+          if (Number.isInteger(b) && b >= 0) this.order({
+            type: a === 'water-connect' ? 'water/connect' : 'water/disconnect',
+            a: this.selected.id, b,
           });
         }
         break;

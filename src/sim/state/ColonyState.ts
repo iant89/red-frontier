@@ -18,6 +18,9 @@
  * No behavior — only data + tiny pure helpers.
  */
 
+import { effectiveBuildingDef } from '../engineering/upgrades';
+import { emptyWaterState, reconcileWater, type WaterState } from './WaterState';
+import { freshRoverParts } from './RoverState';
 import { World } from '../World';
 import { SolClock } from '../clock';
 import { createWeatherState } from './WeatherState';
@@ -93,6 +96,7 @@ export interface ColonyState {
    */
   components: ComponentAmounts;
   pools: FluidPools;
+  water: WaterState;
   power: PowerResult;
   storedKWh: number;
 
@@ -195,6 +199,7 @@ export function createColonyState(params: ColonyStateParams): ColonyState {
       chargeSat: 1,
       autoTask: false,
       condition: 100,
+      parts: freshRoverParts(),
       rules: defaultRoverRules(),
       routePaused: false,
       blockNotified: false,
@@ -248,6 +253,7 @@ export function createColonyState(params: ColonyStateParams): ColonyState {
     storage,
     components,
     pools,
+    water: emptyWaterState(),
     power,
     storedKWh,
     flows,
@@ -289,7 +295,7 @@ export function recomputeCapacitiesState(state: ColonyState): void {
   const fluid = { ...POD_FLUID_CAPACITY };
   for (const b of state.buildings) {
     if (b.state !== 'online' || b.damaged) continue;
-    const def = BUILDINGS[b.kind];
+    const def = effectiveBuildingDef(b);
     const mul = devLevelMul(b.level);
     cap += def.storagePerResourceKg * mul;
     slots += (def.componentSlots ?? 0) * mul;
@@ -316,6 +322,7 @@ export function recomputeCapacitiesState(state: ColonyState): void {
   for (const f of ALL_FLUIDS) {
     if (state.pools.amounts[f] > fluid[f]) state.pools.amounts[f] = fluid[f];
   }
+  reconcileWater(state);
 }
 
 /**

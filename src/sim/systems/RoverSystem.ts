@@ -59,6 +59,11 @@
  * persistence schema.
  */
 
+import { UpgradeSystem } from './UpgradeSystem';
+import { effectiveBuildingDef } from '../engineering/upgrades';
+import { effectiveRoverDef } from '../engineering/upgrades';
+import { freshRoverParts } from '../state/RoverState';
+import { MaintenanceSystem } from './MaintenanceSystem';
 import type { ColonyState } from '../state/ColonyState';
 import { recomputeCapacitiesState } from '../state/ColonyState';
 import type { Building } from '../state/BuildingState';
@@ -173,6 +178,7 @@ export class RoverSystem {
       chargeSat: 1,
       autoTask: false,
       condition: 100,
+      parts: freshRoverParts(),
       rules: defaultRoverRules(),
       routePaused: false,
       blockNotified: false,
@@ -209,7 +215,7 @@ export class RoverSystem {
     let bestD = Math.hypot(SPAWN_X - x, SPAWN_Z - z);
     for (const b of state.buildings) {
       if (!RoverSystem.runnable(b) || !b.enabled) continue;
-      if (!BUILDINGS[b.kind].providesCharge) continue;
+      if (!effectiveBuildingDef(b).providesCharge) continue;
       const d = Math.hypot(b.x - x, b.z - z);
       if (d < bestD) {
         bestD = d;
@@ -244,7 +250,7 @@ export class RoverSystem {
    * drivetrain still turns at half rate — stranded-not-destroyed, always.
    */
   static roverWorkMul(r: Rover): number {
-    return 0.5 + 0.5 * clamp(r.condition / ROVER_CONDITION_SLOW, 0, 1);
+    return 0.5 + 0.5 * clamp(Math.min(r.condition, r.parts.motor, r.parts.circuitBoard) / ROVER_CONDITION_SLOW, 0, 1);
   }
 
   /**
@@ -267,7 +273,7 @@ export class RoverSystem {
   /** Online warehouses — the places a hold can actually be poured into. */
   private static onlineWarehouses(state: ColonyState): Building[] {
     return state.buildings.filter(
-      (b) => RoverSystem.runnable(b) && BUILDINGS[b.kind].storagePerResourceKg > 0,
+      (b) => RoverSystem.runnable(b) && effectiveBuildingDef(b).storagePerResourceKg > 0,
     );
   }
 
@@ -402,9 +408,9 @@ export class RoverSystem {
     const r = state.rovers.find((o) => o.id === roverId);
     if (!r || r.phase === 'disabled') return;
     const b = state.buildings.find((o) => o.id === buildingId);
-    if (!b || b.state === 'online') return;
-    if (!BUILDINGS[b.kind].buildableBy.includes(r.kind)) {
-      log(state, 'warn', `${r.label} can't build a ${BUILDINGS[b.kind].label}.`);
+    if (!b || (b.state === 'online' && !b.upgradeJob)) return;
+    if (!effectiveBuildingDef(b).buildableBy.includes(r.kind)) {
+      log(state, 'warn', `${r.label} can't build a ${effectiveBuildingDef(b).label}.`);
       return;
     }
     RoverSystem.giveTask(state, r, { type: 'construct', buildingId }, queued);
@@ -519,12 +525,12 @@ export class RoverSystem {
     const r = state.rovers.find((o) => o.id === roverId);
     const b = state.buildings.find((o) => o.id === buildingId);
     if (!r || r.phase === 'disabled' || !b || b.state !== 'online') return false;
-    if (BUILDINGS[b.kind].generation !== 'solar') {
-      log(state, 'info', `${BUILDINGS[b.kind].label} has no panels to clean.`);
+    if (effectiveBuildingDef(b).generation !== 'solar') {
+      log(state, 'info', `${effectiveBuildingDef(b).label} has no panels to clean.`);
       return false;
     }
     if (b.cleanliness > 0.995) {
-      log(state, 'info', `The ${BUILDINGS[b.kind].label} array is already clean.`);
+      log(state, 'info', `The ${effectiveBuildingDef(b).label} array is already clean.`);
       return false;
     }
     if (state.weather.shelterRovers()) {
@@ -541,7 +547,7 @@ export class RoverSystem {
     const b = state.buildings.find((o) => o.id === buildingId);
     if (!r || r.phase === 'disabled' || !b) return false;
     if (b.state !== 'online' || b.health >= BUILDING_MAX_HEALTH - 0.5) {
-      log(state, 'info', `${b ? BUILDINGS[b.kind].label : 'That building'} needs no repairs.`);
+      log(state, 'info', `${b ? effectiveBuildingDef(b).label : 'That building'} needs no repairs.`);
       return false;
     }
     if (state.weather.shelterRovers()) {
@@ -560,7 +566,7 @@ export class RoverSystem {
     const b = state.buildings.find((o) => o.id === buildingId);
     if (!b || b.state !== 'online') return false;
     const needsRepair = b.damaged || b.health < BUILDING_MAX_HEALTH - 0.5;
-    const needsClean = BUILDINGS[b.kind].generation === 'solar' && b.cleanliness < 0.995;
+    const needsClean = effectiveBuildingDef(b).generation === 'solar' && b.cleanliness < 0.995;
     if (!needsRepair && !needsClean) return false;
     const crew = state.rovers
       .filter(
@@ -584,7 +590,7 @@ export class RoverSystem {
       : RoverSystem.issueClean(state, rover.id, b.id);
     if (ok) {
       const job = needsRepair ? 'repair' : 'clean';
-      log(state, 'info', `${rover.label} dispatched to ${job} the ${BUILDINGS[b.kind].label}.`);
+      log(state, 'info', `${rover.label} dispatched to ${job} the ${effectiveBuildingDef(b).label}.`);
     }
     return ok;
   }
@@ -636,7 +642,7 @@ export class RoverSystem {
     r.lightsActive = r.lightsOn && RoverSystem.lightsNeeded(state) && r.battery > 0;
     if (!r.lightsActive) return true;
     const hours = SIM_TICK * HOURS_PER_SEC;
-    r.battery = Math.max(0, r.battery - ROVERS[r.kind].lightsPowerKw * hours);
+    r.battery = Math.max(0, r.battery - effectiveRoverDef(r).lightsPowerKw * hours);
     // Sitting out a long night with the lights on can strand a rover too.
     if (r.battery <= 0) {
       RoverSystem.disable(state, r);
@@ -650,7 +656,7 @@ export class RoverSystem {
    * then whatever task it is holding.
    */
   static updateRover(state: ColonyState, r: Rover, hooks: RoverHostHooks): void {
-    const def = ROVERS[r.kind];
+    const def = effectiveRoverDef(r);
 
     // ---- storm recall (TDD §8: "IF storm warning → return to shelter") ----
     // The rover's own command is preserved underneath; when the storm passes
@@ -720,6 +726,10 @@ export class RoverSystem {
     const cmd = r.command;
     switch (cmd.type) {
       case 'idle':
+        if (MaintenanceSystem.holdsRover(state, r) || UpgradeSystem.holdsRover(state, r)) {
+          enterIdle(r);
+          break;
+        }
         RoverSystem.goIdle(state, r, hooks);
         break;
       case 'moveTo':
@@ -741,7 +751,7 @@ export class RoverSystem {
       }
       case 'construct': {
         const b = state.buildings.find((o) => o.id === cmd.buildingId);
-        if (!b || b.state === 'online') {
+        if (!b || (b.state === 'online' && !b.upgradeJob)) {
           if (b) b.workerId = null;
           RoverSystem.finishTask(r);
           break;
@@ -791,7 +801,7 @@ export class RoverSystem {
   /** Move a rover one step along its nav path, burning pack and condition. */
   static moveRover(state: ColonyState, r: Rover): void {
     if (r.phase !== 'moving' || r.goal === 'idle') return;
-    const def = ROVERS[r.kind];
+    const def = effectiveRoverDef(r);
     const hours = SIM_TICK * HOURS_PER_SEC;
     const dest = r.navPath[r.navI] ?? { x: r.gx, z: r.gz };
     const dx = dest.x - r.x;
@@ -883,7 +893,7 @@ export class RoverSystem {
     }
     // Parked at a charger, an idle rover tops itself up (grid permitting —
     // the actual energy transfer happens in PowerSystem.tick).
-    if (RoverSystem.nearCharger(state, r.x, r.z) && r.battery < ROVERS[r.kind].maxBatteryKWh - 1e-6) {
+    if (RoverSystem.nearCharger(state, r.x, r.z) && r.battery < effectiveRoverDef(r).maxBatteryKWh - 1e-6) {
       // (idle, charging): parked on a pad and topping up — the goal stays
       // 'idle' because no charge *task* is running.
       r.phase = 'charging';
@@ -892,7 +902,7 @@ export class RoverSystem {
 
   /** Head for a charger and sit there until the pack is nearly full. */
   static doRecharge(state: ColonyState, r: Rover): void {
-    const def = ROVERS[r.kind];
+    const def = effectiveRoverDef(r);
     // A rover that limps home with a full hold empties it while it charges:
     // every charger sits on a depot, so there is no detour involved. Whatever
     // the silos have room for goes in now; whatever doesn't rides back out.
@@ -947,7 +957,7 @@ export class RoverSystem {
   static rehydrate(state: ColonyState): void {
     for (const r of state.rovers) {
       if (r.battery <= 0) continue;
-      if (r.battery >= ROVERS[r.kind].maxBatteryKWh - 1e-6) continue;
+      if (r.battery >= effectiveRoverDef(r).maxBatteryKWh - 1e-6) continue;
       if (RoverSystem.nearCharger(state, r.x, r.z)) r.phase = 'charging';
     }
   }
@@ -997,7 +1007,7 @@ export class RoverSystem {
    * returns Infinity.
    */
   static nearestObstacleClearance(state: ColonyState, r: Rover): number {
-    const selfR = ROVERS[r.kind].radius;
+    const selfR = effectiveRoverDef(r).radius;
     let best = Infinity;
 
     // ---- other rovers ------------------------------------------------------
@@ -1012,7 +1022,7 @@ export class RoverSystem {
       ) {
         continue;
       }
-      const d = Math.hypot(o.x - r.x, o.z - r.z) - selfR - ROVERS[o.kind].radius;
+      const d = Math.hypot(o.x - r.x, o.z - r.z) - selfR - effectiveRoverDef(o).radius;
       if (d < best) best = d;
     }
 
@@ -1030,7 +1040,7 @@ export class RoverSystem {
 
     // ---- buildings ---------------------------------------------------------
     for (const b of state.buildings) {
-      const bR = BUILDINGS[b.kind].radius;
+      const bR = effectiveBuildingDef(b).radius;
       const centre = Math.hypot(b.x - r.x, b.z - r.z);
       // Skip the structure this rover is actively driving to, once it is
       // inside the task's arrival reach — otherwise the crawl never ends and
@@ -1038,7 +1048,7 @@ export class RoverSystem {
       const targeting =
         ((r.goal === 'toSite' || r.goal === 'toService') && r.gid === b.id) ||
         (r.goal === 'toDepot' &&
-          BUILDINGS[b.kind].storagePerResourceKg > 0 &&
+          effectiveBuildingDef(b).storagePerResourceKg > 0 &&
           RoverSystem.runnable(b));
       const arriveReach = bR + 5;
       if (targeting && centre <= arriveReach) continue;
@@ -1124,7 +1134,7 @@ export class RoverSystem {
    * the hold is as full as the colony can take, walk to the seam, then dig.
    */
   static doMine(state: ColonyState, r: Rover, dep: Deposit, hooks: RoverHostHooks): void {
-    const def = ROVERS[r.kind];
+    const def = effectiveRoverDef(r);
     const hours = SIM_TICK * HOURS_PER_SEC;
     const onRoute = r.command.type === 'mine' && !!r.command.repeat;
 
@@ -1256,7 +1266,7 @@ export class RoverSystem {
    * work — the recovery should cost the player something, not a click.
    */
   static doService(state: ColonyState, r: Rover, b: Building, kind: 'clean' | 'repair'): void {
-    const def = BUILDINGS[b.kind];
+    const def = effectiveBuildingDef(b);
     const dist = Math.hypot(b.x - r.x, b.z - r.z);
     const siteReach = def.radius + 4;
     const hours = SIM_TICK * HOURS_PER_SEC;
@@ -1282,7 +1292,7 @@ export class RoverSystem {
     } else {
       b.cleanliness = Math.min(1, b.cleanliness + ROVER_CLEAN_RATE * mul * SIM_TICK);
     }
-    r.battery = Math.max(0, r.battery - ROVERS[r.kind].workPowerKw * hours * 0.5);
+    r.battery = Math.max(0, r.battery - effectiveRoverDef(r).workPowerKw * hours * 0.5);
     r.condition = Math.max(0, r.condition - ROVER_WEAR_WORK_S * 0.5 * SIM_TICK);
     if (r.battery <= 0) RoverSystem.disable(state, r);
 
@@ -1315,7 +1325,7 @@ export class RoverSystem {
    * the field.
    */
   static doSalvage(state: ColonyState, r: Rover, p: Poi, hooks: RoverHostHooks): void {
-    const def = ROVERS[r.kind];
+    const def = effectiveRoverDef(r);
     const hours = SIM_TICK * HOURS_PER_SEC;
     const reach = SALVAGE_REACH;
 
@@ -1414,13 +1424,13 @@ export class RoverSystem {
 
     if (cmd.give === undefined) {
       // First hookup: size the transfer honestly.
-      const sDef = ROVERS[s.kind];
+      const sDef = effectiveRoverDef(s);
       const home = RoverSystem.nearestChargerPoint(state, s.x, s.z);
       const need = Math.max(
         RoverSystem.travelKWh(s.x, s.z, home.x, home.z, sDef) * 1.25,
         sDef.maxBatteryKWh * 0.15,
       );
-      const rDef = ROVERS[r.kind];
+      const rDef = effectiveRoverDef(r);
       const rHome = RoverSystem.nearestChargerPoint(state, s.x, s.z); // the rescuer walks back from there
       const reserve = Math.max(
         rDef.maxBatteryKWh * (r.rules.chargeFloorPct / 100),

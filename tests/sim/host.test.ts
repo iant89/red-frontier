@@ -41,6 +41,12 @@ import { group, test, finish } from '../harness';
  * message has to prove it is expressible as plain data before it is accepted.
  */
 const SAMPLES: Record<SimCommand['type'], SimCommand> = {
+  'engineering/upgrade': { type: 'engineering/upgrade', entity: 'rover', id: 1000, upgrade: 'battery' },
+  'engineering/cancel': { type: 'engineering/cancel', entity: 'rover', id: 1000 },
+  'engineering/paint': { type: 'engineering/paint', entity: 'rover', id: 1000, paint: '#d67635' },
+  'water/connect': { type: 'water/connect', a: 0, b: 1003 },
+  'water/disconnect': { type: 'water/disconnect', a: 0, b: 1003 },
+  'water/commission': { type: 'water/commission' },
   'rover/move': { type: 'rover/move', roverId: 1000, x: 12, z: -8, queue: false },
   'rover/mine': { type: 'rover/mine', roverId: 1000, depositId: 1, queue: false },
   'rover/unload': { type: 'rover/unload', roverId: 1000, queue: false },

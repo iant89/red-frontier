@@ -9,6 +9,7 @@
  * Simulation.dev* bodies.
  */
 
+import { effectiveRoverDef } from './engineering/upgrades';
 import type { ColonyState } from './state/ColonyState';
 import { recomputeCapacitiesState } from './state/ColonyState';
 import type { Deposit } from './World';
@@ -124,7 +125,7 @@ export const DevBackdoors = {
   setRoverBatteryFrac(state: ColonyState, roverId: number, frac: number): boolean {
     const r = state.rovers.find((x) => x.id === roverId);
     if (!r) return false;
-    r.battery = clamp(frac, 0, 1) * ROVERS[r.kind].maxBatteryKWh;
+    r.battery = clamp(frac, 0, 1) * effectiveRoverDef(r).maxBatteryKWh;
     return true;
   },
 
@@ -140,7 +141,7 @@ export const DevBackdoors = {
     if (!r) return 0;
     let others = 0;
     for (const k of ALL_RESOURCES) if (k !== res) others += r.cargo[k];
-    r.cargo[res] = Math.min(Math.max(0, kg), Math.max(0, ROVERS[r.kind].capacityKg - others));
+    r.cargo[res] = Math.min(Math.max(0, kg), Math.max(0, effectiveRoverDef(r).capacityKg - others));
     return r.cargo[res];
   },
 

@@ -44,11 +44,12 @@ test('the start button reports the chosen seed', () => {
   );
 });
 
-test('overlay cycling advances none → power → life → weather → none', () => {
+test('overlay cycling advances none → power → life → weather → water → none', () => {
   hud.setOverlay('none');
   assert.equal(hud.cycleOverlay(), 'power');
   assert.equal(hud.cycleOverlay(), 'life');
   assert.equal(hud.cycleOverlay(), 'weather');
+  assert.equal(hud.cycleOverlay(), 'water');
   assert.equal(hud.cycleOverlay(), 'none');
 });
 

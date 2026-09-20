@@ -122,6 +122,7 @@ function project(sim: Simulation): unknown {
     // P5: the component rack is state, not presentation — two runs that craft a
     // different number of motors are different colonies.
     components: sim.components,
+    water: { active: sim.state.water.active, links: sim.state.water.links, tanks: sim.state.water.tanks },
     componentCapacity: sim.componentCapacity(),
     fluids: sim.pools.amounts,
     fluidCapacity: sim.pools.capacity,
@@ -169,6 +170,8 @@ function project(sim: Simulation): unknown {
       chargeSat: r.chargeSat,
       autoTask: r.autoTask,
       condition: r.condition,
+      parts: r.parts,
+      upgrades: r.upgrades ?? {}, upgradeJob: r.upgradeJob ?? null, paint: r.paint ?? null,
       rules: r.rules,
       routePaused: r.routePaused,
       blockNotified: r.blockNotified,
@@ -200,9 +203,11 @@ function project(sim: Simulation): unknown {
       cleanliness: b.cleanliness,
       damaged: b.damaged,
       assembly: b.assembly,
+      maintenance: b.maintenance,
       level: b.level,
       recipe: b.recipe,
       craft: b.craft,
+      upgrades: b.upgrades ?? {}, upgradeJob: b.upgradeJob ?? null, paint: b.paint ?? null,
     })),
 
     deposits: byId(sim.world.deposits).map((d) => ({
@@ -284,6 +289,7 @@ export function hashSimulationSection(sim: Simulation, section: StateSection): s
         storedKWh: p.storedKWh,
         storage: p.storage,
         components: p.components,
+        water: p.water,
         componentCapacity: p.componentCapacity,
         fluids: p.fluids,
         fluidCapacity: p.fluidCapacity,

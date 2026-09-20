@@ -262,10 +262,21 @@ test('the progress overlay stages through its steps and lifts on success', async
   assert.ok(step(1).classList.contains('done'));
   assert.ok(step(2).classList.contains('active'), 'the writing step is active');
   hud.saveProgressEnd(true);
-  assert.equal(hud.isSaveProgressOpen(), false, 'state cleared immediately');
+  assert.equal(hud.isSaveProgressOpen(), true, 'the progress card owns the UI through its fade');
   await new Promise((r) => setTimeout(r, 500));
   assert.equal(overlay.style.display, 'none', 'the frost lifts after the fade');
+  assert.equal(hud.isSaveProgressOpen(), false);
   assert.ok(step(2).classList.contains('done'), 'every step checked off');
+});
+
+test('a stale save fade cannot hide a newer progress card', async () => {
+  hud.saveProgressStart('First save');
+  hud.saveProgressEnd(true);
+  hud.saveProgressStart('Second save');
+  await new Promise((r) => setTimeout(r, 500));
+  assert.equal(hud.isSaveProgressOpen(), true);
+  assert.equal(doc0().getElementById('save-progress')!.style.display, 'flex');
+  hud.hideSaveProgress();
 });
 
 test('a failed save clears the overlay without a success fade', () => {

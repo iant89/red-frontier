@@ -168,6 +168,7 @@ export class SaveController {
   /** A manual save from the pause menu (or Ctrl+S): full progress dialog. */
   manualSave(): void {
     if (!this.d.getHost() || !this.d.getStarted()) return;
+    if (this.saveInFlight || this.d.hud.isSaveProgressOpen()) return;
     this.saveContext = 'manual';
     this.save(false);
   }

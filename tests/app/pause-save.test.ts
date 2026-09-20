@@ -1,7 +1,7 @@
 /**
  * @suite app/pause-save
  * @group integration
- * @covers src/app/Game.ts
+ * @covers src/app/Game.ts src/app/MenuController.ts src/app/SaveController.ts
  * @desc The return-to-menu hand-off must not dispose the host before the save
  * settles (the "Save failed — the colony could not be read" bug), a failed
  * save raises the recovery prompt with the right options per context,
@@ -265,6 +265,61 @@ test('the pause menu offers save, settings and a live stats pull', async () => {
   assert.equal(stats.structures.total, sim.buildings.length);
   assert.ok(stats.clockText.includes('Sol'), 'the clock line');
   assert.ok(stats.resources.length >= 4, 'every resource is listed');
+  g.closePauseMenu();
+});
+
+test('saving hides the pause menu until progress closes, then disables save until resume', async () => {
+  const { host, state } = makeHost();
+  const game = await makeGame(host);
+  const g = game as any;
+  game.hud.setSpeed(2);
+  g.openPauseMenu();
+  const menu = g.pauseMenu;
+  const save = menu.root.querySelector('[data-act="save"]') as HTMLButtonElement;
+  save.click();
+  assert.equal(menu.root.style.display, 'none');
+  assert.equal(overlay('save-progress').style.display, 'flex');
+  assert.equal(game.hud.speedIdx, 0);
+  assert.equal(g.closePauseMenu(), false, 'Esc cannot resume a save in progress');
+  g.manualSave(); // repeated shortcut must not start another snapshot
+  await wait(120);
+  assert.equal(state.snapshots, 1);
+  assert.equal(menu.root.style.display, 'none', 'still hidden during the success fade');
+  await wait(450);
+  assert.equal(overlay('save-progress').style.display, 'none');
+  assert.equal(g.pauseMenu, menu, 'restore the same pause session');
+  assert.equal(menu.root.style.display, '');
+  assert.equal(game.hud.speedIdx, 0);
+  assert.equal(save.disabled, true);
+  save.click();
+  g.manualSave();
+  await wait(60);
+  assert.equal(state.snapshots, 1, 'button and shortcut cannot repeat a completed paused save');
+  g.closePauseMenu();
+  assert.equal(game.hud.speedIdx, 2, 'resume restores the original speed');
+  g.openPauseMenu();
+  assert.equal(g.pauseMenu.root.querySelector('[data-act="save"]').disabled, false);
+  g.closePauseMenu();
+});
+
+test('a failed paused save restores an enabled menu and retry disables it only on success', async () => {
+  const { host } = makeHost(1);
+  const game = await makeGame(host);
+  const g = game as any;
+  g.openPauseMenu();
+  const menu = g.pauseMenu;
+  g.manualSave();
+  await wait(120);
+  assert.equal(menu.root.style.display, '');
+  assert.equal(menu.root.querySelector('[data-act="save"]').disabled, false);
+  assert.equal(overlay('save-error').style.display, 'flex');
+  assert.equal(game.hud.speedIdx, 0);
+  g.retrySave();
+  assert.equal(menu.root.style.display, 'none');
+  await wait(600);
+  assert.equal(menu.root.style.display, '');
+  assert.equal(menu.root.querySelector('[data-act="save"]').disabled, true);
+  assert.equal(overlay('save-error').style.display, 'none');
   g.closePauseMenu();
 });
 

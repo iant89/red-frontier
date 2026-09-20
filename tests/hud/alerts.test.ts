@@ -30,6 +30,57 @@ test('alerts render, dedupe by content, and clear', () => {
   assert.equal(doc.querySelectorAll('#alerts .alert').length, 0);
 });
 
+test('live power and weather updates patch cards without remounting or disturbing focus', () => {
+  const power = { key: 'power-deficit', severity: 'warn' as const, title: 'Power deficit', detail: '10 kW', since: 0, lastSeen: 0 };
+  const weather = { ...power, key: 'weather', title: 'Dust storm', detail: 'Arriving in 20 s' };
+  hud.updateAlerts([power, weather]);
+  const cards = [...doc.querySelectorAll('#alerts .alert')];
+  const button = cards[0].querySelector('button')!;
+  button.focus();
+  const observer = new dom.window.MutationObserver(() => {});
+  observer.observe(doc.getElementById('alerts')!, { childList: true });
+  hud.updateAlerts([{ ...power, detail: '11 kW' }, { ...weather, detail: 'Arriving in 19 s' }]);
+  assert.equal(observer.takeRecords().length, 0, 'no card insertions/removals on a text update');
+  observer.disconnect();
+  assert.deepEqual([...doc.querySelectorAll('#alerts .alert')], cards);
+  assert.equal(doc.activeElement, button);
+  assert.match(cards[0].textContent!, /11 kW/);
+  assert.match(cards[1].textContent!, /19 s/);
+  // Title and focus target can change independently of the detail text.
+  hud.updateAlerts([{ ...power, title: 'Grid brownout', severity: 'crit', entityId: 42 }, weather]);
+  assert.equal(doc.querySelector('#alerts .alert'), cards[0]);
+  assert.match(cards[0].textContent!, /Grid brownout/);
+  assert.ok(cards[0].classList.contains('crit'));
+  calls.length = 0;
+  cards[0].dispatchEvent(new dom.window.Event('pointerdown', { bubbles: true }));
+  assert.ok(calls.includes('action:focus:42'), 'the retained listener reads the latest focus target');
+  assert.equal(doc.querySelector('#alerts .alert'), cards[1], 'dismissing power leaves weather mounted');
+  doc.querySelector('#alerts .alerts-restore')!.dispatchEvent(new dom.window.Event('pointerdown', { bubbles: true }));
+  assert.equal(doc.querySelectorAll('#alerts .alert').length, 2);
+  assert.equal(doc.querySelectorAll('#alerts .alert')[1], cards[1]);
+  calls.length = 0;
+  cards[1].querySelector('button')!.dispatchEvent(new dom.window.Event('pointerdown', { bubbles: true }));
+  assert.equal(calls.length, 0, 'dismiss button does not focus');
+  hud.updateAlerts([]);
+});
+
+test('alerts retain keyed identity when reordered and respect the six-card limit', () => {
+  const alerts = Array.from({ length: 7 }, (_, i) => ({
+    key: `limit-${i}`, severity: 'warn' as const, title: `Alert ${i}`, detail: 'test', since: 0, lastSeen: 0,
+  }));
+  hud.updateAlerts(alerts);
+  const cards = [...doc.querySelectorAll('#alerts .alert')];
+  assert.equal(cards.length, 6);
+  hud.updateAlerts([alerts[1], alerts[0], ...alerts.slice(2)]);
+  assert.equal(doc.querySelectorAll('#alerts .alert')[0], cards[1]);
+  assert.equal(doc.querySelectorAll('#alerts .alert')[1], cards[0]);
+  hud.updateAlerts(alerts.slice(1));
+  assert.equal(doc.querySelectorAll('#alerts .alert').length, 6);
+  assert.equal(doc.querySelectorAll('#alerts .alert')[0], cards[1]);
+  assert.equal(doc.querySelectorAll('#alerts .alert')[5].getAttribute('data-key'), 'limit-6');
+  hud.updateAlerts([]);
+});
+
 test('the log appends entries and caps its length', () => {
   for (let i = 0; i < 90; i++) hud.addLog('info', `line ${i}`, 'Sol 1 · 00:00');
   const items = doc.querySelectorAll('#log .log-item');

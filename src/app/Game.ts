@@ -16,6 +16,7 @@
  * or a worker — is not this file's business (TDD §16).
  */
 
+import { EngineeringController } from './EngineeringController';
 import type { SimHost, SimView } from '../sim/host';
 import { createHost, planHost, restoreHost } from '../sim/host';
 import { GameRenderer } from '../render/Renderer';
@@ -86,6 +87,7 @@ export class Game {
   private readonly buildCtrl: BuildController;
   private readonly saveCtrl: SaveController;
   private readonly menuCtrl: MenuController;
+  private readonly engineeringCtrl: EngineeringController;
   private readonly updateCtrl: UpdateController;
 
   // ---- smoke / test field aliases (same names as pre-Phase-19 Game) ----
@@ -223,6 +225,13 @@ export class Game {
       syncUI: (force) => this.syncUI(force),
     });
 
+    this.engineeringCtrl = new EngineeringController({
+      getHost: () => this.host, getSim: () => this.sim, getRenderer: () => this.renderer,
+      get hud() { return hudBag.hud; },
+      blocked: () => !!this.menuCtrl.pauseMenu || hudBag.hud.isSaveProgressOpen() || hudBag.hud.isSaveErrorOpen() || hudBag.hud.isUpdateNoticeOpen(),
+      action: (a, arg) => this.selectionCtrl.handleAction(a, arg),
+    });
+
     this.selectionCtrl = new SelectionController({
       getHost: () => this.host,
       getSim: () => this.sim,
@@ -237,6 +246,7 @@ export class Game {
       getPendingBuild: () => this.buildCtrl.pendingBuild,
       setPendingBuild: (k) => this.buildCtrl.setPendingBuild(k),
       placeBuild: (x, y) => this.buildCtrl.placeBuild(x, y),
+      openEngineering: (target) => this.engineeringCtrl.open(target),
       hasArmedSpawn: () => !!this.dev.armedSpawn,
       placeDevSpawn: (x, z) => this.placeDevSpawn(x, z),
       syncUI: (force) => this.syncUI(force),
@@ -252,10 +262,11 @@ export class Game {
       },
       audio: this.audio,
       isPauseMenuOpen: () => !!this.menuCtrl.pauseMenu,
+      isEngineeringOpen: () => this.engineeringCtrl.isOpen,
       closePauseMenu: () => this.menuCtrl.closePauseMenu(),
       isSaveInFlight: () => this.saveCtrl.saveInFlight,
       updateNoticeLater: () => this.updateCtrl.updateNoticeLater(),
-      manualSave: () => this.saveCtrl.manualSave(),
+      manualSave: () => this.manualSave(),
       toggleDevPanel: () => this.toggleDevPanel(),
       hasArmedSpawn: () => !!this.dev.armedSpawn,
       clearArmedSpawn: () => this.setArmedSpawn(null),
@@ -308,6 +319,7 @@ export class Game {
       // race that disposed the host before the save could finish).
       onMenu: () => this.openPauseMenu(),
       onDev: () => this.toggleDevPanel(),
+      onSaveProgress: (open, saved) => this.menuCtrl.onSaveProgress(open, saved),
       onSaveRetry: () => this.retrySave(),
       onSaveAsNew: () => this.saveAsNew(),
       onSaveDismiss: () => this.hud.hideSaveError(),
@@ -508,6 +520,7 @@ export class Game {
   }
 
   private async loadSave(id: string): Promise<void> {
+    this.engineeringCtrl.close(false);
     const record = this.store.read(id);
     if (!record) {
       this.showMainMenu();
@@ -623,7 +636,7 @@ export class Game {
   }
 
   private manualSave(): void {
-    this.saveCtrl.manualSave();
+    this.menuCtrl.manualSave();
   }
 
   private retrySave(): void {
@@ -659,6 +672,7 @@ export class Game {
   }
 
   private openPauseMenu(): void {
+    this.engineeringCtrl.close();
     this.menuCtrl.openPauseMenu();
   }
 
@@ -809,6 +823,7 @@ export class Game {
 
   private syncUI(force: boolean): void {
     if (!this.sim) return;
+    this.engineeringCtrl.update();
     const now = performance.now();
     // The HUD patches cached nodes, but there is no value in doing it at 144 Hz.
     if (!force && now - this.lastInspector < 120) return;
@@ -830,7 +845,7 @@ export class Game {
         else this.selected = null;
       } else if (this.selected.type === 'building') {
         const b = this.sim.buildingById(this.selected.id);
-        if (b) this.hud.showBuilding(b, this.sim);
+        if (b) this.hud.showBuilding(b, this.sim, true);
         else this.selected = null;
       } else if (this.selected.type === 'poi') {
         const p = this.sim.poiById(this.selected.id);

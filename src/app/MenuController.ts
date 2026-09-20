@@ -3,6 +3,7 @@
  * Move-not-redesign from Game.ts.
  */
 
+import { effectiveRoverDef } from '../sim/engineering/upgrades';
 import { colonistStatusText } from '../sim/Simulation';
 import type { SimView } from '../sim/host';
 import { SOL_SECONDS, SUIT_O2_CAPACITY } from '../sim/config';
@@ -41,6 +42,8 @@ export class MenuController {
   pauseMenu: PauseMenu | null = null;
   /** The speed to restore when the pause menu closes. */
   prePauseSpeed = 1;
+  private saving = false;
+  private savedWhilePaused = false;
 
   constructor(private readonly d: MenuControllerDeps) {}
 
@@ -59,6 +62,7 @@ export class MenuController {
       this.d.hud.isUpdateNoticeOpen()
     )
       return;
+    this.savedWhilePaused = false;
     this.prePauseSpeed = this.d.hud.speedIdx;
     this.d.hud.setSpeed(0);
     this.d.audio.setPaused(true);
@@ -66,7 +70,7 @@ export class MenuController {
       getStats: () => this.buildColonyStats(),
       settings: this.pauseSettings(),
       onResume: () => this.closePauseMenu(),
-      onSave: () => this.d.manualSave(),
+      onSave: () => this.manualSave(),
       onReturnToMenu: () => this.d.returnToMenu(),
     });
     menu.mount();
@@ -75,12 +79,28 @@ export class MenuController {
 
   /** Resume: restore the pre-pause speed and unmount. True if it was open. */
   closePauseMenu(): boolean {
-    if (!this.pauseMenu) return false;
+    if (!this.pauseMenu || this.saving) return false;
     this.pauseMenu.unmount();
     this.pauseMenu = null;
     this.d.hud.setSpeed(this.prePauseSpeed);
     this.d.audio.setPaused(this.d.hud.speedIdx === 0);
     return true;
+  }
+
+  /** The hidden menu still owns the pause; never resume just to show progress. */
+  onSaveProgress(open: boolean, saved: boolean): void {
+    if (!this.pauseMenu) return;
+    this.saving = open;
+    if (saved) this.savedWhilePaused = true;
+    this.pauseMenu.root.style.display = open ? 'none' : '';
+    this.pauseMenu.setSaveEnabled(!open && !this.savedWhilePaused);
+    if (!open) this.pauseMenu.refreshStats();
+  }
+
+  /** Share the button's guard with Ctrl+S while this pause session is saved. */
+  manualSave(): void {
+    if (this.pauseMenu && (this.saving || this.savedWhilePaused)) return;
+    this.d.manualSave();
   }
 
   /** The pause menu's settings contract: values + live-applying callbacks. */
@@ -195,7 +215,7 @@ export class MenuController {
         stranded,
         avgBatteryPct:
           rovers.length > 0
-            ? (rovers.reduce((s, r) => s + r.battery / ROVERS[r.kind].maxBatteryKWh, 0) /
+            ? (rovers.reduce((s, r) => s + r.battery / effectiveRoverDef(r).maxBatteryKWh, 0) /
                 rovers.length) *
               100
             : 0,

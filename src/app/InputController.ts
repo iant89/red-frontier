@@ -45,6 +45,7 @@ export interface InputControllerDeps {
   audio: AudioSystem;
   /** Pause menu open? Esc resumes; other keys ignored. */
   isPauseMenuOpen: () => boolean;
+  isEngineeringOpen?: () => boolean;
   closePauseMenu: () => boolean;
   isSaveInFlight: () => boolean;
   updateNoticeLater: () => void;
@@ -118,6 +119,7 @@ export class InputController {
   }
 
   private pointerDown(e: PointerEvent): void {
+    if (this.d.isEngineeringOpen?.()) return;
     if (!this.d.getStarted()) return;
     if (this.d.hud.isWorldMapOpen()) return;
     e.preventDefault();
@@ -270,6 +272,7 @@ export class InputController {
   }
 
   private keyDown(e: KeyboardEvent): void {
+    if (this.d.isEngineeringOpen?.()) return;
     if (e.key === 'Shift') this.shiftHeld = true;
     if (!this.d.getStarted()) return;
     const key = e.key.toLowerCase();

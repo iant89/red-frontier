@@ -5,8 +5,7 @@
  * to bump the version — an older save keeps its sky and simply gains the new
  * storm hazard.
  */
-import { CURRENT_SAVE_VERSION } from '../SaveSchema';
 
 export function migrateV7Save(data: Record<string, unknown>): Record<string, unknown> {
-  return { ...data, version: CURRENT_SAVE_VERSION };
+  return { ...data, version: 8 };
 }

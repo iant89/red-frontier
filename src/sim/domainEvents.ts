@@ -30,6 +30,7 @@ export type DomainEvent =
       x: number;
       z: number;
     }
+  | { type: 'rover/part-replaced'; roverId: number; buildingId: number; component: 'motor' | 'circuitBoard' }
   | { type: 'building/completed'; buildingId: number; kind: string }
   | { type: 'building/failed'; buildingId: number; cause: string }
   | {
