@@ -27,9 +27,32 @@ export type {
   ResourceView,
   AlertView,
 } from './view';
-export type { SimCommand, SimCommandType, SimAck, RoverRule, DecodeResult } from './protocol';
-export { COMMAND_SHAPES, COMMAND_TYPES, decodeCommand } from './protocol';
-export { applyCommand } from './applyCommand';
+export type {
+  SimCommand,
+  SimCommandType,
+  PlayerCommand,
+  PlayerCommandType,
+  DevCommand,
+  DevCommandType,
+  RoverCommand,
+  BuildingCommand,
+  ColonistCommand,
+  SimAck,
+  RoverRule,
+  DecodeResult,
+} from './protocol';
+export {
+  COMMAND_SHAPES,
+  COMMAND_TYPES,
+  PLAYER_COMMAND_TYPES,
+  DEV_COMMAND_TYPES,
+  decodeCommand,
+  isPlayerCommand,
+  isDevCommand,
+  isPlayerCommandType,
+  isDevCommandType,
+} from './protocol';
+export { applyCommand, applyPlayerCommand, applyDevCommand } from './applyCommand';
 export { LocalSimHost, createLocalHost, restoreLocalHost } from './LocalSimHost';
 export { WorkerSimHost, type WorkerInit } from './WorkerSimHost';
 export {
@@ -51,5 +74,11 @@ export { ColonyMirror, type TerrainParams } from './mirror';
 export { projectView, type ViewPayload, type WeatherPayload, type PowerPayload } from './projection';
 export { evaluateSite, maintenanceNeed, type SitingInput, type SitingGround } from '../rules';
 export type { HostRequest, HostReply, HostPort } from './messages';
+export {
+  createNetworkHostPort,
+  bindServerNetworkChannel,
+  createSimulatedNetworkChannel,
+  type NetworkDuplexChannel,
+} from './NetworkPort';
 
 export type { DomainEvent, DomainEventType } from '../domainEvents';

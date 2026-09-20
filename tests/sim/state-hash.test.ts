@@ -10,7 +10,14 @@
 
 import assert from 'node:assert/strict';
 import { Simulation } from '../../src/sim/Simulation';
-import { hashSimulation } from '../../src/sim/debug/StateHash';
+import {
+  hashSimulation,
+  hashSimulationSection,
+  hashSimulationSections,
+  diffSimulationState,
+  explainStateDivergence,
+  projectSimulation,
+} from '../../src/sim/debug/StateHash';
 import { run, build, nearDeposit } from '../fixtures/sim';
 import { group, test, finish } from '../harness';
 
@@ -166,6 +173,56 @@ test('a busy colony still hashes identically across runs', () => {
     return hashSimulation(sim);
   };
   assert.equal(drive(), drive());
+});
+
+group('Section hashing and state diffing (Phase 27)');
+
+test('section hashes isolate domain mutations', () => {
+  const sim = fresh(505);
+  const sectionsBefore = hashSimulationSections(sim);
+
+  // Mutate only rovers
+  sim.rovers[0].battery -= 5;
+  const sectionsAfterRover = hashSimulationSections(sim);
+  assert.notEqual(sectionsAfterRover.rovers, sectionsBefore.rovers, 'rovers section hash must change');
+  assert.equal(sectionsAfterRover.weather, sectionsBefore.weather, 'weather section hash must remain identical');
+  assert.equal(sectionsAfterRover.resources, sectionsBefore.resources, 'resources section hash must remain identical');
+  assert.equal(sectionsAfterRover.world, sectionsBefore.world, 'world section hash must remain identical');
+
+  // Mutate only storage
+  sim.storage.iron += 20;
+  const sectionsAfterStorage = hashSimulationSections(sim);
+  assert.notEqual(sectionsAfterStorage.resources, sectionsAfterRover.resources, 'resources section hash must change');
+  assert.equal(sectionsAfterStorage.weather, sectionsBefore.weather, 'weather section hash still identical');
+  assert.equal(sectionsAfterStorage.colonist, sectionsBefore.colonist, 'colonist section hash still identical');
+});
+
+test('diffSimulationState pinpoint exact divergence path and values', () => {
+  const a = fresh(42);
+  const b = fresh(42);
+  assert.deepEqual(diffSimulationState(a, b), [], 'identical simulations have zero diffs');
+
+  b.storage.iron += 50;
+  const diffs = diffSimulationState(a, b);
+  assert.equal(diffs.length, 1);
+  assert.equal(diffs[0].path, 'storage.iron');
+  assert.equal(diffs[0].valA, a.storage.iron);
+  assert.equal(diffs[0].valB, a.storage.iron + 50);
+
+  const explanations = explainStateDivergence(a, b);
+  assert.equal(explanations.length, 1);
+  assert.ok(explanations[0].includes('storage.iron'));
+});
+
+test('projectSimulation exposes valid authoritative state shape', () => {
+  const sim = fresh(77);
+  const proj = projectSimulation(sim) as Record<string, unknown>;
+  assert.equal(proj.v, 'rf1');
+  assert.equal(proj.seed, 77);
+  assert.ok(Array.isArray(proj.rovers));
+  assert.ok(Array.isArray(proj.buildings));
+  assert.ok(typeof proj.weather === 'object');
+  assert.ok(typeof proj.storage === 'object');
 });
 
 await finish('sim/state-hash');

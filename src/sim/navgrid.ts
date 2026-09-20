@@ -30,6 +30,123 @@ const N8: Array<[number, number, number]> = [
   [-1, -1, Math.SQRT2],
 ];
 
+function now(): number {
+  return typeof performance !== 'undefined' && typeof performance.now === 'function'
+    ? performance.now()
+    : Date.now();
+}
+
+/**
+ * Reusable pathfinding workspace with generation stamping and indexed binary min-heap.
+ * Eliminates per-search typed array allocations and replaces O(N) open scans with O(log N) heap operations.
+ */
+export class NavWorkspace {
+  readonly capacity: number;
+  readonly gScore: Float32Array;
+  readonly came: Int32Array;
+  readonly heapNodes: Int32Array;
+  readonly heapF: Float32Array;
+  readonly heapPos: Int32Array;
+  readonly gStamp: Uint32Array;
+  readonly inOpenStamp: Uint32Array;
+  heapSize = 0;
+  stamp = 0;
+
+  constructor(capacity: number) {
+    this.capacity = capacity;
+    this.gScore = new Float32Array(capacity);
+    this.came = new Int32Array(capacity);
+    this.heapNodes = new Int32Array(capacity);
+    this.heapF = new Float32Array(capacity);
+    this.heapPos = new Int32Array(capacity);
+    this.gStamp = new Uint32Array(capacity);
+    this.inOpenStamp = new Uint32Array(capacity);
+  }
+
+  nextSearch(): number {
+    this.stamp++;
+    if (this.stamp === 0xffffffff) {
+      this.gStamp.fill(0);
+      this.inOpenStamp.fill(0);
+      this.stamp = 1;
+    }
+    this.heapSize = 0;
+    return this.stamp;
+  }
+
+  push(node: number, f: number, stamp: number): void {
+    let i = this.heapSize++;
+    this.heapNodes[i] = node;
+    this.heapF[i] = f;
+    this.heapPos[node] = i;
+    this.inOpenStamp[node] = stamp;
+    this.bubbleUp(i);
+  }
+
+  decreaseKey(node: number, newF: number): void {
+    const i = this.heapPos[node];
+    this.heapF[i] = newF;
+    this.bubbleUp(i);
+  }
+
+  pop(): number {
+    if (this.heapSize === 0) return -1;
+    const top = this.heapNodes[0];
+    this.inOpenStamp[top] = 0;
+    this.heapSize--;
+    if (this.heapSize > 0) {
+      const last = this.heapNodes[this.heapSize];
+      this.heapNodes[0] = last;
+      this.heapF[0] = this.heapF[this.heapSize];
+      this.heapPos[last] = 0;
+      this.bubbleDown(0);
+    }
+    return top;
+  }
+
+  private bubbleUp(i: number): void {
+    const node = this.heapNodes[i];
+    const f = this.heapF[i];
+    while (i > 0) {
+      const parent = (i - 1) >> 1;
+      if (f >= this.heapF[parent]) break;
+      const pNode = this.heapNodes[parent];
+      this.heapNodes[i] = pNode;
+      this.heapF[i] = this.heapF[parent];
+      this.heapPos[pNode] = i;
+      i = parent;
+    }
+    this.heapNodes[i] = node;
+    this.heapF[i] = f;
+    this.heapPos[node] = i;
+  }
+
+  private bubbleDown(i: number): void {
+    const node = this.heapNodes[i];
+    const f = this.heapF[i];
+    const half = this.heapSize >> 1;
+    while (i < half) {
+      let left = (i << 1) + 1;
+      const right = left + 1;
+      let bestChild = left;
+      let bestF = this.heapF[left];
+      if (right < this.heapSize && this.heapF[right] < bestF) {
+        bestChild = right;
+        bestF = this.heapF[right];
+      }
+      if (f <= bestF) break;
+      const bestNode = this.heapNodes[bestChild];
+      this.heapNodes[i] = bestNode;
+      this.heapF[i] = bestF;
+      this.heapPos[bestNode] = i;
+      i = bestChild;
+    }
+    this.heapNodes[i] = node;
+    this.heapF[i] = f;
+    this.heapPos[node] = i;
+  }
+}
+
 export class NavGrid {
   readonly cell = NAV_CELL;
   readonly n: number;
@@ -37,6 +154,7 @@ export class NavGrid {
   private readonly walk: Uint8Array;
   private readonly reach: Uint8Array;
   private readonly slope: Float32Array;
+  readonly workspace: NavWorkspace;
 
   constructor(heightAt: (x: number, z: number) => number, worldHalf: number = WORLD_HALF) {
     this.n = Math.round((worldHalf * 2) / this.cell);
@@ -46,6 +164,7 @@ export class NavGrid {
     this.walk = new Uint8Array(n * n);
     this.reach = new Uint8Array(n * n);
     this.slope = new Float32Array(n * n);
+    this.workspace = new NavWorkspace(n * n);
 
     for (let j = 0; j < n; j++) {
       for (let i = 0; i < n; i++) {
@@ -110,30 +229,30 @@ export class NavGrid {
 
   /** A* on walkable, reachable cells. Snaps the goal to the nearest driveable cell. */
   findPath(ax: number, az: number, bx: number, bz: number): NavPoint[] | null {
-    getProfiler().recordPathfinding();
+    const t0 = now();
     const n = this.n;
     let si = this.clampI(this.toI(ax));
     let sj = this.clampI(this.toI(az));
     let gi = this.clampI(this.toI(bx));
     let gj = this.clampI(this.toI(bz));
     const goal = this.nearestDriveable(gi, gj);
-    if (!goal) return null;
+    if (!goal) {
+      getProfiler().recordPathfind(now() - t0, 0, 0, 0);
+      return null;
+    }
     gi = goal.i;
     gj = goal.j;
-    if (si === gi && sj === gj) return [{ x: bx, z: bz }];
+    if (si === gi && sj === gj) {
+      getProfiler().recordPathfind(now() - t0, 0, 0, 0);
+      return [{ x: bx, z: bz }];
+    }
 
-    const inf = 1e12;
-    const gScore = new Float32Array(n * n);
-    gScore.fill(inf);
-    const came = new Int32Array(n * n);
-    came.fill(-1);
-    const inOpen = new Uint8Array(n * n);
-    const open: number[] = [];
+    const stamp = this.workspace.nextSearch();
     const start = sj * n + si;
     const end = gj * n + gi;
-    gScore[start] = 0;
-    open.push(start);
-    inOpen[start] = 1;
+    this.workspace.gScore[start] = 0;
+    this.workspace.gStamp[start] = stamp;
+    this.workspace.came[start] = -1;
 
     const heur = (k: number): number => {
       const i = k % n;
@@ -146,23 +265,16 @@ export class NavGrid {
       return this.walk[k] === 1 && this.reach[k] === 1;
     };
 
-    while (open.length) {
-      let best = 0;
-      let bestF = gScore[open[0]] + heur(open[0]);
-      for (let o = 1; o < open.length; o++) {
-        const f = gScore[open[o]] + heur(open[o]);
-        if (f < bestF) {
-          bestF = f;
-          best = o;
-        }
-      }
-      const cur = open[best];
-      inOpen[cur] = 0;
-      open[best] = open[open.length - 1];
-      open.pop();
+    this.workspace.push(start, heur(start), stamp);
+
+    let nodesExpanded = 0;
+    while (this.workspace.heapSize > 0) {
+      const cur = this.workspace.pop();
+      nodesExpanded++;
       if (cur === end) break;
       const ci = cur % n;
       const cj = (cur / n) | 0;
+      const curG = this.workspace.gScore[cur];
       for (const [di, dj, dist] of N8) {
         const ni = ci + di;
         const nj = cj + dj;
@@ -170,30 +282,44 @@ export class NavGrid {
         const nk = nj * n + ni;
         if (!passable(nk)) continue;
         const step = dist * (1 + this.slope[nk] * 1.4);
-        const tentative = gScore[cur] + step;
-        if (tentative < gScore[nk]) {
-          came[nk] = cur;
-          gScore[nk] = tentative;
-          if (!inOpen[nk]) {
-            open.push(nk);
-            inOpen[nk] = 1;
+        const tentative = curG + step;
+        const isVisited = this.workspace.gStamp[nk] === stamp;
+        if (!isVisited || tentative < this.workspace.gScore[nk]) {
+          this.workspace.came[nk] = cur;
+          this.workspace.gScore[nk] = tentative;
+          this.workspace.gStamp[nk] = stamp;
+          const f = tentative + heur(nk);
+          if (this.workspace.inOpenStamp[nk] === stamp) {
+            this.workspace.decreaseKey(nk, f);
+          } else {
+            this.workspace.push(nk, f, stamp);
           }
         }
       }
     }
 
-    if (gScore[end] >= inf) return null;
+    if (this.workspace.gStamp[end] !== stamp) {
+      getProfiler().recordPathfind(now() - t0, nodesExpanded, 0, 0);
+      return null;
+    }
     const cells: Array<{ i: number; j: number }> = [];
     let k = end;
     while (k >= 0) {
       cells.push({ i: k % n, j: (k / n) | 0 });
-      k = came[k];
+      if (k === start) break;
+      k = this.workspace.came[k];
     }
     cells.reverse();
     const pulled = this.stringPull(cells);
     const path = pulled.map((c) => this.center(c.i, c.j));
     // Keep the exact click if it is driveable; otherwise stay on the snapped cell.
     if (this.canDrive(bx, bz)) path[path.length - 1] = { x: bx, z: bz };
+
+    let totalLen = 0;
+    for (let i = 1; i < path.length; i++) {
+      totalLen += Math.hypot(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z);
+    }
+    getProfiler().recordPathfind(now() - t0, nodesExpanded, totalLen, 0);
     return path;
   }
 

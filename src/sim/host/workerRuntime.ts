@@ -79,7 +79,23 @@ export function createSimRuntime(sendRaw: (reply: HostReply) => void): SimRuntim
     runOverlays(s, overlays);
     const events = s.drainEvents();
     const domainEvents = s.drainDomainEvents();
-    send({ kind: 'view', view: projectView(s, 'worker', overlays, events, domainEvents) });
+    const view = projectView(s, 'worker', overlays, events, domainEvents);
+    const prof = getProfiler();
+    if (prof.isEnabled()) {
+      if (typeof structuredClone === 'function') {
+        const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        structuredClone(view);
+        const t1 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        prof.recordStructuredClone(t1 - t0);
+      }
+      try {
+        const bytes = JSON.stringify(view).length;
+        prof.recordWorkerMessagePayload(bytes);
+      } catch {
+        // non-fatal estimation
+      }
+    }
+    send({ kind: 'view', view });
   }
 
   return {

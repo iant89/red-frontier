@@ -42,6 +42,7 @@ import type {
   RoverView,
   WeatherView,
 } from './viewModels';
+import { getProfiler } from '../debug/Profiler';
 
 /**
  * The seed-derived facts needed to rebuild the terrain locally, as the *runtime*
@@ -197,6 +198,8 @@ export class ColonyMirror implements SimView {
 
   /** Adopt the next payload. Called once per view message. */
   apply(payload: ViewPayload): void {
+    const prof = getProfiler();
+    const t0 = prof.isEnabled() && typeof performance !== 'undefined' ? performance.now() : 0;
     this.payload = payload;
     this.powerCache = null;
     if (payload.events.length > 0) {
@@ -208,6 +211,9 @@ export class ColonyMirror implements SimView {
     }
     if (payload.domainEvents.length > 0) {
       this.unreadDomain = this.unreadDomain.concat(payload.domainEvents);
+    }
+    if (t0 > 0) {
+      prof.recordMainThreadApply(performance.now() - t0);
     }
   }
 

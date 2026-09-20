@@ -769,6 +769,72 @@ Persistent notes for future coding sessions.
   roadmap's Phase 12 block.
 
 
+## Refactor Phase 30 (Optional Future Network Boundary) — pure transport seam & string wire adapter
+
+- **Simulation isolation guarantee**: Verified that the simulation core contains 0 references to DOM, `window`, `document`, `WebSocket`, or `fetch`.
+- **Network wire adapter**: `src/sim/host/NetworkPort.ts` implements `createNetworkHostPort` and `bindServerNetworkChannel` adapting typed `HostRequest`/`HostReply` streams to/from serialized JSON string packets over duplex network channels (`NetworkDuplexChannel`).
+- **Transport expansion**: `SimTransport` union expanded to `'in-process' | 'worker' | 'network'`.
+- **Network boundary test suite**: `tests/sim/network-boundary.test.ts` (+6 checks) validates simulation purity, wire protocol serialization, full network host lifecycle, and latency resilience.
+- Gate on completion (2026-09-20): 76 suites / 866 checks green, typecheck green, baseline byte-identical.
+
+## Refactor Phase 29 (Large-Colony Stress Tests) — 100 rovers, 250+ buildings, sustained storm & logistics
+
+- **Stress scenario generator**: `src/sim/debug/LargeColonyScenario.ts` creates a deterministic high-load colony (100 rovers, 255 buildings, active severe storm, multi-site construction, mining/hauling repeat-routes, and exploration).
+- **Stress invariant assertions**: `assertStressInvariants(sim)` verifies deep invariants, pending queue boundedness (`<=10`), deposit reservation uniqueness, and non-deadlock progression.
+- **Runners & regression suite**: `scripts/large-colony-stress.mjs` (`npm run test:stress`), `tests/sim/large-colony-stress.test.ts` (+6 checks). Pinned 1-day (4,800 ticks) state hash: `rf1-094755f9902a5f-0e05c6b7fcbab0`.
+- Gate on completion (2026-09-20): 75 suites / 860 checks green, typecheck green, baseline byte-identical.
+
+## Refactor Phase 28 (Performance Regression Tests) — fleet scaling & benchmark thresholds
+
+- **Scaling benchmark harness**: `src/sim/debug/Benchmark.ts` and `scripts/benchmark.mjs` (`npm run test:bench`) measure tick time, pathfinding, view generation, worker transport, and payload size across 10, 25, 50, 100, and 250 rovers.
+- **Measured baseline**: 100 rovers execute ticks in ~1.4ms (budget: 50ms `SIM_TICK`), worker transport + view gen takes <1.1ms (frame budget: 16.6ms), payload 81 KB. 250 rovers execute ticks in ~4.7ms.
+- **Regression suite**: `tests/sim/performance-regression.test.ts` (+6 checks) enforces scaling thresholds to catch quadratic loops and serialization regressions.
+- Gate on completion (2026-09-19): 74 suites / 854 checks green, typecheck green, baseline byte-identical.
+
+## Refactor Phase 27 (Simulation State Hashing) — domain section hashing & divergence diffing
+
+- **Domain-isolated section hashing**: `hashSimulationSection(sim, section)` and `hashSimulationSections(sim)` across 7 authoritative simulation domains (`core`, `weather`, `resources`, `rovers`, `buildings`, `colonist`, `world`).
+- **Deep structural diffing**: `diffSimulationState(simA, simB)` and `explainStateDivergence(simA, simB)` provide exact path and value differences for regression triage and desync diagnosis.
+- **Authoritative projection export**: `projectSimulation(sim)` exports canonical plain-data representation.
+- Gate on completion (2026-09-19): 73 suites / 848 checks green (`tests/sim/state-hash.test.ts` +3), replay tests green, baseline byte-identical.
+
+## Refactor Phase 26 (Deterministic Replay Testing) — pinned canonical scenarios
+
+- **Unified command application**: `Transcript.ts` now delegates `applyCommandForTranscript` directly to `applyCommand(sim, cmd)`, dropping 150 lines of duplicate command dispatching.
+- **Transcript serialization & replay runner**: `encodeTranscript` / `decodeTranscript` with shape validation; `replayAndHash` returns both simulation state and final `StateHash`.
+- **Pinned canonical scenarios**:
+  - Scenario 1 (Foundation): `rf1-00d64469b1f8ed-045301f4e9a064`
+  - Scenario 2 (Logistics Haul): `rf1-1b403011c4e077-15884ea6a10eb6`
+  - Scenario 3 (Severe Storm Protocol): `rf1-050d43576ad423-12a3abe54893ea`
+- Gate on completion (2026-09-19): 73 suites / 842 checks green (`tests/sim/transcript.test.ts` +4), baseline byte-identical.
+
+## Refactor Phase 25 (Property-Based Simulation Testing) — invariant fuzzing
+
+- **Randomized command fuzzing**: `tests/sim/property-testing.test.ts` drives continuous randomized player command sequences across multiple simulation seeds.
+- **Per-step invariant assertions**: Every step verifies `assertInvariants(sim)` for battery bounds, hold capacity, non-negative storage, valid reservations, and reference integrity.
+- **Stress & replay verification**: Fuzzing verified under rapid build/demolish cycles, severe storms, and proven deterministic via byte-identical `StateHash` replays.
+- Gate on completion (2026-09-19): 73 suites / 838 checks green (`tests/sim/property-testing.test.ts` +4), baseline byte-identical.
+
+## Refactor Phase 24 (Worker/View Performance) — metrics without delta complexity
+
+- **Profiler instrumentation**: `viewTimeMs`, `structuredCloneTimeMs`, `mainThreadApplyTimeMs`, `workerMessageBytes` in `src/sim/debug/Profiler.ts`. Measured in `WorkerSimHost`, `workerRuntime`, and `mirror`.
+- **Baseline confirmation**: View generation (~0.3 ms), structured clone (<0.15 ms), message size (~5 KB), and mirror apply (<0.08 ms) comfortably fit within 60 FPS frame budgets. Full snapshots are not a bottleneck at current colony scale, avoiding delta complexity.
+- Gate on completion (2026-09-19): 72 suites / 834 checks green (`tests/sim/worker-performance.test.ts` +3), both worker smokes (`?worker=1`, `?worker=0`) green, baseline byte-identical.
+
+## Refactor Phase 23 (Navigation Optimization) — zero allocations & binary min-heap
+
+- **`NavWorkspace` in `src/sim/navgrid.ts`**: reusable preallocated workspace with generation stamping (`nextSearch()`). Eliminates per-pathfinding typed array allocations (0 allocs).
+- **Indexed Binary Min-Heap**: $O(\log K)$ push, pop, decreaseKey replaces $O(K)$ linear minimum scans in open set.
+- **Profiler integration**: records A* duration, nodes expanded, path length, and allocation count.
+- Gate on completion (2026-09-19): 71 suites / 831 checks green (`tests/sim/navigation.test.ts` +7), baseline byte-identical.
+
+## Refactor Phase 22 (Command Architecture) — player intent vs dev backdoors
+
+- **`PlayerCommand` vs `DevCommand`**: Formalized in `src/sim/host/protocol.ts`. Sub-unions for `RoverCommand`, `BuildingCommand`, `ColonistCommand`.
+- **Exhaustive separation**: `PLAYER_COMMAND_TYPES` and `DEV_COMMAND_TYPES` partition `COMMAND_TYPES`. Type guards `isPlayerCommand`, `isDevCommand`, `isPlayerCommandType`, `isDevCommandType`.
+- **Dispatch**: `applyPlayerCommand` and `applyDevCommand` in `src/sim/host/applyCommand.ts`. Architecture guard in `tests/sim/host.test.ts` prevents non-dev controllers from issuing dev backdoors.
+- Gate on completion (2026-09-19): 70 suites / 824 checks green, baseline byte-identical.
+
 ## Refactor Phase 21 (Domain Events) — per-tick structured channel
 
 - **`DomainEvent` + `DomainEventLog`** in `src/sim/domainEvents.ts`. String

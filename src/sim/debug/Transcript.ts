@@ -31,10 +31,12 @@
  */
 
 import type { SimCommand } from '../host/protocol';
+import { applyCommand } from '../host/applyCommand';
 import { Simulation } from '../Simulation';
 import { SIM_TICK } from '../config';
 import type { DifficultyId, WorldOptions } from '../difficulty';
 import { DEFAULT_WORLD_OPTIONS } from '../difficulty';
+import { hashSimulation } from './StateHash';
 
 export interface TranscriptCommand {
   /** Tick at which to deliver this command (0 = before first tick). */
@@ -112,138 +114,9 @@ export function replayTranscript(transcript: Transcript): ReplayResult {
   return { sim, ticksRun: duration, finalTick: duration };
 }
 
-/** Apply a SimCommand via the sim's own methods (mirrors applyCommand but without host validation). */
+/** Apply a SimCommand via the sim's authoritative host applyCommand dispatch. */
 function applyCommandForTranscript(sim: Simulation, cmd: SimCommand): void {
-  // We reuse the same dispatch as host/applyCommand to keep behavior identical
-  // Import dynamically to avoid circular deps — but we can inline the minimal set
-  // needed for transcripts, or import the module. For simplicity, use direct calls
-  // for common commands; fall back to generic apply if available.
-  // To avoid async import, we directly call sim methods for the command types we know.
-
-  switch (cmd.type) {
-    case 'rover/move':
-      sim.issueMove(cmd.roverId, cmd.x, cmd.z, cmd.queue);
-      break;
-    case 'rover/mine':
-      sim.issueMine(cmd.roverId, cmd.depositId, cmd.queue);
-      break;
-    case 'rover/unload':
-      sim.issueUnload(cmd.roverId, cmd.queue);
-      break;
-    case 'rover/wait':
-      sim.issueWait(cmd.roverId, cmd.seconds, cmd.queue);
-      break;
-    case 'rover/construct':
-      sim.issueConstruct(cmd.roverId, cmd.buildingId, cmd.queue);
-      break;
-    case 'rover/clean':
-      sim.issueClean(cmd.roverId, cmd.buildingId, cmd.queue);
-      break;
-    case 'rover/repair':
-      sim.issueRepair(cmd.roverId, cmd.buildingId, cmd.queue);
-      break;
-    case 'rover/recover':
-      sim.issueRecover(cmd.roverId, cmd.strandedId, cmd.queue);
-      break;
-    case 'rover/salvage':
-      sim.issueSalvage(cmd.roverId, cmd.poiId, cmd.queue);
-      break;
-    case 'rover/stop':
-      sim.stopRover(cmd.roverId);
-      break;
-    case 'rover/repeatRoute':
-      sim.setRepeatRoute(cmd.roverId, cmd.on);
-      break;
-    case 'rover/rule':
-      sim.setRoverRule(cmd.roverId, cmd.rule, cmd.on);
-      break;
-    case 'rover/chargeFloor':
-      sim.setChargeFloor(cmd.roverId, cmd.pct);
-      break;
-    case 'rover/lights':
-      sim.setRoverLights(cmd.roverId, cmd.on);
-      break;
-    case 'building/place': {
-      const err = sim.canPlace(cmd.kind, cmd.x, cmd.z);
-      if (!err) sim.placeBuilding(cmd.kind, cmd.x, cmd.z);
-      break;
-    }
-    case 'building/toggle':
-      sim.setBuildingEnabled(cmd.buildingId, cmd.enabled);
-      break;
-    case 'building/demolish':
-      sim.demolish(cmd.buildingId);
-      break;
-    case 'building/maintain':
-      sim.dispatchMaintenance(cmd.buildingId);
-      break;
-    case 'building/assemble':
-      sim.assembleRover(cmd.buildingId, cmd.kind);
-      break;
-    case 'colonist/order':
-      sim.orderColonist(cmd.order);
-      break;
-    case 'dev/time':
-      sim.devSetTime(cmd.sol, cmd.frac);
-      break;
-    case 'dev/storm/force':
-      sim.devForceStorm(cmd.kind);
-      break;
-    case 'dev/storm/clear':
-      sim.devClearStorms();
-      break;
-    case 'dev/storm/scheduler':
-      sim.devSetStormScheduler(cmd.on);
-      break;
-    case 'dev/dust':
-      sim.devSetDust(cmd.frac);
-      break;
-    case 'dev/lightning/strike':
-      sim.devForceLightningStrike();
-      break;
-    case 'dev/spawn/rover':
-      sim.devSpawnRover(cmd.kind, cmd.x, cmd.z);
-      break;
-    case 'dev/spawn/building':
-      sim.devSpawnBuilding(cmd.kind, cmd.x, cmd.z);
-      break;
-    case 'dev/spawn/deposit':
-      sim.devSpawnDeposit(cmd.resource, cmd.x, cmd.z, cmd.kg);
-      break;
-    case 'dev/building/complete':
-      sim.devCompleteBuilding(cmd.buildingId);
-      break;
-    case 'dev/building/level':
-      sim.devSetBuildingLevel(cmd.buildingId, cmd.level);
-      break;
-    case 'dev/building/health':
-      sim.devSetBuildingHealth(cmd.buildingId, cmd.pct);
-      break;
-    case 'dev/building/damaged':
-      sim.devSetBuildingDamaged(cmd.buildingId, cmd.on);
-      break;
-    case 'dev/building/cleanliness':
-      sim.devSetBuildingCleanliness(cmd.buildingId, cmd.frac);
-      break;
-    case 'dev/rover/battery':
-      sim.devSetRoverBatteryFrac(cmd.roverId, cmd.frac);
-      break;
-    case 'dev/rover/cargo':
-      sim.devSetRoverCargo(cmd.roverId, cmd.resource, cmd.kg);
-      break;
-    case 'dev/rover/cargoClear':
-      sim.devClearRoverCargo(cmd.roverId);
-      break;
-    case 'dev/rover/condition':
-      sim.devSetRoverCondition(cmd.roverId, cmd.pct);
-      break;
-    case 'dev/colonist/health':
-      sim.devSetColonistHealth(cmd.pct);
-      break;
-    case 'dev/colonist/suit':
-      sim.devRefillSuit();
-      break;
-  }
+  applyCommand(sim, cmd);
 }
 
 /**
@@ -280,6 +153,114 @@ export class TranscriptBuilder {
     return { ...this.transcript, commands: [...this.transcript.commands] };
   }
 }
+
+/**
+ * TranscriptRecorder captures simulation commands in chronological order.
+ * Suitable for session recording, bug reporting, and test fixture capture.
+ */
+export class TranscriptRecorder {
+  private readonly transcript: Transcript;
+  private recording = true;
+
+  constructor(seed: number, options?: {
+    difficulty?: DifficultyId;
+    worldHalf?: number;
+    region?: string | null;
+    worldOptions?: Partial<WorldOptions>;
+    durationTicks?: number;
+  }) {
+    this.transcript = { seed, commands: [] };
+    if (options?.difficulty !== undefined) this.transcript.difficulty = options.difficulty;
+    if (options?.worldHalf !== undefined) this.transcript.worldHalf = options.worldHalf;
+    if (options?.region !== undefined) this.transcript.region = options.region;
+    if (options?.worldOptions !== undefined) this.transcript.worldOptions = options.worldOptions;
+    if (options?.durationTicks !== undefined) this.transcript.durationTicks = options.durationTicks;
+  }
+
+  record(tick: number, command: SimCommand): this {
+    if (!this.recording) return this;
+    this.transcript.commands.push({ tick, command });
+    return this;
+  }
+
+  duration(ticks: number): this {
+    this.transcript.durationTicks = ticks;
+    return this;
+  }
+
+  pause(): void {
+    this.recording = false;
+  }
+
+  resume(): void {
+    this.recording = true;
+  }
+
+  isRecording(): boolean {
+    return this.recording;
+  }
+
+  toTranscript(durationTicks?: number): Transcript {
+    const res: Transcript = {
+      seed: this.transcript.seed,
+      commands: [...this.transcript.commands],
+    };
+    if (this.transcript.difficulty !== undefined) res.difficulty = this.transcript.difficulty;
+    if (this.transcript.worldHalf !== undefined) res.worldHalf = this.transcript.worldHalf;
+    if (this.transcript.region !== undefined) res.region = this.transcript.region;
+    if (this.transcript.worldOptions !== undefined) res.worldOptions = { ...this.transcript.worldOptions };
+    const dur = durationTicks ?? this.transcript.durationTicks;
+    if (dur !== undefined) res.durationTicks = dur;
+    return res;
+  }
+
+  toJSON(pretty = false): string {
+    return encodeTranscript(this.toTranscript(), pretty);
+  }
+}
+
+/**
+ * Pinned canonical scenarios for regression testing and desync validation.
+ */
+export const CANONICAL_SCENARIOS = {
+  foundation: {
+    name: 'colony-foundation',
+    description: 'Initial colony setup with warehouse, solar arrays, and rover deployment',
+    expectedHash: 'rf1-00d64469b1f8ed-045301f4e9a064',
+    build: () =>
+      new TranscriptBuilder(101)
+        .at(0, { type: 'building/place', kind: 'warehouse', x: 40, z: 0 })
+        .at(0, { type: 'building/place', kind: 'solar', x: -40, z: 0 })
+        .at(50, { type: 'rover/move', roverId: 1000, x: 40, z: 20, queue: false })
+        .at(50, { type: 'rover/move', roverId: 1001, x: -40, z: 20, queue: false })
+        .duration(800)
+        .build(),
+  },
+  logistics: {
+    name: 'logistics-haul-loop',
+    description: 'Iron mining with automated repeat-route hauling to silos',
+    expectedHash: 'rf1-1b403011c4e077-15884ea6a10eb6',
+    build: () =>
+      new TranscriptBuilder(2026)
+        .at(0, { type: 'rover/mine', roverId: 1000, depositId: 1, queue: false })
+        .at(200, { type: 'rover/repeatRoute', roverId: 1000, on: true })
+        .duration(2000)
+        .build(),
+  },
+  severeStorm: {
+    name: 'severe-storm-protocol',
+    description: 'Severe storm onset, rover shelter rules, colonist EVA recall, and storm clearance',
+    expectedHash: 'rf1-050d43576ad423-12a3abe54893ea',
+    build: () =>
+      new TranscriptBuilder(303)
+        .at(0, { type: 'dev/storm/force', kind: 'severe' })
+        .at(200, { type: 'rover/rule', roverId: 1000, rule: 'stormShelter', on: true })
+        .at(400, { type: 'colonist/order', order: { type: 'shelter' } })
+        .at(600, { type: 'dev/storm/clear' })
+        .duration(1200)
+        .build(),
+  },
+} as const;
 
 /**
  * Validate a transcript's shape (plain data, not simulation validity).
@@ -326,4 +307,33 @@ export function canonicalTranscriptJson(t: Transcript): string {
     }
     return v;
   });
+}
+
+/**
+ * Replay a transcript and compute the final deterministic StateHash.
+ */
+export function replayAndHash(transcript: Transcript): { hash: string; result: ReplayResult } {
+  const result = replayTranscript(transcript);
+  const hash = hashSimulation(result.sim);
+  return { hash, result };
+}
+
+/**
+ * Serialize a transcript into formatted or canonical JSON.
+ */
+export function encodeTranscript(transcript: Transcript, pretty = false): string {
+  return pretty ? JSON.stringify(JSON.parse(canonicalTranscriptJson(transcript)), null, 2) : canonicalTranscriptJson(transcript);
+}
+
+/**
+ * Deserialize and validate a JSON string into a Transcript.
+ * Throws an Error if the shape is invalid.
+ */
+export function decodeTranscript(raw: string): Transcript {
+  const parsed = JSON.parse(raw);
+  const errors = validateTranscript(parsed);
+  if (errors.length > 0) {
+    throw new Error(`Invalid transcript JSON:\n  ${errors.join('\n  ')}`);
+  }
+  return parsed as Transcript;
 }

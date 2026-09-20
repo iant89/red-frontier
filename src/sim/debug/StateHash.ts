@@ -227,6 +227,161 @@ function project(sim: Simulation): unknown {
 
 // ----------------------------------------------------------------- public ----
 
+export type StateSection =
+  | 'core'
+  | 'weather'
+  | 'resources'
+  | 'rovers'
+  | 'buildings'
+  | 'colonist'
+  | 'world';
+
+export interface StateDiffEntry {
+  path: string;
+  valA: unknown;
+  valB: unknown;
+}
+
+/**
+ * Return the authoritative plain-data state projection for inspection or comparison.
+ */
+export function projectSimulation(sim: Simulation): unknown {
+  return project(sim);
+}
+
+/**
+ * Hash a specific simulation subsystem section.
+ */
+export function hashSimulationSection(sim: Simulation, section: StateSection): string {
+  const p = project(sim) as Record<string, unknown>;
+  let sectionData: unknown;
+  switch (section) {
+    case 'core':
+      sectionData = {
+        v: p.v,
+        seed: p.seed,
+        difficulty: p.difficulty,
+        worldOptions: p.worldOptions,
+        world: p.world,
+        simTime: p.simTime,
+        gameOver: p.gameOver,
+        clock: p.clock,
+        nextDropSol: p.nextDropSol,
+        history: p.history,
+      };
+      break;
+    case 'weather':
+      sectionData = p.weather;
+      break;
+    case 'resources':
+      sectionData = {
+        storedKWh: p.storedKWh,
+        storage: p.storage,
+        fluids: p.fluids,
+        fluidCapacity: p.fluidCapacity,
+        flows: p.flows,
+      };
+      break;
+    case 'rovers':
+      sectionData = p.rovers;
+      break;
+    case 'buildings':
+      sectionData = p.buildings;
+      break;
+    case 'colonist':
+      sectionData = p.colonist;
+      break;
+    case 'world':
+      sectionData = {
+        deposits: p.deposits,
+        pois: p.pois,
+      };
+      break;
+  }
+  const text = canonicalJson(sectionData);
+  const a = cyrb53(text, 0x9e3779b9);
+  const b = cyrb53(text, 0x85ebca6b);
+  return `${FORMAT}-${section}-${a.toString(16).padStart(14, '0')}-${b.toString(16).padStart(14, '0')}`;
+}
+
+/**
+ * Compute section-by-section hashes across all simulation domains.
+ */
+export function hashSimulationSections(sim: Simulation): Record<StateSection, string> {
+  return {
+    core: hashSimulationSection(sim, 'core'),
+    weather: hashSimulationSection(sim, 'weather'),
+    resources: hashSimulationSection(sim, 'resources'),
+    rovers: hashSimulationSection(sim, 'rovers'),
+    buildings: hashSimulationSection(sim, 'buildings'),
+    colonist: hashSimulationSection(sim, 'colonist'),
+    world: hashSimulationSection(sim, 'world'),
+  };
+}
+
+/**
+ * Perform a deep structural comparison between the projected states of two simulations.
+ * Returns an array of paths that diverged along with their values.
+ */
+export function diffSimulationState(simA: Simulation, simB: Simulation): StateDiffEntry[] {
+  const pA = project(simA);
+  const pB = project(simB);
+  const diffs: StateDiffEntry[] = [];
+
+  function compare(a: unknown, b: unknown, currentPath: string): void {
+    if (a === b) return;
+    if (typeof a !== typeof b || a === null || b === null || typeof a !== 'object') {
+      diffs.push({ path: currentPath, valA: a, valB: b });
+      return;
+    }
+    if (Array.isArray(a) !== Array.isArray(b)) {
+      diffs.push({ path: currentPath, valA: a, valB: b });
+      return;
+    }
+    if (Array.isArray(a) && Array.isArray(b)) {
+      if (a.length !== b.length) {
+        diffs.push({ path: `${currentPath}.length`, valA: a.length, valB: b.length });
+      }
+      const len = Math.max(a.length, b.length);
+      for (let i = 0; i < len; i++) {
+        compare(a[i], b[i], `${currentPath}[${i}]`);
+      }
+      return;
+    }
+    const objA = a as Record<string, unknown>;
+    const objB = b as Record<string, unknown>;
+    const keys = Array.from(new Set([...Object.keys(objA), ...Object.keys(objB)])).sort();
+    for (const k of keys) {
+      const nextPath = currentPath ? `${currentPath}.${k}` : k;
+      if (!(k in objA)) {
+        diffs.push({ path: nextPath, valA: undefined, valB: objB[k] });
+      } else if (!(k in objB)) {
+        diffs.push({ path: nextPath, valA: objA[k], valB: undefined });
+      } else {
+        compare(objA[k], objB[k], nextPath);
+      }
+    }
+  }
+
+  compare(pA, pB, '');
+  return diffs;
+}
+
+/**
+ * Human-readable explanation of simulation state divergences.
+ */
+export function explainStateDivergence(simA: Simulation, simB: Simulation, maxDiffs = 10): string[] {
+  const diffs = diffSimulationState(simA, simB);
+  if (diffs.length === 0) return ['No state divergence detected.'];
+  const lines = diffs.slice(0, maxDiffs).map(d =>
+    `  ${d.path}: ${JSON.stringify(d.valA)} vs ${JSON.stringify(d.valB)}`
+  );
+  if (diffs.length > maxDiffs) {
+    lines.push(`  ... and ${diffs.length - maxDiffs} more divergence(s)`);
+  }
+  return lines;
+}
+
 /**
  * Hash the colony's authoritative state into a stable string
  * (`rf1-<13 hex>-<13 hex>`). Read-only; safe to call anywhere the

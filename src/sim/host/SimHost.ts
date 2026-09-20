@@ -25,7 +25,7 @@ import type { DomainEvent } from '../domainEvents';
 import type { OverlayState } from './overlays';
 
 /** How the host reaches the sim — surfaced so UI can be honest about latency. */
-export type SimTransport = 'in-process' | 'worker';
+export type SimTransport = 'in-process' | 'worker' | 'network';
 
 export interface SimHost {
   /** The read model. Valid until the next step; never a live handle's twin. */

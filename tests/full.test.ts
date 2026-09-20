@@ -51,6 +51,7 @@ import './sim/exploration-system.test';
 import './sim/failure-system.test';
 import './sim/alert-system.test';
 import './sim/domain-events.test';
+import './sim/navigation.test';
 import './sim/history-system.test';
 import './sim/simulation-orchestrator.test';
 import './sim/pois.test';
@@ -58,6 +59,11 @@ import './sim/persistence.test';
 import './sim/devtools.test';
 import './sim/host.test';
 import './sim/worker.test';
+import './sim/worker-performance.test';
+import './sim/property-testing.test';
+import './sim/performance-regression.test';
+import './sim/large-colony-stress.test';
+import './sim/network-boundary.test';
 import './render/particles.test';
 import './render/selection.test';
 import './render/solar.test';
@@ -86,4 +92,4 @@ import './hud/pause-menu.test';
 
 // Each suite prints one line as it runs; `report` prints the total, every
 // failure, and exits non-zero if anything broke.
-report(70);
+report(76);
