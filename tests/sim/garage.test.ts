@@ -24,6 +24,12 @@ test('a garage services drivetrains, fast-charges, and assembles rovers', () => 
   sim.storage.iron = 300;
   sim.storage.aluminum = 200;
   sim.storage.silicon = 200;
+  // P5: a rover is a machine as well as a pile of metal, so the line also spends
+  // motors and boards. Only a workshop has a rack to hold them (the pod has
+  // none), which is why the fixture stands one before filling the ledger.
+  buildOnline(sim, 'workshop');
+  sim.components.motor = 12;
+  sim.components.circuitBoard = 4;
   sim.recomputeCapacities();
   assert.ok(sim.assembleRover(garage.id, 'cargo'), 'assembly should start');
   assert.ok(!sim.assembleRover(garage.id, 'utility'), 'the line takes one job at a time');

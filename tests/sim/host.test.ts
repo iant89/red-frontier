@@ -60,6 +60,7 @@ const SAMPLES: Record<SimCommand['type'], SimCommand> = {
   'building/demolish': { type: 'building/demolish', buildingId: 1 },
   'building/maintain': { type: 'building/maintain', buildingId: 1 },
   'building/assemble': { type: 'building/assemble', buildingId: 1, kind: 'cargo' },
+  'building/recipe': { type: 'building/recipe', buildingId: 1, recipe: 1 },
   'colonist/order': { type: 'colonist/order', order: { type: 'shelter' } },
   'dev/time': { type: 'dev/time', sol: 3, frac: 0.5 },
   'dev/storm/force': { type: 'dev/storm/force', kind: 'severe' },
@@ -142,6 +143,9 @@ test('the gate refuses anything the protocol does not name', () => {
     { type: 'dev/rover/condition', roverId: 1000, pct: 900 },
     { type: 'dev/rover/battery', roverId: 1000, frac: 0.5, extra: true }, // strict keys
     { type: 'dev/storm/clear', sol: 4 },
+    { type: 'building/recipe', buildingId: 1, recipe: 1.5 }, // a list position, not a fraction
+    { type: 'building/recipe', buildingId: 1, recipe: -1 },
+    { type: 'building/recipe', buildingId: 1, recipe: 99999 }, // past the bounded index
   ];
   for (const raw of rejects) {
     const r = decodeCommand(raw);

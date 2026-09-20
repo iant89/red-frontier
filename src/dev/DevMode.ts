@@ -30,8 +30,8 @@ import type { SimView, SimWritable } from '../sim/host';
 import type { SimAck, SimCommand } from '../sim/host';
 import { BATTERY_PIN_OVERLAY, EMPTY_OVERLAYS, runOverlays } from '../sim/host';
 import type { OverlayState } from '../sim/host';
-import type { BuildingKind, ResourceId, RoverKind } from '../sim/defs';
-import { RESOURCES } from '../sim/defs';
+import type { BuildingKind, MineableResourceId, ResourceId, RoverKind } from '../sim/defs';
+import { RESOURCES, isRefined } from '../sim/defs';
 import type { StormKindReal } from '../sim/weather';
 
 /** What the panel is currently asking us to drop on the next terrain tap. */
@@ -303,9 +303,25 @@ export class DevMode {
 
   // ---------------------------------------------------------- deposits ----
 
-  /** Survey a fresh deposit of `res` at (x, z); returns its id. */
+  /**
+   * Survey a fresh deposit of `res` at (x, z); returns its id, or -1 when the
+   * material has no seam to survey in (refined resources are made in a
+   * refinery, not dug — GDD §03).
+   */
   spawnDeposit(res: ResourceId, x: number, z: number, kg: number): number {
-    return this.send({ type: 'dev/spawn/deposit', resource: res, x, z, kg }).entityId ?? -1;
+    if (isRefined(res)) {
+      this.log('warn', `${RESOURCES[res].label} is refined, not mined — spawn an ore seam instead.`);
+      return -1;
+    }
+    return (
+      this.send({
+        type: 'dev/spawn/deposit',
+        resource: res as MineableResourceId,
+        x,
+        z,
+        kg,
+      }).entityId ?? -1
+    );
   }
 
   // ---------------------------------------------------------- colonist ----

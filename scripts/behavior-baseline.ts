@@ -26,7 +26,8 @@
  *     colony");
  *   - a per-tick trace sampled every 4 ticks — rover x/z/heading/battery/
  *     condition/phase/goal/navI/recharge/sheltered/routePaused/lights/task/
- *     queue/cargo plus storage — folded into one FNV-1a digest;
+ *     queue/cargo plus storage and the component rack — folded into one FNV-1a
+ *     digest;
  *   - a `structuredClone`d snapshot → restore equality pair, and a same-seed
  *     determinism pair.
  *
@@ -38,7 +39,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { Simulation } from '../src/sim/Simulation';
 import { hashSimulation } from '../src/sim/debug/StateHash';
 import { SIM_TICK, SOL_SECONDS } from '../src/sim/config';
-import { ALL_RESOURCES, type BuildingKind } from '../src/sim/defs';
+import { ALL_COMPONENTS, ALL_RESOURCES, type BuildingKind } from '../src/sim/defs';
 
 /** Ticks per trace sample — 4 ticks at the fixed 20 Hz step. */
 const SAMPLE_EVERY = 4;
@@ -105,7 +106,10 @@ function sampleRovers(sim: Simulation): string {
     )
     .join(';');
   const storage = ALL_RESOURCES.map((res) => sim.storage[res].toFixed(2)).join(',');
-  return `${rovers}|${storage}`;
+  // P5: the rack is colony state as well, and it is counted rather than weighed —
+  // so it joins the digest as integers, not fixed-point kg.
+  const rack = ALL_COMPONENTS.map((c) => sim.components[c]).join(',');
+  return `${rovers}|${storage}|${rack}`;
 }
 
 type Sampler = (sim: Simulation, tick: number) => void;

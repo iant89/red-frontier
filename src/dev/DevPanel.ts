@@ -20,6 +20,7 @@ import {
   BUILDINGS,
   ROVERS,
   ALL_RESOURCES,
+  MINEABLE_RESOURCES,
   RESOURCES,
 } from '../sim/defs';
 import type { StormKindReal } from '../sim/weather';
@@ -217,7 +218,7 @@ export class DevPanel {
           </div>
           <label class="dev-lab">Deposit
             <select id="dv-spawn-dep">
-              ${ALL_RESOURCES.map((r) => `<option value="${r}">${RESOURCES[r].label}</option>`).join('')}
+              ${MINEABLE_RESOURCES.map((r) => `<option value="${r}">${RESOURCES[r].label}</option>`).join('')}
             </select></label>
           <div class="dev-row">
             <label class="dev-num" title="Deposit size">kg <input type="number" id="dv-dep-kg" min="10" step="100" value="2500" /></label>

@@ -7,7 +7,14 @@ import type { SimView, WorldView, BuildingView, RoverView, ColonistView } from '
 import type { RoverKind, BuildingKind, ResourceId } from '../sim/defs';
 import { isPickedClean, POI_KINDS } from '../sim/pois';
 import type { Poi } from '../sim/pois';
-import { RESOURCES, ROVERS, BUILDINGS, ALL_FLUIDS } from '../sim/defs';
+import {
+  RESOURCES,
+  ROVERS,
+  BUILDINGS,
+  ALL_FLUIDS,
+  activeProcess,
+  hasProcess,
+} from '../sim/defs';
 import type { SunState } from '../sim/clock';
 import { sunDirection } from '../sim/clock';
 import {
@@ -784,7 +791,7 @@ export class GameRenderer {
           ? def.powerProduceKw > 0 || def.powerDrawKw > 0 || def.batteryKWh > 0
           : this.overlayMode === 'weather'
             ? def.generation === 'solar' || def.exposure >= 0.5
-            : !!def.process || !!def.fluidCapacity;
+            : hasProcess(b.kind) || !!def.fluidCapacity;
       if (!relevant || b.state !== 'online') continue;
       seen.add(b.id);
 
@@ -847,7 +854,7 @@ export class GameRenderer {
           scale = 0.6 + def.exposure;
         }
       } else {
-        const p = def.process;
+        const p = activeProcess(b.kind, b.recipe);
         if (p?.fluidOut?.water || def.fluidCapacity?.water) color = 0x4aa3e0;
         if (p?.fluidOut?.oxygen || def.fluidCapacity?.oxygen) color = 0x7fd9c8;
         if (p?.fluidOut?.food || def.fluidCapacity?.food) color = 0x8fce5a;
@@ -1065,7 +1072,7 @@ export class GameRenderer {
             damaged: b.damaged,
           });
         }
-        if (def.process && running && b.throughput > 0.02) {
+        if (hasProcess(b.kind) && running && b.throughput > 0.02) {
           const pulse = 1 + Math.sin(this.clockT * 3.2) * 0.02 * b.throughput;
           rec.body.scale.setScalar(pulse);
         } else {
@@ -1676,6 +1683,97 @@ export class GameRenderer {
         const warmth = new THREE.PointLight(0xff7a3a, 0.9, 34, 2);
         warmth.position.set(0, 3, 0);
         g.add(warmth);
+        break;
+      }
+      case 'refinery': {
+        // A blast-furnace complex (P5): tall shaft furnace under a conical
+        // bell, an ore skip hoist, two vent stacks, a glowing tap hole and a
+        // catwalk ring, with the ingots it just poured stacked out front.
+        const plinth = new THREE.Mesh(
+          new THREE.BoxGeometry(11, 0.9, 8.4),
+          mat(0x4a4f55, { rough: 0.7, metal: 0.35 }),
+        );
+        plinth.position.y = 0.45;
+        g.add(plinth);
+
+        const shaft = new THREE.Mesh(
+          new THREE.CylinderGeometry(2.6, 3.1, 8.2, 14),
+          mat(0x77808a, { rough: 0.4, metal: 0.6 }),
+        );
+        shaft.position.set(-1.6, 5.0, 0);
+        const bell = new THREE.Mesh(
+          new THREE.ConeGeometry(2.7, 1.8, 14),
+          mat(0x5d666e, { rough: 0.45, metal: 0.55 }),
+        );
+        bell.position.set(-1.6, 10.0, 0);
+        g.add(shaft, bell);
+
+        // Catwalk ring around the shaft, and the legs holding it up.
+        const catwalk = new THREE.Mesh(
+          new THREE.TorusGeometry(3.3, 0.18, 6, 22),
+          mat(0x9aa2aa, { metal: 0.7, rough: 0.35 }),
+        );
+        catwalk.rotation.x = Math.PI / 2;
+        catwalk.position.set(-1.6, 6.6, 0);
+        g.add(catwalk);
+        for (const a of [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2]) {
+          const leg = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.16, 0.16, 5.7, 6),
+            mat(0x6b7278, { metal: 0.6 }),
+          );
+          leg.position.set(-1.6 + Math.cos(a) * 3.3, 3.75, Math.sin(a) * 3.3);
+          g.add(leg);
+        }
+
+        // Ore skip hoist: an inclined trestle from the feed pad to the bell.
+        const hoist = new THREE.Mesh(
+          new THREE.BoxGeometry(0.5, 0.5, 9.4),
+          mat(0x8d6a4a, { rough: 0.6, metal: 0.4 }),
+        );
+        hoist.position.set(2.0, 5.4, 0.6);
+        hoist.rotation.z = -0.62;
+        const skip = new THREE.Mesh(
+          new THREE.BoxGeometry(1.3, 1.0, 1.3),
+          mat(0xb0784f, { rough: 0.55, metal: 0.45 }),
+        );
+        skip.position.set(2.0, 5.4, 0.6);
+        g.add(hoist, skip);
+
+        // Vent stacks, one taller than the other.
+        const stackA = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.5, 0.62, 6.4, 8),
+          mat(0x8b9299, { metal: 0.7 }),
+        );
+        stackA.position.set(3.6, 4.1, -2.2);
+        const stackB = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.42, 0.52, 4.6, 8),
+          mat(0x7d848b, { metal: 0.7 }),
+        );
+        stackB.position.set(3.6, 3.2, -0.4);
+        g.add(stackA, stackB);
+
+        // Tap hole: molten steel running into the ingot moulds.
+        const tap = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.75, 0.55, 1.5, 10),
+          new THREE.MeshStandardMaterial({
+            color: 0xffb066,
+            emissive: 0xff6a1a,
+            emissiveIntensity: 1.7,
+            roughness: 0.35,
+          }),
+        );
+        tap.rotation.x = Math.PI / 2;
+        tap.position.set(-1.6, 1.5, 3.0);
+        const ingots = new THREE.Mesh(
+          new THREE.BoxGeometry(3.0, 0.9, 1.6),
+          mat(0x8e9aa6, { rough: 0.35, metal: 0.85 }),
+        );
+        ingots.position.set(1.6, 1.35, 3.0);
+        g.add(tap, ingots);
+
+        const furnaceGlow = new THREE.PointLight(0xff8a3a, 1.5, 46, 2);
+        furnaceGlow.position.set(-1.6, 2.2, 3.0);
+        g.add(furnaceGlow);
         break;
       }
     }

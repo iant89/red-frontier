@@ -26,8 +26,11 @@ import {
   SAVE_VERSION,
 } from './config';
 import type {
+  MineableResourceId,
   ResourceId,
   ResourceAmounts,
+  ComponentId,
+  ComponentAmounts,
   FluidId,
   RoverKind,
   BuildingKind,
@@ -60,6 +63,7 @@ import { ClockSystem } from './systems/ClockSystem';
 import { WeatherSystem, type WeatherHostHooks } from './systems/WeatherSystem';
 import { PowerSystem, type PowerSystemContext } from './systems/PowerSystem';
 import { ProductionSystem } from './systems/ProductionSystem';
+import { ComponentSystem } from './systems/ComponentSystem';
 import { LifeSupportSystem, type LifeSupportHostHooks } from './systems/LifeSupportSystem';
 import { ConstructionSystem, type ConstructionHostHooks } from './systems/ConstructionSystem';
 import { RoverSystem, type RoverHostHooks } from './systems/RoverSystem';
@@ -232,6 +236,8 @@ export class Simulation {
   set storage(v: ResourceAmounts) { this.state.storage = v; }
   get pools(): FluidPools { return this.state.pools; }
   set pools(v: FluidPools) { this.state.pools = v; }
+  get components(): ComponentAmounts { return this.state.components; }
+  set components(v: ComponentAmounts) { this.state.components = v; }
 
   get power(): PowerResult { return this.state.power; }
   set power(v: PowerResult) { this.state.power = v; }
@@ -280,6 +286,24 @@ export class Simulation {
 
   storageRoom(res: ResourceId): number {
     return LogisticsSystem.room(this.state, res);
+  }
+
+  // ---- component rack (P5) — counted, not weighed, so a separate ledger ----
+
+  componentCapacity(): number {
+    return ComponentSystem.capacity(this.state);
+  }
+
+  componentRoom(c: ComponentId): number {
+    return ComponentSystem.room(this.state, c);
+  }
+
+  /**
+   * Switch a building's production line (P5). Returns false — and logs why —
+   * when the sim refuses, so the UI never has to guess what happened.
+   */
+  setBuildingRecipe(buildingId: number, recipe: number): boolean {
+    return ProductionSystem.setRecipe(this.state, buildingId, recipe);
   }
 
   storageTotal(): number {
@@ -506,7 +530,7 @@ export class Simulation {
     return DevBackdoors.spawnBuilding(this.state, kind, x, z);
   }
 
-  devSpawnDeposit(resource: ResourceId, x: number, z: number, amountKg: number): Deposit {
+  devSpawnDeposit(resource: MineableResourceId, x: number, z: number, amountKg: number): Deposit {
     return DevBackdoors.spawnDeposit(this.state, resource, x, z, amountKg);
   }
 

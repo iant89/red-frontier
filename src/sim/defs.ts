@@ -1,25 +1,38 @@
 /**
  * Data-driven content definitions (blueprints). No gameplay logic lives here.
  *
- * Two distinct material systems:
+ * Three distinct material systems:
  *
- * - **Bulk resources** are solids dug out of the ground, carried by rovers and
- *   stockpiled in warehouses. They are the *construction* economy.
+ * - **Bulk resources** are solids carried by rovers and stockpiled in
+ *   warehouses. They are the *construction* economy. Two origins share one
+ *   ledger (GDD §03):
+ *     - `mined`  — dug out of a seam (regolith, iron ore, silica, aluminum ore,
+ *                  water ice). Only these have deposits on the planet and only
+ *                  these can be mined or dev-spawned as a seam.
+ *     - `refined`— made by a building process out of something else (steel, P5).
+ *                  Never scattered, never mined, but hauled, stored, reserved
+ *                  and spent exactly like any other solid — one ledger, not two.
  * - **Fluids** (water, oxygen, food) are life-support commodities. They never
  *   ride on a rover; they live in tanks provided by buildings and move through
  *   processes. They are the *survival* economy.
  *
- * The bridge between the two is the Water Extractor: it eats bulk `ice` and
- * emits fluid `water`.
+ * The bridges are the buildings: the Water Extractor eats bulk `ice` and emits
+ * fluid `water`; the Refinery eats bulk `iron` and emits bulk `steel`.
  */
 
 import type { PowerTier } from './config';
 
 // ------------------------------------------------------- bulk resources ----
 
-export type ResourceId = 'regolith' | 'iron' | 'silicon' | 'aluminum' | 'ice';
+/** Solids the planet has seams of — the only ones a rover can dig. */
+export type MineableResourceId = 'regolith' | 'iron' | 'silicon' | 'aluminum' | 'ice';
 
-export const ALL_RESOURCES: ResourceId[] = [
+/** Solids a building process makes (P5 — the middle of the industrial chain). */
+export type RefinedResourceId = 'steel';
+
+export type ResourceId = MineableResourceId | RefinedResourceId;
+
+export const MINEABLE_RESOURCES: MineableResourceId[] = [
   'regolith',
   'iron',
   'silicon',
@@ -27,10 +40,19 @@ export const ALL_RESOURCES: ResourceId[] = [
   'ice',
 ];
 
+export const REFINED_RESOURCES: RefinedResourceId[] = ['steel'];
+
+export const ALL_RESOURCES: ResourceId[] = [...MINEABLE_RESOURCES, ...REFINED_RESOURCES];
+
 export type ResourceAmounts = Record<ResourceId, number>;
 
 export function emptyAmounts(): ResourceAmounts {
-  return { regolith: 0, iron: 0, silicon: 0, aluminum: 0, ice: 0 };
+  return { regolith: 0, iron: 0, silicon: 0, aluminum: 0, ice: 0, steel: 0 };
+}
+
+/** True for materials a process makes rather than a seam yields. */
+export function isRefined(res: ResourceId): res is RefinedResourceId {
+  return (REFINED_RESOURCES as string[]).includes(res);
 }
 
 export interface ResourceInfo {
@@ -38,7 +60,13 @@ export interface ResourceInfo {
   label: string;
   short: string;
   color: number; // hex color used by renderer (mound + chip)
-  /** kg mined per game second by a standard mining tool. */
+  /** Where the material comes from: a seam, or a building process. */
+  origin: 'mined' | 'refined';
+  /**
+   * kg mined per game second by a standard mining tool. Zero for refined
+   * materials, which have no seam to mine — read {@link ResourceInfo.origin}
+   * before using this.
+   */
   mineRateKg: number;
   description: string;
 }
@@ -49,6 +77,7 @@ export const RESOURCES: Record<ResourceId, ResourceInfo> = {
     label: 'Regolith',
     short: 'Reg',
     color: 0xb07850,
+    origin: 'mined',
     mineRateKg: 12,
     description: 'Loose soil. Used for construction, foundations and shielding.',
   },
@@ -57,6 +86,7 @@ export const RESOURCES: Record<ResourceId, ResourceInfo> = {
     label: 'Iron Ore',
     short: 'Fe',
     color: 0x8a8677,
+    origin: 'mined',
     mineRateKg: 5,
     description: 'Crushed and smelted into steel for structures and machinery.',
   },
@@ -65,6 +95,7 @@ export const RESOURCES: Record<ResourceId, ResourceInfo> = {
     label: 'Silica',
     short: 'Si',
     color: 0xc7cfd6,
+    origin: 'mined',
     mineRateKg: 4,
     description: 'Refined into glass and silicon for panels and electronics.',
   },
@@ -73,6 +104,7 @@ export const RESOURCES: Record<ResourceId, ResourceInfo> = {
     label: 'Aluminum Ore',
     short: 'Al',
     color: 0xa9b7bd,
+    origin: 'mined',
     mineRateKg: 3.5,
     description: 'Light structural metal for frames, hulls and solar trusses.',
   },
@@ -81,9 +113,20 @@ export const RESOURCES: Record<ResourceId, ResourceInfo> = {
     label: 'Water Ice',
     short: 'Ice',
     color: 0x5f9fd0,
+    origin: 'mined',
     mineRateKg: 3,
     description:
       'Buried ice. Feed it to a Water Extractor to turn it into liquid water — and from there, oxygen and crops.',
+  },
+  steel: {
+    id: 'steel',
+    label: 'Steel',
+    short: 'Stl',
+    color: 0x8e9aa6,
+    origin: 'refined',
+    mineRateKg: 0,
+    description:
+      'Smelted iron. There is no seam for it: a Refinery makes it out of ore and power, and the heavy structures downstream are built from it.',
   },
 };
 
@@ -136,6 +179,59 @@ export const FLUIDS: Record<FluidId, FluidInfo> = {
   },
 };
 
+// ---------------------------------------------------------- components ----
+
+/**
+ * Manufactured units (P5 slice 2). Components are **counted, not weighed**: a
+ * motor is not 40 kg of anything, it is one motor, so it lives on its own
+ * integer ledger (`ColonyState.components`) rather than bending the kg ledger
+ * into holding counts. They are crafted by a workshop recipe, racked in
+ * workshop slots, and spent when the garage assembles a rover.
+ */
+export type ComponentId = 'motor' | 'circuitBoard';
+
+export const ALL_COMPONENTS: ComponentId[] = ['motor', 'circuitBoard'];
+
+export type ComponentAmounts = Record<ComponentId, number>;
+
+export function emptyComponents(): ComponentAmounts {
+  return { motor: 0, circuitBoard: 0 };
+}
+
+/** Component costs, as whole units — the counted counterpart of {@link costs}. */
+export function units(entries: Array<[ComponentId, number]>): ComponentAmounts {
+  const a = emptyComponents();
+  for (const [c, n] of entries) a[c] = n;
+  return a;
+}
+
+export interface ComponentInfo {
+  id: ComponentId;
+  label: string;
+  short: string;
+  color: number; // hex, for the HUD chip
+  description: string;
+}
+
+export const COMPONENTS: Record<ComponentId, ComponentInfo> = {
+  motor: {
+    id: 'motor',
+    label: 'Drive Motor',
+    short: 'Mtr',
+    color: 0xc9a227,
+    description:
+      'A sealed drive unit machined out of steel. Every rover that leaves the garage rolls on four of them or more.',
+  },
+  circuitBoard: {
+    id: 'circuitBoard',
+    label: 'Circuit Board',
+    short: 'PCB',
+    color: 0x3fae6a,
+    description:
+      'Controller and sensor boards cut from silica and wired with aluminum. A rover needs them to be more than a remote-controlled cart.',
+  },
+};
+
 // -------------------------------------------------------------- rovers ----
 
 export type RoverKind = 'mining' | 'utility' | 'cargo';
@@ -166,6 +262,12 @@ export interface RoverDef {
   radius: number; // visual / arrival radius
   /** Materials consumed when the garage assembles one of these (P4). */
   cost: ResourceAmounts;
+  /**
+   * Manufactured components the garage line consumes alongside the bulk cost
+   * (P5). Crafted in a workshop — so a rover is now the end of the whole chain:
+   * ore → steel → motors and boards → vehicle.
+   */
+  componentCost: ComponentAmounts;
   /** Garage assembly time at full line power (game seconds). */
   buildTime: number;
 }
@@ -192,6 +294,10 @@ export const ROVERS: Record<RoverKind, RoverDef> = {
       ['aluminum', 30],
       ['silicon', 15],
     ]),
+    componentCost: units([
+      ['motor', 4],
+      ['circuitBoard', 1],
+    ]),
     buildTime: 55,
   },
   utility: {
@@ -214,6 +320,10 @@ export const ROVERS: Record<RoverKind, RoverDef> = {
       ['iron', 40],
       ['aluminum', 20],
       ['silicon', 10],
+    ]),
+    componentCost: units([
+      ['motor', 2],
+      ['circuitBoard', 1],
     ]),
     buildTime: 40,
   },
@@ -238,6 +348,10 @@ export const ROVERS: Record<RoverKind, RoverDef> = {
       ['aluminum', 50],
       ['silicon', 25],
     ]),
+    componentCost: units([
+      ['motor', 6],
+      ['circuitBoard', 2],
+    ]),
     buildTime: 75,
   },
 };
@@ -255,7 +369,8 @@ export type BuildingKind =
   | 'greenhouse'
   | 'garage'
   | 'rtg'
-  | 'weatherStation';
+  | 'weatherStation'
+  | 'refinery';
 
 /**
  * A continuous conversion run by an online, powered building.
@@ -264,10 +379,21 @@ export type BuildingKind =
 export interface ProcessDef {
   /** Bulk solids consumed per hour at full rate. */
   solidIn?: Partial<Record<ResourceId, number>>;
+  /**
+   * Bulk solids produced per hour at full rate (P5 — refining). Output is
+   * limited by silo room in the colony ledger, exactly like a delivery.
+   */
+  solidOut?: Partial<Record<ResourceId, number>>;
   /** Fluids consumed per hour at full rate. */
   fluidIn?: Partial<Record<FluidId, number>>;
   /** Fluids produced per hour at full rate. */
   fluidOut?: Partial<Record<FluidId, number>>;
+  /**
+   * Manufactured units produced per hour at full rate (P5). A line accumulates
+   * the fraction on the building and hands over **whole** units — you cannot
+   * rack 0.4 of a motor — so a slow recipe still delivers, just less often.
+   */
+  componentOut?: Partial<Record<ComponentId, number>>;
   /** If true the process also scales with available sunlight (greenhouses). */
   needsLight?: boolean;
   /** Short line shown in the inspector. */
@@ -314,6 +440,12 @@ export interface BuildingDef {
    */
   exposure: number;
   buildableBy: RoverKind[];
+  /**
+   * Rack space for manufactured components (P5). Whole units, not kg, and it is
+   * the *only* component capacity in the game: the landing pod has no rack, so
+   * nothing can be crafted until a workshop stands.
+   */
+  componentSlots?: number;
   /** Palette ordering / hotkey slot. */
   order: number;
 }
@@ -427,9 +559,10 @@ export const BUILDINGS: Record<BuildingKind, BuildingDef> = {
     radius: 6,
     cost: costs([
       ['regolith', 24],
-      ['iron', 36],
+      ['iron', 18],
       ['silicon', 28],
       ['aluminum', 18],
+      ['steel', 25],
     ]),
     buildTime: 44,
     powerDrawKw: 10,
@@ -555,7 +688,8 @@ export const BUILDINGS: Record<BuildingKind, BuildingDef> = {
   workshop: {
     kind: 'workshop',
     label: 'Workshop',
-    description: 'Repairs and fabricates components. Speeds up nearby construction work.',
+    description:
+      'Machine shop and repair bench. Runs one of its two lines — drive motors or circuit boards — out of refined stock, racks the finished components, and lends tooling to every build site nearby.',
     radius: 6,
     cost: costs([
       ['regolith', 30],
@@ -568,6 +702,7 @@ export const BUILDINGS: Record<BuildingKind, BuildingDef> = {
     powerProduceKw: 0,
     batteryKWh: 0,
     storagePerResourceKg: 120,
+    componentSlots: 24,
     tier: 2,
     exposure: 0.5,
     buildableBy: ['utility', 'mining'],
@@ -581,8 +716,9 @@ export const BUILDINGS: Record<BuildingKind, BuildingDef> = {
     radius: 6.5,
     cost: costs([
       ['regolith', 25],
-      ['iron', 30],
+      ['iron', 12],
       ['silicon', 12],
+      ['steel', 30],
     ]),
     buildTime: 34,
     powerDrawKw: 3,
@@ -596,6 +732,34 @@ export const BUILDINGS: Record<BuildingKind, BuildingDef> = {
     buildableBy: ['utility', 'mining'],
     order: 8,
   },
+  refinery: {
+    kind: 'refinery',
+    label: 'Refinery',
+    description:
+      'Smelts hauled iron ore into steel. The gate on every heavy structure downstream: steel is made, not dug, and a hungry arc furnace will brown out half the colony to make it.',
+    radius: 7.5,
+    cost: costs([
+      ['regolith', 40],
+      ['iron', 50],
+      ['silicon', 18],
+      ['aluminum', 16],
+    ]),
+    buildTime: 48,
+    powerDrawKw: 35,
+    idlePowerKw: 4,
+    powerProduceKw: 0,
+    batteryKWh: 0,
+    storagePerResourceKg: 150,
+    tier: 2,
+    process: {
+      solidIn: { iron: 2.6 },
+      solidOut: { steel: 1.6 },
+      summary: '2.6 kg iron ore → 1.6 kg steel per hour',
+    },
+    exposure: 0.6,
+    buildableBy: ['utility', 'mining'],
+    order: 11,
+  },
 };
 
 export const BUILDING_ORDER: BuildingKind[] = (
@@ -606,17 +770,100 @@ export function buildingLabel(kind: BuildingKind): string {
   return BUILDINGS[kind].label;
 }
 
+// ------------------------------------------------------------- recipes ----
+
+/**
+ * A selectable production line (P5 slice 2).
+ *
+ * **B′, one source of truth per building:** when a kind has recipes, the list
+ * *replaces* `BUILDINGS[kind].process` rather than adding to it — a blueprint
+ * either has one fixed line or a menu of them, never both. A test pins that.
+ * Everything that used to read `def.process` reads {@link activeProcess} now, so
+ * the sim, the renderer and the HUD cannot disagree about which line is running.
+ *
+ * The selection is a per-building index (`Building.recipe`), saved and hashed
+ * like any other building field; switching lines keeps whatever work-in-progress
+ * the bench holds, because `craft` is keyed by component, not by recipe.
+ */
+export interface RecipeDef {
+  /** Stable name for UI keys and log lines. */
+  id: string;
+  label: string;
+  process: ProcessDef;
+}
+
+export const RECIPES: Partial<Record<BuildingKind, RecipeDef[]>> = {
+  workshop: [
+    {
+      id: 'motors',
+      label: 'Drive Motors',
+      process: {
+        solidIn: { steel: 2.5, aluminum: 1 },
+        componentOut: { motor: 0.5 },
+        summary: '2.5 kg steel + 1 kg aluminum → 1 drive motor per 2 hours',
+      },
+    },
+    {
+      id: 'boards',
+      label: 'Circuit Boards',
+      process: {
+        solidIn: { silicon: 1.2, aluminum: 0.4, steel: 0.2 },
+        componentOut: { circuitBoard: 0.35 },
+        summary: '1.2 kg silica + 0.4 kg aluminum + 0.2 kg steel → 1 board per ~3 hours',
+      },
+    },
+  ],
+};
+
+/** The recipe list for a kind; empty for a building with a fixed line or none. */
+export function recipesFor(kind: BuildingKind): RecipeDef[] {
+  return RECIPES[kind] ?? [];
+}
+
+/** True when this kind has a line the player can choose. */
+export function hasRecipes(kind: BuildingKind): boolean {
+  return (RECIPES[kind]?.length ?? 0) > 1;
+}
+
+/**
+ * The process a building is actually running. An out-of-range index falls back to
+ * the first recipe rather than throwing: a save from a future build, or a stale
+ * UI command, must not take the tick down with it.
+ */
+export function activeProcess(kind: BuildingKind, recipe: number): ProcessDef | undefined {
+  const list = RECIPES[kind];
+  if (list && list.length > 0) {
+    const i = Number.isInteger(recipe) && recipe >= 0 && recipe < list.length ? recipe : 0;
+    return list[i].process;
+  }
+  return BUILDINGS[kind].process;
+}
+
+/** Does this kind convert anything at all (fixed line or first recipe)? */
+export function hasProcess(kind: BuildingKind): boolean {
+  return activeProcess(kind, 0) !== undefined;
+}
+
+/** The line a building is running, as one sentence — what the HUD prints. */
+export function activeSummary(kind: BuildingKind, recipe: number): string {
+  return activeProcess(kind, recipe)?.summary ?? '';
+}
+
 // ------------------------------------------------------------- deposits ----
 
+/**
+ * A seam of *mined* material. Refined resources never appear here: there is no
+ * steel deposit on this planet, only a refinery that makes steel out of ore.
+ */
 export interface DepositDef {
-  resource: ResourceId;
+  resource: MineableResourceId;
   amountKg: number;
   radius: number;
   amountVariance: number;
 }
 
 /** Deposit spread parameters by resource (generated around the region). */
-export const DEPOSIT_TABLE: Record<ResourceId, DepositDef> = {
+export const DEPOSIT_TABLE: Record<MineableResourceId, DepositDef> = {
   regolith: { resource: 'regolith', amountKg: 6000, radius: 6, amountVariance: 0.5 },
   iron: { resource: 'iron', amountKg: 4000, radius: 5, amountVariance: 0.6 },
   silicon: { resource: 'silicon', amountKg: 3500, radius: 5, amountVariance: 0.6 },

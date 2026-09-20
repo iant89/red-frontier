@@ -119,6 +119,10 @@ function project(sim: Simulation): unknown {
 
     storedKWh: sim.storedKWh,
     storage: sim.storage,
+    // P5: the component rack is state, not presentation — two runs that craft a
+    // different number of motors are different colonies.
+    components: sim.components,
+    componentCapacity: sim.componentCapacity(),
     fluids: sim.pools.amounts,
     fluidCapacity: sim.pools.capacity,
     flows: sim.flows,
@@ -197,6 +201,8 @@ function project(sim: Simulation): unknown {
       damaged: b.damaged,
       assembly: b.assembly,
       level: b.level,
+      recipe: b.recipe,
+      craft: b.craft,
     })),
 
     deposits: byId(sim.world.deposits).map((d) => ({
@@ -277,6 +283,8 @@ export function hashSimulationSection(sim: Simulation, section: StateSection): s
       sectionData = {
         storedKWh: p.storedKWh,
         storage: p.storage,
+        components: p.components,
+        componentCapacity: p.componentCapacity,
         fluids: p.fluids,
         fluidCapacity: p.fluidCapacity,
         flows: p.flows,

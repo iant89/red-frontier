@@ -34,7 +34,7 @@
  *    ever disappears from the sim, tighten the check to match.
  */
 
-import { ROVERS, ALL_RESOURCES, ALL_FLUIDS } from '../defs';
+import { ROVERS, ALL_RESOURCES, ALL_FLUIDS, ALL_COMPONENTS } from '../defs';
 import { SUIT_O2_CAPACITY } from '../config';
 import type { Simulation, Rover, Building, RoverPhase, RoverTask } from '../Simulation';
 
@@ -342,6 +342,27 @@ function checkBuildings(sim: Simulation, roverIds: Set<number>, out: InvariantVi
         message: `workerId ${b.workerId} does not reference a rover`,
       });
     }
+
+    // P5: a recipe is an index into a hand-authored table, and the bench holds
+    // at most one unfinished unit — ProductionSystem racks the whole and keeps
+    // the fraction, so anything outside those bounds means something wrote to
+    // the building behind the system's back.
+    if (!Number.isInteger(b.recipe) || b.recipe < 0) {
+      out.push({
+        code: 'building-recipe',
+        subject: what,
+        message: `recipe must be a non-negative integer index, found ${b.recipe}`,
+      });
+    }
+    for (const c of ALL_COMPONENTS) {
+      if (!inRange(b.craft[c], 0, 1)) {
+        out.push({
+          code: 'building-craft',
+          subject: what,
+          message: `craft.${c} must be within 0..1, found ${b.craft[c]}`,
+        });
+      }
+    }
   }
 }
 
@@ -369,6 +390,22 @@ function checkResources(sim: Simulation, out: InvariantViolation[]): void {
         code: 'fluid-range',
         subject: `pools.${f}`,
         message: `fluid amount must be within 0..${cap}, found ${v}`,
+      });
+    }
+  }
+
+  // P5: components are counted and the rack is clamped whenever capacity is
+  // recomputed, so unlike bulk storage this ledger *cannot* legitimately sit
+  // above capacity — and it cannot hold a fraction, because whole units are the
+  // only thing ComponentSystem ever writes.
+  const rack = sim.componentCapacity();
+  for (const c of ALL_COMPONENTS) {
+    const v = sim.components[c];
+    if (!Number.isInteger(v) || v < 0 || v > rack) {
+      out.push({
+        code: 'component-ledger',
+        subject: `components.${c}`,
+        message: `must be a whole 0..${rack} units, found ${v}`,
       });
     }
   }

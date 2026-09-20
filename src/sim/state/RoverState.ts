@@ -22,6 +22,24 @@ export type RoverTask =
 
 export type RoverCommand = RoverTask;
 
+/**
+ * True when a task's target is this specific building. Three task types carry a
+ * `buildingId` (construct, clean, repair); the rest do not reference buildings
+ * at all. Used when a building leaves the colony — every task pointing at it,
+ * active or queued, has to go with it, or the rover is left holding a reference
+ * to something that no longer exists (`task-building-ref`).
+ */
+export function taskTargetsBuilding(task: RoverTask, buildingId: number): boolean {
+  switch (task.type) {
+    case 'construct':
+    case 'clean':
+    case 'repair':
+      return task.buildingId === buildingId;
+    default:
+      return false;
+  }
+}
+
 export interface RoverRules {
   chargeFloorPct: number;
   autoHaul: boolean;

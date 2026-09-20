@@ -13,7 +13,7 @@ import { SPEEDS } from '../../src/sim/config';
 import { group, test, finish } from '../harness';
 
 const { doc, hud, sim } = await mountHud();
-const { BUILDING_ORDER } = await loadDefs();
+const { BUILDING_ORDER, ALL_RESOURCES, RESOURCES } = await loadDefs();
 
 group('HUD construction');
 
@@ -53,6 +53,37 @@ test('every panel the HUD patches actually exists in the DOM', () => {
 test('the build palette renders every blueprint', () => {
   const btns = doc.querySelectorAll('.build-btn');
   assert.equal(btns.length, BUILDING_ORDER.length, 'one button per blueprint');
+});
+
+test('the palette sells the refinery, and the heavy blueprints are priced in steel', () => {
+  const btns = [...doc.querySelectorAll<HTMLElement>('.build-btn')];
+  const button = (label: string) => {
+    const b = btns.find((x) => x.textContent?.includes(label));
+    assert.ok(b, `${label} is a buildable blueprint`);
+    return b!;
+  };
+  const price = (label: string) => button(label).querySelector('.cost')?.textContent ?? '';
+
+  // The refinery advertises the process it runs...
+  assert.match(button('Refinery').title, /iron ore → .*steel/i, 'the tooltip explains the smelter');
+  // ...and is itself bought with raw ore, or the chain could never be opened.
+  assert.doesNotMatch(price('Refinery'), /Stl/, `the refinery costs ore, got "${price('Refinery')}"`);
+
+  // Downstream of it, heavy structures are priced in steel (P5).
+  assert.match(price('Garage'), /Stl/, `a garage costs steel, got "${price('Garage')}"`);
+  assert.match(price('Radar'), /Stl/, `a radar station costs steel, got "${price('Radar')}"`);
+  // The survival chain is not: breathing is never gated on industry.
+  assert.doesNotMatch(price('Habitat'), /Stl/, 'a habitat still costs only ore');
+  assert.doesNotMatch(price('Extractor'), /Stl/, 'so does the water extractor');
+});
+
+test('the resource chips carry steel alongside the ores', () => {
+  const chips = [...doc.querySelectorAll<HTMLElement>('#resources .res-chip')];
+  assert.equal(chips.length, ALL_RESOURCES.length, 'one chip per bulk resource');
+  assert.ok(
+    chips.some((c) => c.title.startsWith(RESOURCES.steel.label)),
+    'steel is visible in the stock panel before it exists',
+  );
 });
 
 test('vitals update without throwing and show live values', () => {

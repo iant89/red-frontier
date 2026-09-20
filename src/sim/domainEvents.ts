@@ -39,6 +39,13 @@ export type DomainEvent =
       buildingId?: number;
     }
   | {
+      /** A whole manufactured unit came off a bench (P5). */
+      type: 'component/crafted';
+      component: string;
+      amount: number;
+      buildingId?: number;
+    }
+  | {
       type: 'resource/consumed';
       resource: string;
       amount: number;

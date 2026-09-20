@@ -2,8 +2,8 @@
  * Phase 2 — Building state (extracted from Simulation.ts).
  */
 
-import type { ResourceAmounts, BuildingKind, RoverKind } from '../defs';
-import { ALL_RESOURCES } from '../defs';
+import type { ComponentAmounts, ResourceAmounts, BuildingKind, RoverKind } from '../defs';
+import { ALL_COMPONENTS, ALL_RESOURCES } from '../defs';
 
 export interface Building {
   id: number;
@@ -28,6 +28,28 @@ export interface Building {
   damaged: boolean;
   assembly: { kind: RoverKind; progress: number } | null;
   level: number;
+  /**
+   * Which recipe this building is running (P5): an index into
+   * `RECIPES[kind]`, ignored by a kind with no recipe list. Persisted and
+   * hashed — it changes what the building does, so it is colony state, not
+   * runtime decoration.
+   */
+  recipe: number;
+  /**
+   * Fractional progress toward the next whole component of each type, kept on
+   * the bench that is making it. A recipe's `componentOut` is a rate per Mars
+   * hour, and a unit is only racked once it is finished — so the fraction lives
+   * here rather than in the ledger, which counts whole things only. Keyed by
+   * component, not by recipe: switching lines keeps whatever was half-made.
+   */
+  craft: ComponentAmounts;
+}
+
+/** A fresh bench: nothing half-made, first recipe selected. */
+export function emptyCraft(): ComponentAmounts {
+  const c = {} as ComponentAmounts;
+  for (const k of ALL_COMPONENTS) c[k] = 0;
+  return c;
 }
 
 export function remainingCostTotal(b: Pick<Building, 'remainingCost'>): number {

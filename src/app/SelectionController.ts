@@ -345,6 +345,21 @@ export class SelectionController {
           });
         }
         break;
+      case 'recipe':
+        // P5: the inspector's production-line buttons. The arg arrives as the
+        // string the DOM carried, so it is parsed here and validated by the
+        // protocol — the sim answers a bad index with a refusal, not a throw.
+        if (this.selected.type === 'building') {
+          const recipe = Number(arg);
+          if (Number.isInteger(recipe) && recipe >= 0) {
+            this.order({
+              type: 'building/recipe',
+              buildingId: this.selected.id,
+              recipe,
+            });
+          }
+        }
+        break;
     }
     this.d.syncUI(true);
   }

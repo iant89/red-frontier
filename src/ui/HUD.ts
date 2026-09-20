@@ -10,15 +10,21 @@
  * field-by-field through cached element references.
  */
 
-import type { BuildingKind, ResourceId, FluidId } from '../sim/defs';
+import type { BuildingKind, ComponentId, ResourceId, FluidId } from '../sim/defs';
 import {
   BUILDINGS,
   BUILDING_ORDER,
   RESOURCES,
   ALL_RESOURCES,
   ALL_FLUIDS,
+  ALL_COMPONENTS,
+  COMPONENTS,
   FLUIDS,
   ROVERS,
+  activeSummary,
+  hasProcess,
+  hasRecipes,
+  recipesFor,
 } from '../sim/defs';
 import type { BuildingView, RoverView, ColonistView, AlertView, AlertsView, SimView } from '../sim/host';
 import type { RoverTask } from '../sim/Simulation';
@@ -178,6 +184,8 @@ export class HUD {
   private buildBtns = new Map<BuildingKind, HTMLElement>();
   private overlayBtns = new Map<OverlayMode, HTMLElement>();
   private resChips = new Map<ResourceId, { val: HTMLElement; bar: HTMLElement; wrap: HTMLElement }>();
+  /** P5: the component rack reads as counts against rack space, not kg. */
+  private compChips = new Map<ComponentId, { val: HTMLElement; bar: HTMLElement; wrap: HTMLElement }>();
   private fluidRows = new Map<
     FluidId,
     { val: HTMLElement; bar: HTMLElement; rate: HTMLElement; eta: HTMLElement; row: HTMLElement }
@@ -385,6 +393,7 @@ export class HUD {
           <div class="sun-meta"><span id="phase-label">Morning</span><span id="irr-label">0%</span></div>
         </div>
         <div class="resources" id="resources"></div>
+        <div class="resources comp-rack" id="components" style="display:none"></div>
         <button class="btn idle-btn" id="idle-btn" title="Select the next idle rover (.)">😴 <span class="btn-t">Idle</span> <span class="idle-n" id="idle-n">0</span></button>
         <button class="btn" id="map-btn" class="btn" title="World map (M)">🗺</button>
         <button class="btn" id="dev-btn" title="Developer mode — world editor (~ backtick)">🛠</button>
@@ -627,6 +636,7 @@ export class HUD {
 
     this.autopauseOnCrit = this.storeGet(SETTINGS_KEYS.autopause) === '1';
     this.buildResourceChips();
+    this.buildComponentChips();
     this.buildLifeBlock();
     this.buildTierRows();
     this.buildSpeeds();
@@ -1154,6 +1164,36 @@ export class HUD {
     }
   }
 
+  /**
+   * P5: the component rack chips. They look like the resource chips on purpose
+   * — same glance, same bar — but read as `4/24` units of rack space, because a
+   * motor is counted, not weighed. The whole row stays hidden until a workshop
+   * gives the colony a rack: the landing pod has none, and two chips that can
+   * never move are just noise on the topbar.
+   */
+  private buildComponentChips(): void {
+    const wrap = this.el('components');
+    wrap.innerHTML = '';
+    for (const c of ALL_COMPONENTS) {
+      const info = COMPONENTS[c];
+      const chip = document.createElement('div');
+      chip.className = 'res-chip comp';
+      chip.title = `${info.label} — ${info.description}`;
+      chip.innerHTML = `
+        <span class="swatch" style="background:#${info.color.toString(16).padStart(6, '0')}"></span>
+        <span class="rc-body">
+          <span class="n">0</span>
+          <span class="mini-bar"><i style="width:0%"></i></span>
+        </span>`;
+      wrap.appendChild(chip);
+      this.compChips.set(c, {
+        val: chip.querySelector('.n') as HTMLElement,
+        bar: chip.querySelector('.mini-bar i') as HTMLElement,
+        wrap: chip,
+      });
+    }
+  }
+
   private buildLifeBlock(): void {
     const block = this.el('life-block');
     block.innerHTML = '';
@@ -1317,7 +1357,8 @@ export class HUD {
       const radar = def.weatherRadarRangeKm
         ? `\nRadar: ${def.weatherRadarRangeKm} km${def.advancedForecast ? ' · advanced forecast' : ''}`
         : '';
-      btn.title = `${def.label} — ${def.description}\n\nCost: ${costTxt}${power ? `\nPower: ${power}` : ''}${def.process ? `\nProcess: ${def.process.summary}` : ''}${radar}`;
+      const lines = linesText(k);
+      btn.title = `${def.label} — ${def.description}\n\nCost: ${costTxt}${power ? `\nPower: ${power}` : ''}${lines ? `\n${hasRecipes(k) ? 'Lines' : 'Process'}: ${lines}` : ''}${radar}`;
       btn.innerHTML = `
         <span class="ic">${iconFor(k)}</span>
         <span class="bl">${def.label}</span>
@@ -1386,8 +1427,11 @@ export class HUD {
     pw.style.display = power ? '' : 'none';
     if (power) pw.innerHTML = `<span class="k">Power</span> ${power}`;
     const pr = this.el('bi-process');
-    pr.style.display = def.process ? '' : 'none';
-    if (def.process) pr.innerHTML = `<span class="k">Process</span> ${def.process.summary}`;
+    const biLines = linesText(kind);
+    pr.style.display = biLines ? '' : 'none';
+    if (biLines) {
+      pr.innerHTML = `<span class="k">${hasRecipes(kind) ? 'Lines' : 'Process'}</span> ${biLines}`;
+    }
     const radar = this.el('bi-radar');
     radar.style.display = def.weatherRadarRangeKm ? '' : 'none';
     if (def.weatherRadarRangeKm) {
@@ -1466,6 +1510,22 @@ export class HUD {
       const pct = cap > 0 ? Math.min(100, (v / cap) * 100) : 0;
       ref.bar.style.width = `${pct}%`;
       ref.wrap.classList.toggle('full', pct >= 99.5);
+    }
+
+    // ---- component rack (P5) ----
+    const rackCap = sim.componentCapacity();
+    const rack = this.el('components');
+    rack.style.display = rackCap > 0 ? '' : 'none';
+    if (rackCap > 0) {
+      for (const c of ALL_COMPONENTS) {
+        const ref = this.compChips.get(c)!;
+        const n = sim.components[c];
+        ref.val.textContent = `${n}/${rackCap}`;
+        const pct = Math.min(100, (n / rackCap) * 100);
+        ref.bar.style.width = `${pct}%`;
+        ref.wrap.classList.toggle('full', pct >= 99.5);
+        ref.wrap.title = `${COMPONENTS[c].label} — ${n} of ${rackCap} rack slots. ${COMPONENTS[c].description}`;
+      }
     }
 
     // ---- idle rovers ----
@@ -2236,6 +2296,7 @@ export class HUD {
           <div class="bar-wrap"><div class="bar-fill amber" id="b-progress"></div></div>
         </div>
         <div id="b-body"></div>
+        ${recipeBlock(b.kind)}
         <div id="b-garage" style="display:none">
           <div class="sub sm">Assembly line</div>
           <div class="stat"><span class="k">Building</span><span class="v" id="b-asm-label">—</span></div>
@@ -2334,14 +2395,22 @@ export class HUD {
           `<div class="note">${b.powerSat >= 0.5 && b.enabled && !b.damaged ? 'Live radar map is available in colony vitals.' : 'Radar offline until the station is enabled and powered.'}</div>`,
         );
       }
-      if (def.process) {
+      if (hasProcess(b.kind)) {
         const pct = Math.round(b.throughput * 100);
         rows.push(
           `<div class="stat"><span class="k">Throughput</span><span class="v ${pct > 0 ? 'good' : 'warn'}">${pct}%</span></div>`,
           `<div class="bar-wrap"><div class="bar-fill ${pct > 0 ? 'green' : 'amber'}" style="width:${pct}%"></div></div>`,
-          `<div class="note">${def.process.summary}</div>`,
+          `<div class="note">${activeSummary(b.kind, b.recipe)}</div>`,
         );
         if (b.idleReason) rows.push(`<div class="note warn">⚠ ${b.idleReason}</div>`);
+      }
+      const slots = def.componentSlots ?? 0;
+      if (slots > 0) {
+        // The rack this building contributes — the reason components exist at
+        // all, and the number the topbar chips are counting against.
+        rows.push(
+          `<div class="stat"><span class="k">Component rack</span><span class="v">${Math.floor(slots * devLevelMul(b.level))} slots</span></div>`,
+        );
       }
       if (b.powerSat < 0.995) {
         rows.push(
@@ -2395,11 +2464,20 @@ export class HUD {
         for (const kind of ['utility', 'mining', 'cargo'] as const) {
           const btn = q(`asm-${kind}`) as HTMLButtonElement;
           const rdef = ROVERS[kind];
-          const afford = ALL_RESOURCES.every((res) => sim.storage[res] >= rdef.cost[res]);
+          // P5: a rover costs metal *and* machines — both ledgers have to cover
+          // it, and the button greys out until they do.
+          const afford =
+            ALL_RESOURCES.every((res) => sim.storage[res] >= rdef.cost[res]) &&
+            ALL_COMPONENTS.every((c) => sim.components[c] >= rdef.componentCost[c]);
           btn.classList.toggle('unaffordable', !afford);
-          const cost = ALL_RESOURCES.filter((res) => rdef.cost[res] > 0)
-            .map((res) => `${Math.round(rdef.cost[res])} ${RESOURCES[res].short}`)
-            .join(' · ');
+          const cost = [
+            ...ALL_RESOURCES.filter((res) => rdef.cost[res] > 0).map(
+              (res) => `${Math.round(rdef.cost[res])} ${RESOURCES[res].short}`,
+            ),
+            ...ALL_COMPONENTS.filter((c) => rdef.componentCost[c] > 0).map(
+              (c) => `${rdef.componentCost[c]} ${COMPONENTS[c].short}`,
+            ),
+          ].join(' · ');
           btn.innerHTML = `${rdef.label.split(' ')[0]}<span class="cost">${cost}</span>`;
         }
         q('b-asm-note').innerHTML =
@@ -2407,6 +2485,38 @@ export class HUD {
       }
     } else {
       garage.style.display = 'none';
+    }
+
+    // ---- production line (P5): which recipe is running, and why not --------
+    const rec = q('b-recipe');
+    if (rec) {
+      const recs = recipesFor(b.kind);
+      recs.forEach((r, i) => {
+        const btn = q(`rec-${i}`) as HTMLButtonElement | null;
+        if (!btn) return;
+        btn.classList.toggle('active', i === b.recipe);
+        // Grey a line the colony could not run right now — no input stock, or
+        // nowhere to rack the output. The sim would refuse it anyway; this says
+        // so before the click instead of after.
+        const p = r.process;
+        const stocked = ALL_RESOURCES.every(
+          (res) => (p.solidIn?.[res] ?? 0) <= 0 || sim.storage[res] > 0,
+        );
+        const room = ALL_COMPONENTS.every(
+          (c) => (p.componentOut?.[c] ?? 0) <= 0 || sim.components[c] < sim.componentCapacity(),
+        );
+        btn.classList.toggle('unaffordable', !stocked || !room);
+      });
+      const note = q('b-recipe-note');
+      if (note) {
+        // Work in progress belongs to the bench, not to a line: switching
+        // recipes keeps it, so the panel says what is half-made rather than
+        // letting the player assume a changeover throws it away.
+        const bench = ALL_COMPONENTS.filter((c) => b.craft[c] > 0.005)
+          .map((c) => `${COMPONENTS[c].short} ${Math.round(b.craft[c] * 100)}%`)
+          .join(' · ');
+        note.innerHTML = `${activeSummary(b.kind, b.recipe)}${bench ? `<br>On the bench: ${bench}` : ''}`;
+      }
     }
 
     const toggle = q('b-toggle') as HTMLButtonElement;
@@ -2783,6 +2893,43 @@ export class HUD {
   }
 }
 
+/** Those lines as one string — a tooltip lists them, a dossier row prints them. */
+function linesText(kind: BuildingKind): string {
+  if (hasRecipes(kind)) {
+    return recipesFor(kind)
+      .map((r) => `${r.label} — ${r.process.summary}`)
+      .join('  ·  ');
+  }
+  return activeSummary(kind, 0);
+}
+
+/**
+ * The production-line selector for a building inspector (P5), or '' for a kind
+ * with nothing to choose.
+ *
+ * It is part of the skeleton rather than patched in later on purpose: the
+ * skeleton is already per-selection, so these buttons get the same one-time
+ * `data-act` wiring every other inspector control has, and the refresh path
+ * only has to move the highlight. The sim still owns the answer — a click sends
+ * `building/recipe` and the panel reads back whatever the sim decided.
+ */
+function recipeBlock(kind: BuildingKind): string {
+  if (!hasRecipes(kind)) return '';
+  const recs = recipesFor(kind);
+  const btns = recs
+    .map(
+      (r, i) =>
+        `<button class="btn" data-act="recipe" data-arg="${i}" id="rec-${i}" title="${r.process.summary}">${r.label}</button>`,
+    )
+    .join('');
+  return `
+        <div id="b-recipe">
+          <div class="sub sm">Production line</div>
+          <div class="action-grid${recs.length > 2 ? ' three' : ''}" id="b-recipe-btns">${btns}</div>
+          <div class="note dim" id="b-recipe-note"></div>
+        </div>`;
+}
+
 function iconFor(k: BuildingKind): string {
   switch (k) {
     case 'habitat':
@@ -2807,6 +2954,8 @@ function iconFor(k: BuildingKind): string {
       return '☢';
     case 'weatherStation':
       return '📡';
+    case 'refinery':
+      return '🏭';
   }
 }
 

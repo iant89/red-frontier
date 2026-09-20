@@ -19,6 +19,16 @@ does not show until a rover finds them, a SALVAGE task that cuts a wreck apart
 and hauls it home, and Earth cargo missions that land under a transponder and
 get buried by the dust if nobody goes out for them.
 
+Since then the planet has got sharper edges and better chrome: **weather is a
+field, not a mood** — storms are travelling systems with a local intensity, so a
+rover 20 m away can be in clear air while the pad is hammered — and dust that
+thick carries **lightning**, which singes arrays, flashes rover batteries dry and
+can kill a colonist caught outside. Rovers now **crawl near obstacles** instead of
+driving through each other, the claim has a **minimap and a zoomable world map**
+with storm tracks on it, and the whole thing has a **procedural soundscape**
+synthesised in the browser — no audio files, no fetch, and a pause keeps the wind
+audible while the machinery fades out.
+
 Design & technical specifications live in [`docs/design/GDD.md`](docs/design/GDD.md)
 and [`docs/design/TDD.md`](docs/design/TDD.md).
 
@@ -40,7 +50,7 @@ npm run test:sim        # every tests/sim suite
 npm run test:hud        # every tests/hud suite
 npm run test:unit       # the fast formula-level suites
 npm test -- power       # any suite whose name/desc matches "power"
-npm run test:list       # all 55 suites and what each covers
+npm run test:list       # all 79 suites and what each covers
 ```
 
 One URL flag is worth knowing while developing:
@@ -79,12 +89,35 @@ ice deposit → [rover hauls] → Water Extractor → water → Oxygen Generator
                                                   └───→ Greenhouse → food
 ```
 
+**The chain that lets you grow:**
+
+```
+iron deposit → [rover hauls] → Refinery → steel → Rover Garage / Radar Station
+                                    ↑ 35 kW: the grid pays for every kilo
+```
+
+**The chain that builds machines:**
+
+```
+steel + aluminum ──→ Workshop (motors line) ──┐
+silica + aluminum ─→ Workshop (boards line) ──┴→ component rack → Rover Garage → rover
+                     one line at a time, your choice; 24 slots of rack
+```
+
 A workable opening: **Warehouse** (storage) → **Solar + Battery** (power that
 survives the night) → **Water Extractor** → **Oxygen Generator** → **Greenhouse**
 (closes the food loop) → **Habitat** (recycles 55 % of your water). Once the
-chain holds, a **Rover Garage** pays for itself — 40 kW charging halves the
-fleet's downtime, the bay keeps drivetrains at 100%, and the assembly line can
-add a **cargo rover** (3 t hopper, 120 kWh) for the long hauls.
+chain holds, raise a **Refinery** and start smelting: heavy structures are built
+from steel now, and steel is made, not dug. Budget the power before you pour the
+foundation — 35 kW is more than one array makes, and the furnace will brown out
+rather than borrow from your air.
+
+With a steel silo behind it, a **Rover Garage** (30 kg steel) pays for itself —
+32 kW charging (twice the pod's 16 kW) halves the fleet's downtime, the bay keeps
+drivetrains at 100%, and the assembly line can add a **cargo rover** (3 t hopper,
+120 kWh) for the long hauls. A rover is a machine as well as a pile of metal, so
+the line also spends **motors and circuit boards** off the rack — raise a
+**Workshop** first, pick a line, and let it craft while you haul.
 
 Oxygen kills in hours, water in days, food in weeks — so build in that order.
 Watch the *empty in…* estimates on the left panel; they are the real clock.
@@ -135,7 +168,7 @@ deposits instead of dogpiling — a rich seam is still shared, a worked-out
 scrap heap never is, and no rover idles merely because its nearest seam is
 taken.
 
-The **Rover Garage** fast-charges at 40 kW (twice the pod), services parked
+The **Rover Garage** fast-charges at 32 kW (twice the pod's 16 kW), services parked
 rovers' drivetrains back to 100%, and its assembly line builds **utility,
 mining and cargo rovers** from stockpiled parts. Work wears drivetrains — a
 worn rover works at as little as half rate — so schedule garage time before
@@ -250,6 +283,48 @@ Materials flow into sites *without* a rover parked there — the "Materials
 Reserved" stage of TDD §7. A site quietly accumulates regolith while a rover
 fetches iron, and cancelling one refunds everything already delivered.
 
+### Refining (P5)
+Ore is not the end of the chain. The **Refinery** — 35 kW, tier 2, a blast furnace
+with a skip hoist and a glowing tap hole — smelts **2.6 kg of iron ore into 1.6 kg
+of steel** per Mars hour, and steel is what the heavy structures downstream are
+made of: a **Rover Garage** costs 30 kg of it, a **Weather Radar Station** 25 kg.
+
+Steel is a bulk resource like any other — it rides a rover's bed, fills a silo,
+is reserved by a construction site and shows up in the stock chips — with one
+difference: **it has no seam**. Refined material is `origin: 'refined'`, so the
+world never scatters it, no rover can mine it and developer mode will not survey
+one in. The only way to own steel is to make it, and the Refinery itself is
+priced in raw ore (40 regolith / 50 iron / 18 silica / 16 aluminum) so the chain
+can always be opened from a cold start.
+
+The furnace behaves like every other line: it throttles on ore supply, on silo
+headroom (**"Steel silo full"** is its own idle reason) and on power. That last
+one is the design point — 35 kW is more than a solar array makes, so smelting
+competes with the colony, and industry is shed before life support ever is.
+Run the furnace when the sun is up.
+
+### Manufacturing (P5)
+Steel is not the end of the chain either. The **Workshop** — 5 kW, tier 2, and the
+colony's only machine shop — runs **one of two lines you choose**: drive motors
+(2.5 kg steel + 1 kg aluminum → one motor per two Mars hours) or circuit boards
+(1.2 kg silica + 0.4 kg aluminum + 0.2 kg steel → one board per three). The
+selection is per building, saved with the colony, and switching lines keeps
+whatever is half-made on the bench — a changeover never throws a motor away.
+
+What comes off the bench is **counted, not weighed**. Components live on their own
+integer ledger with *rack slots* instead of silo mass (a workshop brings 24; the
+landing pod brings none, so nothing can be crafted until one stands), the
+unfinished fraction stays on the building making it, and a full rack stops the line
+with its own idle reason rather than inventing storage.
+
+Rovers are what spends them: a **Utility** costs 2 motors and 1 board, a **Mining**
+4 and 1, a **Cargo** 6 and 2 — on top of the metal. The garage asks both ledgers
+before it spends either, and a refusal names the part you are short of.
+
+What is *not* in yet: a wider parts catalogue (pipes, valves), a second refined
+material (glass), utility networks to run them through, and part-level wear — the
+components exist to be worn out now, but nothing wears them.
+
 ### Exploration (`sim/pois.ts`)
 The map begins mostly unknown (GDD §06). The world scatters **sites** from the
 seed — a wrecked rover, an abandoned camp, a meteorite, an ice cave, a science
@@ -287,35 +362,63 @@ what stops a brownout producing 200 identical log lines.
 ## Module layout
 
 ```
-docs/design/        GDD + TDD reference copies
+docs/design/        GDD + TDD + the rover state model
 src/
   main.ts           entry point
-  app/              Game loop, input, camera rig, command dispatch
+  app/              composition root: Game + the controllers it wires (Phase 19)
+    Game.ts             owns the colony: boot, launch, save/load hand-off, settings
+    GameLoop.ts         rAF timing, host.step(), render scheduling
+    InputController.ts  keyboard / pointer / touch → gestures and commands
+    SelectionController.ts · BuildController.ts · SaveController.ts
+    MenuController.ts   pause menu, settings contract, expedition stats
+    UpdateController.ts + UpdateCheck.ts   the in-play build check and its card
+    CameraRig.ts        orbit / pan / zoom
+    gestures.ts         pure gesture normalization (unit-tested, no DOM)
+  audio/            procedural Web Audio soundscape — presentation only
   sim/              framework-agnostic simulation (no DOM / no three.js)
     config.ts       balance constants + the two time bases
     defs.ts         data-driven blueprints (resources, fluids, rovers, buildings)
+    difficulty.ts   Settler/Pioneer/Survivor + world sizes + world options
     clock.ts        Mars sol clock + authoritative sun
     power.ts        pure power-grid resolver
     lifesupport.ts  fluid pools, colonist needs, health
     alerts.ts       alert bus (conditions) + event log (occurrences)
-    weather.ts      wind, dust, storm scheduler + envelopes
+    domainEvents.ts per-tick structured events (not a pub/sub bus)
+    weather.ts      wind, dust, storm cells + envelopes, spatial sampling, lightning RNG
     pois.ts         site/drop content tables + the pure salvage maths
+    terrain.ts      local height / material from seed (MOLA-relief prior) + landing
+    marsGlobe.ts    compact geographic Mars: biomes, elevation, landable regions
+    marsDem.ts      the MOLA-derived elevation table the globe samples
+    navgrid.ts      walk/build grid, reachability flood, zero-alloc A*
     rules.ts        the siting + maintenance verdicts, shared by both sides
     World.ts        seeded terrain + deposits + scattered sites
-    Simulation.ts   orchestration: entities, tick order, rover task dispatch
+    Simulation.ts   thin orchestrator: state, hooks, tick order, lifecycle API
+    DevBackdoors.ts the dev-only edit surface, apart from player commands
     state/          ColonyState and the entity/record shapes (data, no behavior)
     systems/        extracted tick responsibilities, each a static API over state
       ClockSystem.ts      the sol clock and the authoritative sun
-      WeatherSystem.ts    weather progression + what it does to the colony
+      WeatherSystem.ts    weather progression + what it does to the colony (dust,
+                          wind, lightning) + the powered-radar capability
       PowerSystem.ts      the grid: tiers, satisfaction, brownout shedding
-      ProductionSystem.ts what a process wants, why it is idle, the mass it moves
+      ProductionSystem.ts what a process wants, why it is idle, the mass it moves,
+                          the units it racks, which line a building runs
       LifeSupportSystem.ts the fluid draw, the colonist, EVA orders
       ConstructionSystem.ts siting, site materials, crews, progress, completion
-    persistence/    versioned saves: schema, codec, validator, v1…v7 migrations
-    debug/          invariant checks, deterministic state hash, profiler, transcripts
+      RoverSystem.ts      fleet commands, task lifecycle, movement, task bodies
+      FleetAutomationSystem.ts the job model + autonomous dispatch
+      LogisticsSystem.ts  the bulk (kg) ledger, cargo, reservations — one owner
+      ComponentSystem.ts  the manufactured-unit ledger: rack space, whole units
+      ExplorationSystem.ts discovery, drops, burial, salvage rewards
+      GarageSystem.ts     fast charge, drivetrain service, the assembly line
+      FailureSystem.ts    failure outcomes as domain events
+      AlertSystem.ts      domain events → state.alerts (keys, dedupe, expiry)
+      HistorySystem.ts    vitals time series + the flow-window roll
+    persistence/    versioned saves: schema (v10), codec, validator, migration steps v1…v9
+    debug/          invariant checks, state hash, profiler, transcripts, benchmarks,
+                    the large-colony stress scenario (dev-only; tree-shaken out)
     host/           the seam: SimCommand protocol, SimView read model, the host
       protocol.ts     every legal write, as plain serializable data
-      view.ts         SimView — the read model, derived from Simulation by Pick
+      view.ts         SimView — the immutable read model (+ viewModels.ts shapes)
       applyCommand.ts the dispatch table (sim-side, worker-reusable)
       overlays.ts     runtime edits as *data* (a name + ids), never closures
       projection.ts   the view payload a host answers with
@@ -323,14 +426,25 @@ src/
       mirror.ts       a SimView built from payloads + terrain from the seed
       workerRuntime.ts the sim side of the wire (also driven headless in tests)
       WorkerSimHost.ts the worker host: posts ticks, mirrors state, optimistic acks
+      NetworkPort.ts  the same requests/replies over any string duplex (no server ships)
       createHost.ts   one factory, either transport (worker by default, ?worker=0 opts out)
   dev/              developer mode: runtime edit state (DevMode) + the panel (DevPanel)
   render/           three.js renderer (terrain, entities, day/night, overlays)
+    Renderer.ts       scene, terrain, entities, selection ring, lightning flash
+    marsTerrain.ts    PBR atlas + macro albedo + the no-asset fallback material
+    WeatherFX.ts      the FX director (derives viewRadius + windRamp)
+    DescentStage.ts · WeatherStation.ts   presentation-only props
+    ModelRegistry.ts · GlbLoader.ts · assetCatalog.ts   the GLB pipeline
     particles/      true particle system (wind, storm grit, dust devils, rover trails)
-  ui/               DOM HUD (vitals, alerts, inspectors, build palette)
+  ui/               DOM HUD (vitals, alerts, inspectors, build palette), menus, wizard,
+                    WorldMap.ts (minimap + world map), SaveStore, Settings, BuildStatus,
+                    Changelog, GlobePicker
   lib/              deterministic RNG + simplex noise
-tests/              54 headless suites (sim/*, hud/*, render/*, ui/*, app/*) + linked serial test
-scripts/            esbuild test runner: parallel scheduling, filters, --affected, --watch
+tests/              76 headless suites (sim/*, hud/*, render/*, ui/*, app/*, audio/*)
+                    + linked serial test
+scripts/            esbuild test runner: parallel scheduling, filters, --affected, --watch;
+                    Playwright smokes; benchmark, stress, transcript replay, screenshots
+public/             terrain PBR atlas, menu art, and the GLB drop folder (empty but for a fixture)
 ```
 
 ## Architecture
@@ -379,11 +493,20 @@ scripts/            esbuild test runner: parallel scheduling, filters, --affecte
   rover-load of regolith deadlock every other supply chain, which reads as a bug
   rather than a bottleneck.
 - **Saves are versioned** and refuse to load a schema they don't understand
-  rather than silently corrupting a colony. The chain runs v3 → v7, each step
+  rather than silently corrupting a colony. The chain runs v3 → v10, each step
   additive: task queues, drivetrain condition and automation rules (v4),
-  position lights (v5), difficulty and world options (v6), and exploration (v7)
-  — a v6 colony loads with its sites unscattered-but-unfound and a fresh drop
-  schedule, because a planet that had nothing on it is not a corrupted save.
+  position lights (v5), difficulty and world options (v6), exploration (v7), the
+  weather lightning state — the seeded strike RNG plus the difficulty
+  multiplier (v8), refined material (v9: `storage` gains `steel`), and
+  manufacturing (v10: the colony gains a component rack, every building gains
+  the line it is running and the fraction still on its bench) — a v6 colony
+  loads with its sites unscattered-but-unfound and a fresh drop schedule, a v7
+  colony simply gains a sky that can throw a bolt, a v8 colony simply has not
+  smelted anything yet, and a v9 colony has never crafted anything, because a
+  planet that had nothing on it is not a corrupted save. Restore *sanitises*
+  what it is given: components floor to whole non-negative units, bench
+  fractions clamp to 0…1, and a recipe index that names no line resolves to the
+  first one instead of taking the tick down.
 - **Developer mode is a runtime overlay, never sim state.** The keep-full
   battery pin is registered on the host as an overlay (so it applies to a step,
   not to a save), and the upgrade marks ride as a runtime-only field that
@@ -393,8 +516,8 @@ scripts/            esbuild test runner: parallel scheduling, filters, --affecte
 
 ### Testing
 
-The tests are split into **43 small suites** that each pin one corner of the
-game, plus one linked serial entry point. A suite is a plain module that
+The tests are split into **79 small suites / 913 checks** that each pin one corner
+of the game, plus one linked serial entry point. A suite is a plain module that
 registers cases with `test()` and finishes with `await finish()`; `scripts/run-tests.mjs`
 bundles and runs any subset in isolated processes. Full runs schedule the
 historically slowest suites first across the available CPU workers.
@@ -402,17 +525,28 @@ historically slowest suites first across the available CPU workers.
 ```
 tests/
   harness.ts          test()/group()/finish(), the per-suite report, the roll-up
-  full.test.ts        optional serial run: imports all 55 suites, prints the total
+  full.test.ts        optional serial run: imports all 79 suites, prints the total
   fixtures/sim.ts     shared sim setup (place a building, run N sols, find a seam)
   fixtures/hud.ts     jsdom bootstrap, a recording 2D canvas stub, one mounted
                       HUD + sim per suite
   sim/                power · clock · life-support · colony · soak · build · grid
                       · alerts · weather · storms · rovers · fleet · garage
                       · lights · determinism · persistence · pois · setup
-                      · world · devtools · host · worker
-  hud/                chrome · weather · inspectors · fleet · garage · controls
-                      · alerts · mobile · dossier · markers · panels · devpanel · worldmap
-  render/ particles   ui/ build-status
+                      · world · devtools · host · worker · proximity · refining
+                      · components
+                      + one suite per extracted system (clock-, weather-, power-,
+                      production-, life-support-, construction-, rover-, logistics-,
+                      exploration-, failure-, alert-, history-system)
+                      + the harness suites: invariants · state-hash · transcript
+                      · property-testing · performance-regression
+                      · large-colony-stress · network-boundary · save-validation
+  hud/                chrome · weather · inspectors · fleet · garage · workshop
+                      · controls · alerts · mobile · dossier · markers · panels
+                      · devpanel · worldmap · pause-menu
+  render/             particles · descent-stage · weather-station · glb-assets
+                      · selection · solar
+  audio/  system      ui/ build-status · gestures      app/ game-controllers
+                      · pause-save · update-check
 ```
 
 Run the piece you touched, not the whole planet:
@@ -447,41 +581,68 @@ never be picked by `--affected`; `npm test` performs the same layout guard.
 
 What is covered, by TDD §21's categories:
 
-- **Unit** (`sim/power`, `sim/clock`, `sim/alerts`, `sim/weather`, `sim/host`) — power
+- **Unit** (`sim/power`, `sim/clock`, `sim/alerts`, `sim/weather`, `sim/host`,
+  plus one suite per extracted system — `sim/weather-system`, `sim/power-system`,
+  `sim/rover-system`, `sim/logistics-system`, `sim/exploration-system`,
+  `sim/failure-system`, `sim/alert-system`, `sim/history-system`, …) — power
   allocation, tier shedding, energy conservation, the sun model, dust
-  transmission and visibility, the alert bus's raise/clear rule, and the host
-  seam itself — every command decodes and applies, the gate refuses what the
-  protocol does not name, the view carries no mutator, and the same command
-  transcript replayed against the same seed lands on an identical colony.
+  transmission and visibility, the spatial weather field and the lightning hazard
+  curve, the alert bus's raise/clear rule, and the host seam itself — every command
+  decodes and applies, the gate refuses what the protocol does not name, the view
+  carries no mutator, and the same command transcript replayed against the same
+  seed lands on an identical colony.
 - **Integration** (`sim/life-support`, `sim/colony`, `sim/build`, `sim/grid`,
   `sim/storms`, `sim/rovers`, `sim/fleet`, `sim/garage`, `sim/lights`,
-  `sim/pois`, `sim/persistence`) —
+  `sim/pois`, `sim/persistence`, `sim/proximity`, `sim/save-validation`,
+  `sim/refining`, `sim/components`) —
   ice → water → oxygen actually produces oxygen; the greenhouse closes the food
   loop; batteries charge by day and drain by night; switching a building off
   drops grid demand; storms cut solar, bury arrays, damage structures, shelter
-  crews, refuse EVAs and recover, end to end; rover orders (queue, replace,
+  crews, refuse EVAs and recover, end to end; a bolt trips the array it lands on
+  and can strand a rover or end an EVA; rover orders (queue, replace,
   WAIT), haul routes parking on a full silo and resuming, seam reservations,
   jump-start recovery, drivetrain wear, garage service/fast-charge/assembly,
-  per-rover automation rules, position lights (night/dust auto-on, battery
-  draw, the switch, the stranded rover's reserve strobe), seeded site scatter,
-  discovery radius, the salvage task and its refusals, supply drops landing on a
-  schedule and being buried faster inside a storm, and the v3→v7 save
-  migrations.
-- **Determinism** (`sim/determinism`, `sim/weather`, `sim/pois`,
-  `sim/persistence`) — identical seeds and identical elapsed time produce
-  identical state hashes regardless of frame pacing; weather and the scattered
-  planet are identical across replays and across a save/restore.
+  per-rover automation rules, the hull-clearance crawl (and the destination
+  exemption that keeps a builder from hanging), position lights (night/dust
+  auto-on, battery draw, the switch, the stranded rover's reserve strobe), seeded
+  site scatter, discovery radius, the salvage task and its refusals, supply drops
+  landing on a schedule and being buried faster inside a storm, iron ore smelted
+  into steel and spent on a garage site, a steel silo that throttles the furnace
+  rather than bursting, two furnaces that cannot invent mass, steel and silica
+  machined into motors and boards on a line the player picks, a rack that stops
+  the line when it fills, work in progress that survives a changeover, a garage
+  that refuses a rover and names the missing part, and the v3→v10 save
+  migrations against hostile payloads.
+- **Determinism & replay** (`sim/determinism`, `sim/transcript`, `sim/state-hash`,
+  `sim/weather`, `sim/pois`, `sim/persistence`) — identical seeds and identical
+  elapsed time produce identical state hashes regardless of frame pacing; a
+  canonical transcript (seed + difficulty + world options + timed commands)
+  replays to a pinned hash; weather and the scattered planet are identical across
+  replays and across a save/restore.
+- **Property-based** (`sim/property-testing`) — random command sequences must never
+  break the invariants, whatever order they arrive in.
+- **Performance** (`sim/performance-regression`, `sim/large-colony-stress`,
+  `sim/worker-performance`) — tick, view-projection, transport, payload and
+  pathfinding thresholds at 10/25/50/100 rovers, and 100 rovers + 250 buildings
+  through a sustained storm with bounded task queues and a pinned end-state hash.
 - **Load** (`sim/soak`) — twenty sols of live operation: days, nights, storms,
   hauling and wear. The one suite worth running on its own before a release.
 - **HUD** (`hud/*`) — every panel exists and patches live under jsdom, every
   callback fires, the inspectors (rover, structure, crew, site), the mobile
   collapse and dismiss gestures, the alert history, autopause, the supply-drop
-  edge markers and their deadlines.
+  edge markers and their deadlines, the pause menu's three tabs, and the
+  minimap/world-map paint paths.
+- **Render, audio, app** (`render/*`, `audio/system`, `app/*`) — GPU-free checks on
+  the particle budget and coherence, the descent stage's leg clearances, the radar
+  station's animation, the GLB registry's fallback contract, the selection pulse;
+  the pure audio mix and the exhaustive command→cue map; the Game-level save/pause
+  hand-off and the update-check poller.
 
-`npm test` runs all 570 checks in isolated parallel child processes, with the
-longest suites launched first; on a two-worker machine it takes about two minutes.
+`npm test` runs all 913 checks in isolated parallel child processes, with the
+longest suites launched first; it takes about three and a half minutes.
 `npm run test:serial` keeps the linked single-process run available for debugging.
-The renderer needs a GPU and is covered separately by the mobile smoke test.
+The renderer needs a GPU and is covered separately by the mobile smoke test — note
+that CI runs the build and the browser smokes, **not** `npm test`.
 
 ## Next milestones (per GDD §16 / TDD §25)
 
@@ -489,9 +650,13 @@ The renderer needs a GPU and is covered separately by the mobile smoke test.
 in — terrain and camera, the mission wizard, staged construction, the power
 grid, the sol and the water → oxygen → food chain, weather and storms, and the
 rover fleet with queued tasks, automation rules and a garage — plus the first
-slice of **P6/T6** (points of interest, the salvage task, supply drops). The MVP
-building set from GDD §16 is complete. `npm test` is green at 55 suites / 570
-checks.
+slice of **P6/T6** (points of interest, the salvage task, supply drops) and both
+shippable slices of **P5** (the Refinery and `steel`; the Workshop's two lines,
+the component rack, and rovers priced in motors and boards). The MVP building set
+from GDD §16 is complete, and so is GDD §03's replication chain: ore → steel →
+components → machine. `npm test` is green at 79 suites / 913 checks. The **30-phase architectural refactor roadmap is also complete**: systems
+extracted, `ColonyState` formalised, persistence and app controllers split out,
+the host seam strengthened, and the debug/perf harness in place.
 
 1. **Finish the Web Worker move** (TDD T1–T2 hardening). `WorkerSimHost` is in:
    a module worker owns the `Simulation`, the client pumps it one `advance{dt}`
@@ -532,17 +697,24 @@ checks.
      is throttled and the colony would race ahead unseen).
    - transferables for the terrain and `OffscreenCanvas` for the renderer
      (TDD §16 P2/P3), each needing its own guard. Neither is in the tree yet.
-2. **GDD §16 P5 — refining, manufacturing, utility networks, maintenance.** The
-   slice the roadmap puts next. None of it is implemented: `defs.ts` defines eleven
-   blueprints (habitat, solar, battery, rtg, warehouse, extractor, oxygenator,
-   greenhouse, workshop, garage, weather radar station), so GDD §04's table still has no **Refinery**,
-   **Laboratory**, **Repair Bay** or **Nuclear Reactor**; ore the rovers haul is
-   stockpiled rather than processed (the only `process` definitions are the
-   extractor, oxygenator and greenhouse), there is no `sim/utilities/` module
-   because power is the only network, and GDD §03's replication chain — iron →
-   crushing → smelting → steel → components → construction — has no middle.
-   TDD §6's logistics reservations and §7's staged construction are the pieces
-   this builds on.
+2. **GDD §16 P5 — refining, manufacturing, utility networks, maintenance.** Both
+   shippable slices are in (see *Refining* and *Manufacturing* above): `defs.ts`
+   defines twelve blueprints — the **Refinery** joined habitat, solar, battery,
+   rtg, warehouse, extractor, oxygenator, greenhouse, workshop, garage and the
+   weather radar station — and GDD §03's replication chain is complete: iron ore
+   is smelted into steel, steel and silica are machined into motors and boards on
+   a line the player chooses, and a rover leaving the garage has spent both.
+   What the pillar still owes:
+   - **a wider parts catalogue** — pipes, valves, pumps — which wants the utility
+     networks below to exist before there is anything to connect them with;
+   - **a second refined material** (glass from silica), which the recipe machinery
+     can now carry as a third Workshop line or a Refinery one;
+   - **utility networks** — there is still no `sim/utilities/` module, because
+     power is the only network;
+   - **maintenance depth** — part-level wear rather than one health number. The
+     rack gives it something to consume: components exist now, and nothing wears
+     them out yet;
+   - GDD §04's **Laboratory**, **Repair Bay** and **Nuclear Reactor**.
 3. **GDD §16 P6 / TDD §25 T6 — procedural exploration, POIs, supply drops.**
    The first slice is in: `sim/pois.ts` carries the content tables, `World`
    scatters sites from the seed, the map only shows what a rover has found,
@@ -566,13 +738,22 @@ checks.
    §08's skills ladder have nothing to attach to yet, and the colony is still
    exactly one human.
 5. **TDD §22 — the rest of the developer tooling.** The panel (`src/dev/`)
-   shipped; the spec's other tools did not: tick/frame perf counters, worker
-   queue inspection, the deterministic state hash, and the teleport/reveal cheat
-   commands.
+   shipped; the spec's other tools are half-built: `sim/debug/Profiler.ts` counts
+   ticks, pathfinds, commands, worker messages and view generations, and
+   `sim/debug/StateHash.ts` produces the deterministic state hash — but both are
+   test-only modules with no readout in the panel. Still missing entirely: worker
+   queue inspection and the teleport/reveal cheat commands.
+6. **A skybox** (`ISSUES.md` #16), **POI-specific markers** (#19), **generated
+   changelog data** (#15) and **an audio mute/volume setting** — the soundscape is
+   the one shipped feature a player cannot turn off.
 
 **An ordering conflict worth knowing about.** GDD §16 and TDD §25 disagree about
 what follows the rover slice: GDD puts **refining/manufacturing at P5** and
 exploration at P6, while TDD puts **POIs and supply drops at T6** and never
-gives refining its own tier. The choice is which pillar to grow next —
-**Engineering** (item 2) or **Exploration** (item 3) — not what the documents
-decided for you.
+gives refining its own tier. The build answered it by taking a slice of each —
+**Exploration** first (item 3), then **Engineering** twice over (item 2) — and TDD
+§25 still has no tier for the industrial layer, so P5 progress is tracked in GDD
+§0/§16 and TDD Appendix B rather than in a T-row of its own. With both P5 slices
+shipped, the open question is no longer which pillar comes next but whether the
+remaining engineering depth (utility networks, part-level wear) is worth more than
+finishing exploration.

@@ -27,6 +27,7 @@ import {
   RESOURCES,
   ROVERS,
   ALL_RESOURCES,
+  type MineableResourceId,
   type ResourceId,
   type RoverKind,
   type BuildingKind,
@@ -60,9 +61,15 @@ export const DevBackdoors = {
     return b;
   },
 
+  /**
+   * Survey in a seam. The parameter is a *mined* resource: refined materials
+   * have no deposit, and the boundaries that accept untyped input (the command
+   * decoder's `mineableResourceId` field, DevMode before it sends) are what
+   * keep them out.
+   */
   spawnDeposit(
     state: ColonyState,
-    resource: ResourceId,
+    resource: MineableResourceId,
     x: number,
     z: number,
     amountKg: number,

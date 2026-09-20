@@ -321,7 +321,10 @@ test('hasMaterials / consumeMaterials / missingList are the one ledger the garag
   assert.equal(sim.storage.iron, 3000 - cost.iron);
 
   // A cost nobody owes reads as "materials", never as an empty string.
-  assert.equal(ConstructionSystem.missingList({ regolith: 0, iron: 0, silicon: 0, aluminum: 0, ice: 0 }), 'materials');
+  assert.equal(
+    ConstructionSystem.missingList({ regolith: 0, iron: 0, silicon: 0, aluminum: 0, ice: 0, steel: 0 }),
+    'materials',
+  );
 });
 
 // ------------------------------------------------------- worker choice ----

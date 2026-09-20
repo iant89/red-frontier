@@ -7,7 +7,13 @@
  * semantically equivalent across transports.
  */
 
-import type { BuildingKind, FluidId, ResourceAmounts, RoverKind } from '../defs';
+import type {
+  BuildingKind,
+  ComponentAmounts,
+  FluidId,
+  ResourceAmounts,
+  RoverKind,
+} from '../defs';
 import type { Alert, LogEvent, Severity } from '../alerts';
 import type { FluidFlow, HistorySample } from '../Simulation';
 import type {
@@ -76,6 +82,13 @@ export interface BuildingView {
   readonly damaged: boolean;
   readonly assembly: Readonly<{ kind: RoverKind; progress: number }> | null;
   readonly level: number;
+  /**
+   * Which line this building is running (P5) — an index into `RECIPES[kind]`,
+   * ignored by kinds whose blueprint has a fixed process.
+   */
+  readonly recipe: number;
+  /** Fractional progress toward each unit still on the bench. */
+  readonly craft: Readonly<ComponentAmounts>;
 }
 
 /** The colonist as presentation reads them. */
@@ -113,6 +126,11 @@ export interface ResourceView {
   readonly lastFlows: Readonly<Record<FluidId, Readonly<FluidFlow>>>;
   readonly history: ReadonlyArray<Readonly<HistorySample>>;
   readonly storedKWh: number;
+  /**
+   * Manufactured components (P5): whole units on the rack. Counted, not
+   * weighed, so they are deliberately *not* part of `storage`.
+   */
+  readonly components: Readonly<ComponentAmounts>;
 }
 
 /** One active alert on the board (plain data). */

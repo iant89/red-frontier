@@ -36,7 +36,7 @@ import { resolvePower, idlePower, type PowerDemand } from '../power';
 import { batteryCapacityKWh } from '../state/PowerState';
 import type { ColonyState } from '../state/ColonyState';
 import type { Building } from '../state/BuildingState';
-import { BUILDINGS, ROVERS } from '../defs';
+import { BUILDINGS, ROVERS, hasProcess } from '../defs';
 import { clamp } from '../../lib/rng';
 import {
   SIM_TICK,
@@ -164,7 +164,7 @@ export class PowerSystem {
       const actual = want * sat;
       b.throughput = actual;
       b.loadKw = (def.idlePowerKw + (def.powerDrawKw - def.idlePowerKw) * want) * sat;
-      if (def.process) {
+      if (hasProcess(b.kind)) {
         if (actual > 1e-6) ctx.runProcess(b, actual, hours);
         else if (!b.idleReason) {
           b.idleReason = sat < 0.99 ? 'No power' : ctx.processBlockReason(b);

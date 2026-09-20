@@ -10,16 +10,21 @@ import {
   POI_MIN_DIST_FROM_SPAWN,
   POI_MIN_SEPARATION,
 } from './config';
-import type { ResourceId } from './defs';
-import { ALL_RESOURCES, RESOURCES, DEPOSIT_TABLE } from './defs';
+import type { MineableResourceId, ResourceId } from './defs';
+import { MINEABLE_RESOURCES, RESOURCES, DEPOSIT_TABLE } from './defs';
 import type { Poi, PoiKind } from './pois';
 import { makePoi, pickPoiKind } from './pois';
 
 export type { ScatterRock, SurfaceSample, LandingSite } from './terrain';
 
+/**
+ * A seam on the planet. `resource` is always a *mined* material — refined
+ * resources (steel) exist only as the output of a building process, so there is
+ * nothing of that kind to dig here (GDD §03).
+ */
 export interface Deposit {
   id: number;
-  resource: ResourceId;
+  resource: MineableResourceId;
   x: number;
   z: number;
   amount: number;
@@ -154,7 +159,9 @@ export class World {
     const total = Math.round(42 * areaScale);
     const richness = params.richness ?? 1;
     const nearCount = Math.max(5, Math.round(total * params.nearDeposits));
-    const weight: Record<ResourceId, number> = {
+    // Only mined materials have seams. Refined ones (steel) are made by a
+    // building process and must never be scattered onto the planet.
+    const weight: Record<MineableResourceId, number> = {
       regolith: 3,
       iron: 3,
       silicon: 2,
@@ -167,11 +174,11 @@ export class World {
      * regolith, iron, silica and — above all — ice, the life-support chain is
      * unopenable and the seed is simply unwinnable.
      */
-    const guaranteed: ResourceId[] = ['regolith', 'iron', 'ice', 'silicon'];
+    const guaranteed: MineableResourceId[] = ['regolith', 'iron', 'ice', 'silicon'];
 
     for (let i = 0; i < total; i++) {
       const isNear = i < nearCount;
-      let res: ResourceId;
+      let res: MineableResourceId;
       if (i < guaranteed.length) res = guaranteed[i];
       else res = this.pickWeighted(weight);
 
@@ -269,11 +276,11 @@ export class World {
     return this.nextPoiId;
   }
 
-  private pickWeighted(weight: Record<ResourceId, number>): ResourceId {
+  private pickWeighted(weight: Record<MineableResourceId, number>): MineableResourceId {
     let total = 0;
-    for (const r of ALL_RESOURCES) total += weight[r];
+    for (const r of MINEABLE_RESOURCES) total += weight[r];
     let roll = this.depositRng() * total;
-    for (const r of ALL_RESOURCES) {
+    for (const r of MINEABLE_RESOURCES) {
       roll -= weight[r];
       if (roll <= 0) return r;
     }
@@ -284,8 +291,11 @@ export class World {
    * Developer mode: drop a fresh resource deposit into the world at runtime.
    * An ordinary deposit afterwards — the renderer picks it up on the next
    * sync and rovers can mine it like any generated seam.
+   *
+   * Refined materials are typed out of this: there is no steel seam to survey
+   * in, only a refinery that makes steel out of ore.
    */
-  addDeposit(resource: ResourceId, x: number, z: number, amountKg: number, radius?: number): Deposit {
+  addDeposit(resource: MineableResourceId, x: number, z: number, amountKg: number, radius?: number): Deposit {
     const table = DEPOSIT_TABLE[resource];
     const d: Deposit = {
       id: this.nextId++,

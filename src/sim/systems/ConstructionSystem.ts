@@ -54,7 +54,8 @@ import { recomputeCapacitiesState } from '../state/ColonyState';
 import type { Building } from '../state/BuildingState';
 import { remainingCostTotal } from '../state/BuildingState';
 import type { Rover, RoverGoal, RoverTask } from '../state/RoverState';
-import { cargoMass, enterWork } from '../state/RoverState';
+import { cargoMass, enterWork, taskTargetsBuilding } from '../state/RoverState';
+import { emptyCraft } from '../state/BuildingState';
 import { LogisticsSystem } from './LogisticsSystem';
 import { evaluateSite } from '../rules';
 import type { BuildingKind, ResourceAmounts } from '../defs';
@@ -194,6 +195,8 @@ export class ConstructionSystem {
       damaged: false,
       assembly: null,
       level: 1,
+      recipe: 0,
+      craft: emptyCraft(),
     };
   }
 
@@ -472,8 +475,19 @@ export class ConstructionSystem {
     } else {
       ConstructionSystem.log(state, 'warn', `${BUILDINGS[b.kind].label} dismantled.`);
     }
+    /**
+     * Every rover task pointing at this building goes with it — queued ones
+     * first. `finishTask` promotes `pending[0]`, so pruning the queue *before*
+     * finishing the active task is what stops a dangling reference being
+     * promoted into the rover's hands (SimulationAssertions `task-building-ref`).
+     * Clean and repair are included alongside construct: all three name a
+     * building, and a rover walking to service a pile of rubble is the same bug.
+     */
     for (const r of state.rovers) {
-      if (r.command.type === 'construct' && r.command.buildingId === b.id) {
+      if (r.pending.some((t) => taskTargetsBuilding(t, b.id))) {
+        r.pending = r.pending.filter((t) => !taskTargetsBuilding(t, b.id));
+      }
+      if (taskTargetsBuilding(r.command, b.id)) {
         hooks.finishTask(r);
       }
     }

@@ -2,6 +2,178 @@
 
 Persistent notes for future coding sessions.
 
+## P5 slice 2 — manufacturing (components, recipes, save v10)
+
+- **Two ledgers, one shape.** `ComponentId` = `'motor' | 'circuitBoard'`;
+  `state.components: ComponentAmounts` is an **integer** ledger and
+  `state._componentCapacity` is *rack slots*, not kg. `ComponentSystem` mirrors
+  `LogisticsSystem`'s API on purpose (`capacity` / `room` / `total` /
+  `totalCapacity` / `store` / `take` / `has` / `consume` / `missingList`);
+  `store`/`take` **floor to whole units** and return what actually moved.
+  Components are deliberately *not* in `ALL_RESOURCES`, so nothing that iterates
+  the bulk ledger (haul, cargo, silos, reservations, HUD chips, assertions) picks
+  them up — a motor is not 40 kg of anything.
+- **The bench holds the fraction.** `Building.craft: ComponentAmounts` is keyed by
+  **component, not by recipe**, so switching lines keeps work in progress.
+  `ProductionSystem.runProcess` accumulates `craft[c]`, clamps it to ≤ 1 (a stalled
+  line can never bank invisible progress), floors it, hands the whole unit to
+  `ComponentSystem.store` and pushes `component/crafted`. `Building.recipe` is the
+  index of the line the building runs. Both are persisted, hashed and
+  invariant-checked (`building-recipe`, `building-craft`, `component-ledger`).
+- **B′ — a recipe list *replaces* the blueprint process.** `RECIPES:
+  Partial<Record<BuildingKind, RecipeDef[]>>`; workshop = `motors` (2.5 steel + 1
+  aluminum → 0.5 motor/hr) and `boards` (1.2 silicon + 0.4 aluminum + 0.2 steel →
+  0.35 board/hr). **`BUILDINGS.workshop.process` is `undefined`** and a
+  `sim/components` check pins that a kind with recipes has no fixed process — one
+  source of truth per blueprint. Everything reads `activeProcess(kind, recipe)`
+  (out-of-range index → 0, never throws); `recipesFor` / `hasRecipes` /
+  `hasProcess` / `activeSummary` are the rest of that surface. **Grep `def.process`
+  before adding a reader**: ProductionSystem, PowerSystem, Renderer (×3) and HUD
+  (×3) were all converted in this slice.
+- **Rack space is a building's.** `BuildingDef.componentSlots` (workshop 24),
+  `BASE_COMPONENT_SLOTS = 0` (the pod has none → nothing is craftable until a
+  workshop stands), summed over online undamaged buildings × `devLevelMul` and
+  floored in `recomputeCapacitiesState`, which also **clamps stored components to
+  the new capacity** — the same rule as the silo clamp right beside it. A full rack
+  makes `desiredThroughput` 0 and `processBlockReason` say `"Drive Motor rack
+  full"`; the HUD greys the line out before the click.
+- **Rovers are the end of the chain.** `RoverDef.componentCost`: utility 2 motors +
+  1 board, mining 4 + 1, cargo 6 + 2. `GarageSystem.assemble` asks
+  `ComponentSystem.has` after the bulk check and **before spending either ledger**,
+  refusing with `missingList` in the sentence ("Not enough components for a Cargo
+  Rover — needs 6 × Drive Motor, 2 × Circuit Board.").
+- **Command.** `building/recipe {buildingId, recipe}` with a new `'index'`
+  FieldKind (integer 0…255 — an entity id is not a list position). `applyCommand`
+  forwards the boolean like `building/assemble`; `AudioSystem.COMMAND_CUES` maps it
+  to `'toggle'`; `SelectionController` case `'recipe'` parses `data-arg`.
+  `ProductionSystem.setRecipe` owns the refusals (unknown building / fixed-line
+  kind / out-of-range index) and logs each one, but treats "already running that
+  line" as a **silent success** so a stale panel click cannot spam the log.
+- **Save v10.** `SAVE_VERSION = 10`, `migrations/v9.ts` (a version bump only —
+  additive), codec range 3…10, `SaveState.components` + `BuildingSave.recipe?` /
+  `craft?`. Restore **sanitises**: components floor to whole ≥ 0 (then the capacity
+  clamp), craft clamps to 0…1 with `NaN → 0`, a non-integer or negative recipe
+  resets to 0 — but an out-of-range *integer* recipe is kept as data, because
+  `activeProcess` resolves it. A v9 colony arrives with an empty rack, every
+  building on its first line and every bench empty.
+- **Read model.** `ResourceView.components` (field, like `storage`) plus
+  `SimQuery.componentCapacity()` — a **method**, like `storageCapacity()`, because
+  `Simulation` has to satisfy `SimView` structurally and the HUD tests pass a
+  `Simulation` straight in. Payload carries both; `BuildingView.recipe`/`craft`
+  flow through `projectBuilding`'s `...b` spread, with `craft` copied so the panel
+  owns it.
+- **HUD.** Topbar gains `#components` chips reading `4/24`, hidden while capacity
+  is 0; the inspector gains a `#b-recipe` selector built **into the skeleton** (so
+  its buttons get the one-time `data-act` wiring every other control has), lines
+  grey out through `.unaffordable` when inputs are short or the rack is full, the
+  note shows what is on the bench, and the garage's assembly buttons price
+  components too. Module-level helpers: `lineCount` / `linesText` / `recipeBlock`.
+  CSS: `.comp-rack`, `.res-chip.comp` (dashed border, smaller numerals).
+- **Hashes moved again** (rack + line + bench joined the hashed building state):
+  canonical `rf1-1d7ae6c1b30534-0db8f0413ab365` (foundation),
+  `rf1-04698eb32329c3-1bd5148e7c7808` (logistics),
+  `rf1-1e512ca8a160cd-07318129a675dd` (severe storm); 1-day stress
+  `rf1-1497ee5db284ac-1af522781eadd7`. Re-pinned in `src/sim/debug/Transcript.ts`
+  **and** `tests/sim/transcript.test.ts` (both!),
+  `tests/sim/large-colony-stress.test.ts`, and the Phase 26/29 notes below.
+  `npm run test:replay` prints actual-vs-expected for the canonical three;
+  `npm run test:stress` prints the 1-day final hash.
+- **Tests.** `tests/sim/components.test.ts` — **21 checks**, `@group integration`,
+  linked in `full.test.ts` right after `refining`; `tests/hud/workshop.test.ts` —
+  **5 checks** (rack chips, line selector + `action:recipe:1`, the bench note,
+  `.unaffordable` greying per line, component prices on the assembly buttons). Also
+  touched: `sim/garage` (stands a workshop and racks parts before assembling),
+  `sim/host` (a `building/recipe` sample + three gate rejections), `sim/refining`
+  (its `SAVE_VERSION` pin moved 9 → 10). Suite totals **79 suites / 913 checks**.
+- **Traps found.** (a) `assert.equal(x, null)` from `node:assert/strict` **narrows**
+  the local, so a later `x?.kind` typechecks as `never` — re-read through the sim
+  instead. (b) A fresh `Simulation` has component capacity 0, so a test that writes
+  `sim.components.motor = 12` without an online workshop trips `component-ledger`.
+  (c) `ComponentSystem.fullComponents()` was written and then **deleted as dead
+  code**: with zero capacity every rack reads "full", which is true for a line but
+  false for a colony — ProductionSystem names the blocking component itself.
+- **What P5 still owes.** Utility networks (no `sim/utilities/`), a wider parts
+  catalogue (pipes / valves — wants networks first), a second refined material
+  (glass; the recipe machinery can carry it as another line), and maintenance depth
+  (part-level wear — components now exist to wear out, and nothing consumes them
+  except the garage line).
+
+## P5 slice 1 — refining (steel, the Refinery, save v9)
+
+- **One ledger, two origins.** `ResourceId` = `MineableResourceId |
+  RefinedResourceId`; `steel` is the only refined one. `RESOURCES[*].origin`
+  (`'mined' | 'refined'`) is the discriminator and `isRefined(res)` is a *type
+  predicate* — that narrowing is what lets `World.addDeposit` take a
+  `MineableResourceId` after a refusal. Everything that iterates `ALL_RESOURCES`
+  (LogisticsSystem, ResourceState, HUD chips, cargo, assertions, StateHash) picked
+  steel up with **no** changes. Do not add a second inventory for refined goods
+  (roadmap §39/§40).
+- **Deposits are mined-only, by type.** `Deposit.resource`, `DepositDef.resource`,
+  `DEPOSIT_TABLE`, `DepositSave.resource` are `MineableResourceId`;
+  `World.generateDeposits` + `pickWeighted` iterate `MINEABLE_RESOURCES` (same
+  order, same weights as the old `ALL_RESOURCES` list → world gen is bit-identical,
+  only the hash of *storage* moved). `dev/spawn/deposit` decodes through a new
+  `mineableResourceId` field kind; `DevMode.spawnDeposit` refuses refined material
+  before sending (returns -1, logs a warn); DevPanel's dropdown lists mined only;
+  restore *drops* any deposit row naming a refined resource.
+- **`ProcessDef.solidOut`** is the new half of Phase 8's contract: `desiredThroughput`
+  gates on `LogisticsSystem.room`, `processBlockReason` says `"Steel silo full"`,
+  and `runProcess` stores through `LogisticsSystem.store` (clamped, like a
+  delivery) and pushes the ordinary `resource/produced` event. Refinery: 2.6 kg
+  iron ore → 1.6 kg steel per Mars hour, 35 kW draw / 4 kW idle, tier 2, +150 kg
+  per silo, 48 s build, radius 7.5, order 11 — cost 40 regolith / 50 iron / 18
+  silica / 16 aluminum and **no steel**, so the chain is openable from a cold start.
+- **`runProcess` conserves mass now.** Outputs are scaled by `earned`, the smallest
+  `obtained / wanted` over all inputs. Pre-existing bug: `desiredThroughput` is
+  answered per building *before* any of them draws, so two lines on one silo (two
+  extractors, two refineries) both got a full rate and the second produced output
+  for input it never received. Pinned by `sim/refining` ("two furnaces on one ore
+  pile…").
+- **`demolish` prunes queued tasks.** `ConstructionSystem.demolish` now removes
+  every pending task targeting the building *before* `hooks.finishTask(r)` —
+  `finishTask` promotes `pending[0]`, so the order is load-bearing — and it covers
+  `clean` / `repair`, not just `construct`. Helper: `RoverState.taskTargetsBuilding`.
+  Real pre-existing invariant break (`task-building-ref`): at the base commit the
+  `sim/property-testing` rapid-placement property fails on **31 of 39** seed pairs;
+  P5 only surfaced it because a 12th blueprint shifts that test's RNG sequence.
+  Now 0 of 39.
+- **Steel is a construction cost.** garage 30 kg, weatherStation 25 kg (their raw
+  iron dropped 30→12 and 36→18 to keep the totals sane). The survival chain —
+  habitat, solar, battery, extractor, oxygenator, greenhouse — costs **no** steel,
+  deliberately: P5 gates industry, never breathing. Costs are plain
+  `ResourceAmounts`, so sites, reservations, `missingList` and the palette needed
+  no changes.
+- **Save v9.** `SAVE_VERSION = 9`, `persistence/migrations/v8.ts` in the chain,
+  codec range 3…9. Additive: restore spreads `{ ...emptyAmounts(), ...saved }`, so
+  a v8 colony simply has `steel: 0`. `snapshotColony` now writes
+  `CURRENT_SAVE_VERSION` — the brittle `version: SAVE_VERSION as 8` literal cast is
+  gone, so a bump cannot stamp a stale header.
+- **Presentation.** `Renderer.makeBuildingBody` case `'refinery'` (shaft furnace +
+  conical bell, catwalk ring on legs, inclined ore skip hoist, two vent stacks,
+  emissive tap hole with a point light, ingot stack); `HUD.iconFor` → '🏭';
+  `assetCatalog` has `building/refinery` (no GLB ships). **No HUD logic changed** —
+  palette, stock chips, inspector process rows and the expedition dossier all
+  iterate the tables.
+- **Tests.** `tests/sim/refining.test.ts` — 19 checks, `@group integration`, linked
+  in `full.test.ts` — plus 2 new `hud/chrome` checks (palette pricing, steel chip).
+  Suite totals **77 suites / 887 checks**.
+- **Hashes moved** (ledger grew a key, then the mass fix moved the stress one
+  again): canonical `rf1-1fb397a83dab0f-03933d5673e3fc` (foundation),
+  `rf1-04ac719607e6ef-19c1b02d1efd57` (logistics), `rf1-024f47c6057572-040fc7d7a2fd6a`
+  (severe storm); 1-day stress `rf1-17fd8ba2b33ec1-055f4434298265`. **All four were
+  re-pinned again by slice 2 — the live values are in the section above.** Pins live in
+  `tests/sim/transcript.test.ts` **and** `src/sim/debug/Transcript.ts` (both!),
+  `tests/sim/large-colony-stress.test.ts`, and below. `npm run test:replay` prints
+  actual-vs-expected for the canonical three — use it instead of guessing.
+- **Next P5 slice — shipped, see above.** The plan recorded here (components as an
+  *integer* ledger beside `ResourceAmounts`, capacity from workshops, a Workshop
+  process with `componentOut`, a per-building whole-unit craft accumulator,
+  `ROVERS[kind].componentCost` spent in `GarageSystem.assemble`) is what slice 2
+  built, and the recipe decision it was blocked on was answered as **B′**: a
+  `RECIPES` list *replaces* `BUILDINGS[kind].process` rather than joining it, with
+  `Building.recipe` as the selected index. Debt entries are in the roadmap's
+  "Recorded (P5 slice 1 — refining)" section.
+
 ## GLB asset pipeline (rf-11)
 
 - **Pipeline only** — Leonardo da Vinci exports land under `public/models/`
@@ -115,10 +287,17 @@ Persistent notes for future coding sessions.
 
 ## Design docs (realigned)
 
-- `docs/design/GDD.md` and `docs/design/TDD.md` carry a living **§0 Implementation status** that maps every major system to **IN / PARTIAL / OUT** against the current tree (Prototype 4 + first P6 exploration slice). Prefer those tables over the original PDF wording when deciding what exists.
-- Package is `0.3.0`; README correctly says Prototype 4. `SAVE_VERSION = 7`. Worker is the default transport (`WORKER_DEFAULT = true`).
-- **Next-pillar fork is still open:** GDD wants P5 refining next; the project already shipped a P6 slice and TDD never gave refining its own tier. Pick Engineering (P5) vs finishing Exploration (T6) explicitly — the docs will not decide it for you.
-- Deliberate locks encoded in sim + docs: bulk solids on rovers, fluids never; per-resource storage; dev *modifiers* never save, *fabrications* do; no field-fluid recovery in supply drops.
+- `docs/design/GDD.md` and `docs/design/TDD.md` carry a living **§0 Implementation status** that maps every major system to **IN / PARTIAL / OUT** against the current tree (Prototype 4 + the first P6 exploration slice + both shipped P5 slices: refining and manufacturing). Prefer those tables over the original PDF wording when deciding what exists.
+- **Re-swept 2026-09-20** on `arena/01a0bc5e-red-frontier` (this branch): GDD §§0/02/04/05/06/07/11/12/13/14/15/16/17, TDD §§0–3/4/9/10/11/15/16/17/18/19/20/21/22/23/25/26/27 + both appendices, README (intro, garage kW, module tree, save chain, testing, milestones), `ROVER-STATE.md` §3, and `ISSUES.md` #18.
+- **Updated for P5 slice 1 (refining)** on this branch: GDD §§0/02/03/04/16, TDD header + §§0/6/7/15/21/25/26 + Appendices A/B, README (survival + growth chains, a new *Refining (P5)* section, module tree, save chain, testing counts, milestone 2, the ordering note), and a new "Recorded (P5 slice 1 — refining)" section in the roadmap.
+- **Updated again for P5 slice 2 (manufacturing)**: GDD §§0/02/03/04/05/16 (the industrial-components paragraph, the Workshop row, the rover assembly prices, the P5 slice row and a new "slice 2 shipped" bullet list), TDD header + §§3/6/15/16/25/26 + Appendix B (a `Manufacturing` network row, the v10 migration step, `building/recipe` in the command list, the acceptance table), README (a machine chain diagram, a new *Manufacturing (P5)* section, module tree, save chain, suite list and prose, milestone 2, the ordering note), and this file. `SaveCodec`'s header comment was also stale ("outside 3..8", "migrations v3..v7 → v8") and now describes the rule instead of a version.
+- Package is `0.3.0`; README correctly says Prototype 4. **`SAVE_VERSION = 10`** (v9 = refined material: `storage` gains `steel`; v10 = manufacturing: `components` plus per-building `recipe`/`craft`; the chain is v3→v10 and the codec refuses <3 and >10). Worker is the default transport (`WORKER_DEFAULT = true`).
+- **Numbers to quote:** `npm test` = **79 suites / 913 checks**, ~3½ min in parallel (39 unit, 23 integration, 15 hud, 1 determinism, 1 load, + `full.test.ts` as the linked serial entry). CI (`pages.yml`) runs `npm run build` (which runs `tsc`) + mobile smoke + worker smoke ×2 transports; **`npm test` is not in CI** — that is deliberate and now written down in TDD §23.
+- **Things the docs used to get wrong** (fixed, but check them again if you touch these areas): audio was listed OUT while `src/audio/AudioSystem.ts` shipped; lightning was absent from every doc while 21 source files carried it; the garage charge rate was quoted as 40 kW when `GARAGE_CHARGE_RATE_KW = 32` (2× the pod's 16); perf budgets were called "unenforced" while `sim/performance-regression` asserts them; the minimap/world map was open in `ISSUES.md` while `ui/WorldMap.ts` + `hud/worldmap` shipped it; world sizes were described as "~640 m default" without the four presets (420/640/960/1280 half-extent).
+- **Doc-drift trap:** suite/check counts, the save version and the module tree are quoted in *four* places (README, GDD §0, TDD §0/§3, this file). When you add a suite or bump `SAVE_VERSION`, grep for the old number rather than updating the file you happen to be in.
+- **Next-pillar fork was answered in the build:** Exploration (P6) went first, then Engineering twice — P5 slice 1 (refining) and slice 2 (manufacturing) are both IN, and GDD §03's replication chain is complete end to end. TDD §25 still has no tier for the industrial layer, so P5 progress is tracked in GDD §0/§16 and TDD Appendix B, not in a T-row. The one-process-per-building model that blocked slice 2 is **gone** (`RECIPES` + `Building.recipe` + `activeProcess`), so a second refined material or a wider parts catalogue is now content, not architecture. The open fork is the remaining P5 depth (utility networks, part-level wear) vs the T6 remainder. (The 30-phase *architectural* roadmap is complete, so this is a content/product decision, not a structural one.)
+- Deliberate locks encoded in sim + docs: bulk solids on rovers, fluids never; per-resource storage; **one bulk ledger** — refined material is a `ResourceId` with `origin: 'refined'`, never a parallel inventory; **a deposit is always mined material** (typed, not just conventional); **a process earns its output** — production is bounded by the input that actually arrived; dev *modifiers* never save, *fabrications* do; no field-fluid recovery in supply drops; **audio + particles are presentation** (read the sim, never write it, animate on sim time); **lightning has its own seeded RNG stream** so strikes never perturb weather rolls.
+- Unconfirmed, worth watching: one full `npm test` run in three showed a single transient suite failure that the two re-runs did not reproduce (the failing log line was lost to a `| tail`). Timing-threshold suites (`sim/performance-regression`, `sim/worker-performance`) are the obvious suspects under parallel load. If it recurs, capture the whole log before concluding anything.
 
 ## Weather FX (dust devils)
 
@@ -781,7 +960,7 @@ Persistent notes for future coding sessions.
 
 - **Stress scenario generator**: `src/sim/debug/LargeColonyScenario.ts` creates a deterministic high-load colony (100 rovers, 255 buildings, active severe storm, multi-site construction, mining/hauling repeat-routes, and exploration).
 - **Stress invariant assertions**: `assertStressInvariants(sim)` verifies deep invariants, pending queue boundedness (`<=10`), deposit reservation uniqueness, and non-deadlock progression.
-- **Runners & regression suite**: `scripts/large-colony-stress.mjs` (`npm run test:stress`), `tests/sim/large-colony-stress.test.ts` (+6 checks). Pinned 1-day (4,800 ticks) state hash: `rf1-094755f9902a5f-0e05c6b7fcbab0`.
+- **Runners & regression suite**: `scripts/large-colony-stress.mjs` (`npm run test:stress`), `tests/sim/large-colony-stress.test.ts` (+6 checks). Pinned 1-day (4,800 ticks) state hash: `rf1-1497ee5db284ac-1af522781eadd7`.
 - Gate on completion (2026-09-20): 75 suites / 860 checks green, typecheck green, baseline byte-identical.
 
 ## Refactor Phase 28 (Performance Regression Tests) — fleet scaling & benchmark thresholds
@@ -803,9 +982,9 @@ Persistent notes for future coding sessions.
 - **Unified command application**: `Transcript.ts` now delegates `applyCommandForTranscript` directly to `applyCommand(sim, cmd)`, dropping 150 lines of duplicate command dispatching.
 - **Transcript serialization & replay runner**: `encodeTranscript` / `decodeTranscript` with shape validation; `replayAndHash` returns both simulation state and final `StateHash`.
 - **Pinned canonical scenarios**:
-  - Scenario 1 (Foundation): `rf1-00d64469b1f8ed-045301f4e9a064`
-  - Scenario 2 (Logistics Haul): `rf1-1b403011c4e077-15884ea6a10eb6`
-  - Scenario 3 (Severe Storm Protocol): `rf1-050d43576ad423-12a3abe54893ea`
+  - Scenario 1 (Foundation): `rf1-1d7ae6c1b30534-0db8f0413ab365`
+  - Scenario 2 (Logistics Haul): `rf1-04698eb32329c3-1bd5148e7c7808`
+  - Scenario 3 (Severe Storm Protocol): `rf1-1e512ca8a160cd-07318129a675dd`
 - Gate on completion (2026-09-19): 73 suites / 842 checks green (`tests/sim/transcript.test.ts` +4), baseline byte-identical.
 
 ## Refactor Phase 25 (Property-Based Simulation Testing) — invariant fuzzing

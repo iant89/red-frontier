@@ -24,6 +24,7 @@
  */
 
 import type { Simulation, HistorySample, FluidFlow, Rover, Building } from '../Simulation';
+import type { ComponentAmounts } from '../defs';
 import type { Deposit } from '../World';
 import type { Poi } from '../pois';
 import type { LogEvent } from '../alerts';
@@ -109,6 +110,10 @@ export interface ViewPayload {
   weather: WeatherPayload;
   power: PowerPayload;
   storage: ResourceAmounts;
+  /** Manufactured components on the rack (P5) — whole units. */
+  components: ComponentAmounts;
+  /** Rack capacity per component (P5). */
+  componentCapacity: number;
   pools: { amounts: Record<FluidId, number>; capacity: Record<FluidId, number> };
   flows: Record<FluidId, FluidFlow>;
   lastFlows: Record<FluidId, FluidFlow>;
@@ -164,6 +169,7 @@ function projectBuilding(b: Building): BuildingView {
     ...b,
     remainingCost: { ...b.remainingCost },
     assembly: b.assembly ? { ...b.assembly } : null,
+    craft: { ...b.craft },
   };
 }
 
@@ -242,6 +248,8 @@ export function projectView(
       satisfaction: [...sim.power.satisfaction.entries()],
     },
     storage: { ...sim.storage },
+    components: { ...sim.components },
+    componentCapacity: sim.componentCapacity(),
     pools: { amounts: { ...sim.pools.amounts }, capacity: { ...sim.pools.capacity } },
     flows: copyFlows(sim.flows),
     lastFlows: copyFlows(sim.lastFlows),

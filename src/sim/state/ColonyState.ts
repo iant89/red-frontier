@@ -27,6 +27,7 @@ import { DomainEventLog } from '../domainEvents';
 import { mulberry32 } from '../../lib/rng';
 import {
   BASE_STORAGE_PER_RESOURCE,
+  BASE_COMPONENT_SLOTS,
   BASE_DUST_TRANSMISSION,
   POD_BATTERY_KWH,
   POD_POWER_KW,
@@ -38,14 +39,21 @@ import {
 } from '../config';
 import {
   emptyAmounts,
+  emptyComponents,
   POD_STARTING_FLUIDS,
   POD_FLUID_CAPACITY,
   emptyFluids,
   ROVERS,
   BUILDINGS,
 } from '../defs';
-import type { ResourceAmounts, FluidId, RoverKind, BuildingKind } from '../defs';
-import { ALL_RESOURCES, ALL_FLUIDS } from '../defs';
+import type {
+  ComponentAmounts,
+  ResourceAmounts,
+  FluidId,
+  RoverKind,
+  BuildingKind,
+} from '../defs';
+import { ALL_RESOURCES, ALL_FLUIDS, ALL_COMPONENTS } from '../defs';
 import { DIFFICULTIES, DEFAULT_WORLD_OPTIONS, richnessMulFor, suppliesMulFor } from '../difficulty';
 import type { DifficultyId, WorldOptions } from '../difficulty';
 import { initialPowerState } from './PowerState';
@@ -78,6 +86,12 @@ export interface ColonyState {
   colonist: Colonist;
 
   storage: ResourceAmounts;
+  /**
+   * Manufactured components on the racks, in whole units (P5). A second ledger
+   * beside `storage` on purpose: components are counted, bulk solids are weighed,
+   * and `ComponentSystem` owns this one the way `LogisticsSystem` owns that one.
+   */
+  components: ComponentAmounts;
   pools: FluidPools;
   power: PowerResult;
   storedKWh: number;
@@ -99,6 +113,8 @@ export interface ColonyState {
   remainder: number;
   nextId: number;
   _storageCapacity: number;
+  /** Derived: component rack space, from online undamaged workshops. */
+  _componentCapacity: number;
   stormAnnounced: boolean;
 }
 
@@ -137,6 +153,7 @@ export function createColonyState(params: ColonyStateParams): ColonyState {
   const domainEvents = new DomainEventLog();
   const colonist = makeColonist(1, 'Cmdr. Vega', SPAWN_X, world.heightAt(SPAWN_X, SPAWN_Z), SPAWN_Z + 3);
   const storage = emptyAmounts();
+  const components = emptyComponents();
   const pools = makePools();
   const power = initialPowerState();
   const storedKWh = POD_BATTERY_KWH * 0.6;
@@ -199,6 +216,8 @@ export function createColonyState(params: ColonyStateParams): ColonyState {
   const fluid = { ...POD_FLUID_CAPACITY };
   // No buildings online yet, so cap is base only
   const _storageCapacity = cap;
+  // ...and the pod has no machine shop, so there is nowhere to rack a component.
+  const _componentCapacity = BASE_COMPONENT_SLOTS;
   pools.capacity = fluid;
 
   // exploration
@@ -227,6 +246,7 @@ export function createColonyState(params: ColonyStateParams): ColonyState {
     buildings: [],
     colonist,
     storage,
+    components,
     pools,
     power,
     storedKWh,
@@ -244,6 +264,7 @@ export function createColonyState(params: ColonyStateParams): ColonyState {
     remainder: 0,
     nextId,
     _storageCapacity,
+    _componentCapacity,
     stormAnnounced: false,
   };
 }
@@ -264,12 +285,14 @@ export function resetExplorationState(state: ColonyState, nextDropSol?: number):
  */
 export function recomputeCapacitiesState(state: ColonyState): void {
   let cap = BASE_STORAGE_PER_RESOURCE;
+  let slots = BASE_COMPONENT_SLOTS;
   const fluid = { ...POD_FLUID_CAPACITY };
   for (const b of state.buildings) {
     if (b.state !== 'online' || b.damaged) continue;
     const def = BUILDINGS[b.kind];
     const mul = devLevelMul(b.level);
     cap += def.storagePerResourceKg * mul;
+    slots += (def.componentSlots ?? 0) * mul;
     if (def.fluidCapacity) {
       for (const f of ALL_FLUIDS) {
         fluid[f] += (def.fluidCapacity[f] ?? 0) * mul;
@@ -277,6 +300,15 @@ export function recomputeCapacitiesState(state: ColonyState): void {
     }
   }
   state._storageCapacity = cap;
+  // Rack space is an integer count of places to put a finished unit; a workshop
+  // going offline or damaged takes its rack with it, and whatever was on it is
+  // clamped away exactly the way an over-full silo is.
+  state._componentCapacity = Math.floor(slots);
+  for (const c of ALL_COMPONENTS) {
+    if (state.components[c] > state._componentCapacity) {
+      state.components[c] = state._componentCapacity;
+    }
+  }
   for (const r of ALL_RESOURCES) {
     if (state.storage[r] > cap) state.storage[r] = cap;
   }

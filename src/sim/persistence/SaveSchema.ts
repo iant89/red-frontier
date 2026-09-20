@@ -1,11 +1,19 @@
 /**
- * Current save schema — version 8.
+ * Current save schema — version 10.
  *
  * Phase 3: persistence extraction. This file owns the *shape* of a saved
  * colony. Simulation.ts no longer defines it inline in snapshot().
  */
 
-import type { ResourceAmounts, FluidAmounts, ResourceId, RoverKind, BuildingKind } from '../defs';
+import type {
+  ComponentAmounts,
+  ResourceAmounts,
+  FluidAmounts,
+  MineableResourceId,
+  ResourceId,
+  RoverKind,
+  BuildingKind,
+} from '../defs';
 import type { DifficultyId, WorldOptions } from '../difficulty';
 import type { PoiKind } from '../pois';
 import type { RoverTask, RoverRules } from '../state/RoverState';
@@ -20,7 +28,8 @@ export interface ClockSave {
 
 export interface DepositSave {
   id: number;
-  resource: ResourceId;
+  /** Always a *mined* material — refined resources have no seams (P5). */
+  resource: MineableResourceId;
   x: number;
   z: number;
   amount: number;
@@ -85,6 +94,13 @@ export interface BuildingSave {
   cleanliness: number;
   damaged: boolean;
   assembly: BuildingAssemblySave | null;
+  /**
+   * Which recipe the building is running (P5) — an index into `RECIPES[kind]`,
+   * absent on a v9 save, where it means 0. Ignored by a kind with no recipes.
+   */
+  recipe?: number;
+  /** Fraction of each next component, kept on the bench. Absent means zeros. */
+  craft?: Partial<ComponentAmounts>;
 }
 
 export interface ColonistSave {
@@ -155,6 +171,8 @@ export interface SaveState {
   ticksRun: number;
   clock: ClockSave;
   storage: ResourceAmounts;
+  /** Manufactured components on the racks, in whole units (P5). */
+  components: ComponentAmounts;
   fluids: FluidAmounts;
   storedKWh: number;
   gameOver: { reason: string; sol: number } | null;
@@ -169,7 +187,7 @@ export interface SaveState {
 }
 
 /**
- * Loose historical save — used as input to migrations. Version may be <8,
+ * Loose historical save — used as input to migrations. Version may be <10,
  * fields may be missing. This is intentionally `any`-like but typed as unknown
  * record for migration functions to narrow.
  */

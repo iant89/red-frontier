@@ -795,9 +795,11 @@ export class Game {
         this.devPanel.setStatus('Cannot fabricate there — see the colony log for why');
       }
     } else {
-      this.dev.spawnDeposit(spec.kind as ResourceId, x, z, spec.amountKg ?? 2500);
+      const depId = this.dev.spawnDeposit(spec.kind as ResourceId, x, z, spec.amountKg ?? 2500);
       this.devPanel.setStatus(
-        `${spec.kind} deposit surveyed in — ${Math.round(spec.amountKg ?? 2500)} kg`,
+        depId >= 0
+          ? `${spec.kind} deposit surveyed in — ${Math.round(spec.amountKg ?? 2500)} kg`
+          : `${spec.kind} is refined, not mined — spawn an ore seam instead`,
       );
     }
     // Shift-place keeps the spawn armed, exactly like the build palette.
