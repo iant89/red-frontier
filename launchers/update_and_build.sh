@@ -326,6 +326,6 @@ fi
 
 echo ""
 echo -e "  ${BOLD}Launch Game Server:${RESET}"
-echo -e "    ${MARS}${BOLD}Run:${RESET} ${WHITE}./launch_preview.sh${RESET}"
+echo -e "    ${MARS}${BOLD}Run:${RESET} ${WHITE}./launchers/launch_preview.sh${RESET}"
 echo -e "    ${DIM}Serves the compiled distribution locally on http://localhost:4173${RESET}"
 echo ""

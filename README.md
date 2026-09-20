@@ -34,49 +34,51 @@ and [`docs/design/TDD.md`](docs/design/TDD.md).
 
 ## Running it
 
-### Automated Scripts (Ubuntu & Windows 11)
+### Game Launchers & Setup Scripts (Ubuntu & Windows 11)
 
-Ready-to-use scripts are provided to set up dependencies, pull and build, and launch a local preview server:
+Ready-to-use, standalone game launcher and setup scripts are located in the [`launchers/`](launchers/) directory (kept separate from internal build & test utilities in `scripts/`):
 
 #### Ubuntu / Debian Linux
 1. **Download & Setup Dependencies:**
    ```bash
-   ./setup_ubuntu.sh
-   # (or ./setup.sh)
+   ./launchers/setup_ubuntu.sh
+   # (or ./launchers/setup.sh)
    # Verifies & installs Git, Node.js LTS (>= 18), curl, and npm dependencies
    ```
 2. **Pull Latest Source & Build Game:**
    ```bash
-   ./update_and_build.sh
-   # (or ./build.sh)
+   ./launchers/update_and_build.sh
+   # (or ./launchers/build.sh)
    # Pulls latest commits from GitHub, updates dependencies, and runs production build
    ```
 3. **Launch Local Preview Server:**
    ```bash
-   ./launch_preview.sh
-   # (or ./preview.sh)
+   ./launchers/launch_preview.sh
+   # (or ./launchers/preview.sh)
    # Starts Vite preview server at http://localhost:4173 (playable locally)
    ```
 
 #### Windows 11
 1. **Download & Setup Dependencies:**
    ```cmd
-   setup_windows.bat
-   # (or setup.bat)
+   launchers\setup_windows.bat
+   # (or launchers\setup.bat)
    # Verifies & installs Git and Node.js LTS via winget/PowerShell and installs npm packages
    ```
 2. **Pull Latest Source & Build Game:**
    ```cmd
-   update_and_build.bat
-   # (or build.bat)
+   launchers\update_and_build.bat
+   # (or launchers\build.bat)
    # Pulls latest commits from GitHub, updates dependencies, and builds the game
    ```
 3. **Launch Local Preview Server:**
    ```cmd
-   launch_preview.bat
-   # (or preview.bat)
+   launchers\launch_preview.bat
+   # (or launchers\preview.bat)
    # Opens default browser and starts preview server on port 4173
    ```
+
+*(See [`launchers/README.md`](launchers/README.md) for full CLI flags, unattended options, and documentation).*
 
 ### Manual Commands
 

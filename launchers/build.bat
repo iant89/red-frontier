@@ -237,7 +237,7 @@ if exist "dist\version.json" (
 )
 echo.
 echo   Launch Game Server:
-echo     Run: launch_preview.bat
+echo     Run: launchers\launch_preview.bat
 echo     Serves the compiled distribution locally on http://localhost:4173
 echo.
 

@@ -260,10 +260,10 @@ for /f "tokens=*" %%v in ('npm -v 2^>nul') do echo     • npm:         v%%v
 echo.
 echo   Next Available Commands:
 echo     1. Build the game:
-echo        update_and_build.bat   (pulls newest changes and builds to dist\)
+echo        launchers\update_and_build.bat   (pulls newest changes and builds to dist\)
 echo.
 echo     2. Launch local preview server:
-echo        launch_preview.bat     (serves production build at http://localhost:4173)
+echo        launchers\launch_preview.bat     (serves production build at http://localhost:4173)
 echo.
 
 if "%NON_INTERACTIVE%"=="0" pause
