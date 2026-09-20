@@ -1547,3 +1547,97 @@ Persistent notes for future coding sessions.
   jsdom test, so *what the map looks like* is only checkable in the browser smokes.
 - Cosmetic, not a bug: `HUD.ts`'s `#map-btn` markup carries `class="btn"` twice; the parser
   keeps the first, so the button renders correctly. Left alone — unrelated to this fix.
+
+## Commercial roadmap — Phase 0 (2026-09-20)
+
+**Goal:** Freeze foundation, establish stable baseline per COMMERCIAL-ROADMAP.md Phase 0
+and COMMERCIAL-ROADMAP-REVIEW.md §4.7. This was the 30-phase architectural roadmap's
+aftermath — the sim was already deep, the game around it shallow.
+
+**What Phase 0 codifies (review §4.7):**
+
+1. **CI runs full suite on PRs** — `.github/workflows/pages.yml` now runs:
+   - `npm test` (91 suites / 1040 checks, ~4.5 min, parallel workers)
+   - `npm run test:replay` (canonical 3 hashes)
+   - `node scripts/generate-golden-colony.mjs --check` (golden colony hash)
+   - then build + mobile-smoke + worker-smoke ×2 transports
+   - Uploads test-output.txt, replay-output.txt, golden-output.txt on failure
+   - Highest-leverage item in review §4.4 — suite was local-only before, so main carried red suites
+
+2. **Golden colony = canonical transcript + pinned hash + save** — `tests/golden-colony/`:
+   - Seed 9001, pioneer, nearDeposits 0.2, 11 buildings (warehouse, solar, battery,
+     extractor, oxygenator, greenhouse, refinery, workshop, garage, waterTank,
+     pumpStation) placed via deterministic findSpot ring scan (same as fixtures/sim.ts),
+     then dev-completed (dev/building/complete) to ensure viability regardless of rover logistics
+   - Plus ice/iron/silicon hauling with repeatRoute, spawned cargo rover for silicon
+   - Duration 5 sols = 24000 ticks (SOL_SECONDS=240, 20Hz)
+   - Artifacts: transcript JSON (diffable), hash txt (`rf1-08708ac02b9217-143e488a41e1c5`),
+     save JSON (48KB, manual inspection), meta JSON, README.md
+   - Generator: `scripts/generate-golden-colony.mjs --write|--check` (bundles via esbuild,
+     replays, hashes, snapshots)
+   - Suite: `tests/sim/golden-colony.test.ts` (7 checks): transcript valid, hash format,
+     save decodes, replay to pinned hash, save restore invariants, restored-vs-restored
+     determinism, viable shape (warehouse/solar/battery online, colonist alive)
+   - Linked in `full.test.ts`, report 91
+   - Package scripts: `test:golden` (check), `test:golden:write` (write)
+
+3. **Simulation invariants doc** — `docs/SIMULATION-INVARIANTS.md`:
+   - Maps each invariant code (28 codes from SimulationAssertions.ts) to suite that pins it
+   - Plus determinism/replay/worker/perf/stress invariants
+   - How to add new invariant, change-control meaning of "freeze"
+
+4. **Save compatibility policy** — `docs/SAVE-COMPATIBILITY.md`:
+   - Current SAVE_VERSION=13, supported v3..13, localStorage now, file+Steam Cloud future
+   - Every bump ships migration + hostile test + hash re-pin checklist (v3→v13 table)
+   - What is/isn't saved, header rule, desktop future (§4.2 review)
+   - Checklist for bumping version (migration file, wiring, SAVE_VERSION, SaveState,
+     hostile test, replay/stress/golden re-pin, baseline.md, invariants.md, grep docs)
+
+5. **Baseline perf** — `benchmarks/baseline.md`:
+   - Fleet scaling from `test:bench` (10/25/50/100/250 rovers, avg/peak tick, pathfind,
+     view gen, clone+apply, payload) — measured 2026-09-20: 10=0.63ms avg, 250=5.13ms avg
+   - Stress from `test:stress --day` (4800 ticks, 100 rovers/255 buildings, severe storm,
+     418 ticks/s, 108MB heap, max queue 0, hash `rf1-17f926380467a3-0b6ffd671d40ac`)
+   - Canonical replay hashes (foundation/logistics/severeStorm)
+   - Golden colony hash, build sizes, update procedure
+
+**Phase 0 exit criteria (review §7 M0):** suite green on every PR; golden transcript pinned in CI — DONE
+
+**Why dev-completed golden colony:** Using normal construction would require rover
+logistics and material delivery, making the transcript fragile to balance changes.
+The golden colony is a regression gate, not gameplay — dev commands are deterministic
+and part of transcript format. The hash still moves when tick behavior changes.
+
+**Next:** Phase 1 — First 30 Minutes Excellent. Infrastructure for it already shipped
+this session:
+
+- `src/sim/forecast.ts` — pure forecast math: sols-to-empty, runway breach (<1.0 sol),
+  warning tiers, formatSolsToEmpty, warningForFluid ("Your water reserve will run dry
+  in 1.8 sols." exemplar). Needed by P1 warnings, P4 dashboard, P5 bottleneck — built
+  once, three phases early per review §3.1. Suite `sim/forecast` 8 checks.
+- `src/ui/strings.ts` — externalized player-facing copy: tutorial.*, warning.*,
+  project.*, bottleneck.*, dashboard.*, autonomy.*, poi.*, report.*, alert.*,
+  plus formatKg/Km/Pct/Sols helpers. English-only at launch fine, unlocalizable not
+  per review §4.6. Suite `ui/strings` 5 checks.
+- `docs/COMMERCIAL-PHASE-1.md` — full Phase 1 spec and remaining TODO (TutorialSystem,
+  TutorialPanel, funnel instrumentation, playtest plan)
+- `docs/COMMERCIAL-IMPLEMENTATION.md` — living tracker against verbatim roadmap + review,
+  Phase 0 DONE, Phase 1 IN PROGRESS infra DONE
+
+**How to run Phase 0 gates locally:**
+
+```
+npm run typecheck
+npm test                    # 91 suites / 1040 checks
+npm run test:replay
+npm run test:golden         # or --check via generate-golden-colony.mjs
+npm run test:bench
+npm run test:stress -- --day
+npm run build
+```
+
+**CI runs same (except bench/stress) on every PR and main.**
+
+**Full suite now 91 suites / 1040 checks** (was 88/1020): added golden-colony (7),
+forecast (8), strings (5). Report number in full.test.ts is 91.
+

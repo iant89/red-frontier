@@ -24,6 +24,8 @@
     "test:list": "node scripts/run-tests.mjs --list",
     "test:check": "node scripts/run-tests.mjs --check",
     "test:replay": "node scripts/replay-transcript.mjs --canonical",
+    "test:golden": "node scripts/generate-golden-colony.mjs --check",
+    "test:golden:write": "node scripts/generate-golden-colony.mjs --write",
     "test:bench": "node scripts/benchmark.mjs",
     "test:stress": "node scripts/large-colony-stress.mjs",
     "test:smoke": "node scripts/mobile-smoke.mjs",

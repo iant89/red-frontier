@@ -1,0 +1,2560 @@
+{
+  "version": 13,
+  "seed": 9001,
+  "difficulty": "pioneer",
+  "worldHalf": 640,
+  "region": null,
+  "worldOptions": {
+    "nearDeposits": 0.2,
+    "stormLevel": "normal",
+    "supplies": "standard",
+    "richness": "standard"
+  },
+  "simTime": 1199.9999999994563,
+  "ticksRun": 24000,
+  "clock": {
+    "sol": 5,
+    "frac": 0.34000000000027303
+  },
+  "storage": {
+    "regolith": 0,
+    "iron": 80.45219540000319,
+    "silicon": 0,
+    "aluminum": 0,
+    "ice": 219.7973191933822,
+    "steel": 0
+  },
+  "components": {
+    "motor": 0,
+    "circuitBoard": 0,
+    "pipe": 0,
+    "batteryPack": 0,
+    "cargoFrame": 0,
+    "drillTeeth": 0
+  },
+  "fluids": {
+    "water": 86.15593747354991,
+    "oxygen": 16.40352268137878,
+    "food": 95.1635943417466
+  },
+  "water": {
+    "active": false,
+    "links": [],
+    "tanks": {}
+  },
+  "storedKWh": 0,
+  "gameOver": null,
+  "colonist": {
+    "id": 1,
+    "name": "Cmdr. Vega",
+    "x": 0,
+    "z": 1.3500000000000005,
+    "heading": 2.3180429890071506,
+    "health": 100,
+    "suitO2": 0.42,
+    "inside": true,
+    "shelterId": 0,
+    "order": {
+      "type": "shelter"
+    },
+    "dead": false
+  },
+  "deposits": [
+    {
+      "id": 1,
+      "resource": "regolith",
+      "x": 48.57777824342104,
+      "z": -37.76229154760852,
+      "amount": 3662.764049658175,
+      "maxAmount": 3706.8640496581793,
+      "radius": 5.341733946092427,
+      "reservedBy": null
+    },
+    {
+      "id": 2,
+      "resource": "iron",
+      "x": 53.96452634730058,
+      "z": -16.144049886518587,
+      "amount": 3643.4113326578595,
+      "maxAmount": 3765.0613326579332,
+      "radius": 4.503859183751047,
+      "reservedBy": null
+    },
+    {
+      "id": 3,
+      "resource": "ice",
+      "x": -24.91525319836338,
+      "z": 73.01277281542694,
+      "amount": 1354.4075003592297,
+      "maxAmount": 1354.4075003592297,
+      "radius": 5.721602473966778,
+      "reservedBy": null
+    },
+    {
+      "id": 4,
+      "resource": "silicon",
+      "x": 82.71388837200783,
+      "z": -17.00198429894662,
+      "amount": 2562.160185771063,
+      "maxAmount": 2562.160185771063,
+      "radius": 4.758305526338518,
+      "reservedBy": null
+    },
+    {
+      "id": 5,
+      "resource": "ice",
+      "x": -8.42033473678923,
+      "z": -49.64724565791874,
+      "amount": 4969.42304379977,
+      "maxAmount": 5201.398043800145,
+      "radius": 5.490373540855945,
+      "reservedBy": null
+    },
+    {
+      "id": 6,
+      "resource": "ice",
+      "x": 52.65593078363616,
+      "z": -38.36243320317774,
+      "amount": 4010.4231509005567,
+      "maxAmount": 4083.773150900379,
+      "radius": 6.737721139378847,
+      "reservedBy": null
+    },
+    {
+      "id": 7,
+      "resource": "regolith",
+      "x": 25.287096929662752,
+      "z": -67.08898232909058,
+      "amount": 3643.8628770411015,
+      "maxAmount": 3643.8628770411015,
+      "radius": 6.304523007385433,
+      "reservedBy": null
+    },
+    {
+      "id": 8,
+      "resource": "iron",
+      "x": -67.6542201161832,
+      "z": -49.586045713760896,
+      "amount": 2744.0212160348897,
+      "maxAmount": 2744.0212160348897,
+      "radius": 4.115167791955173,
+      "reservedBy": null
+    },
+    {
+      "id": 9,
+      "resource": "ice",
+      "x": 180.0263744336894,
+      "z": 236.56490719290392,
+      "amount": 5911.115687456913,
+      "maxAmount": 5911.115687456913,
+      "radius": 6.869967444241047,
+      "reservedBy": null
+    },
+    {
+      "id": 10,
+      "resource": "silicon",
+      "x": -135.85453550050133,
+      "z": -280.59522430760427,
+      "amount": 3455.0006999168545,
+      "maxAmount": 3455.0006999168545,
+      "radius": 5.366532582323998,
+      "reservedBy": null
+    },
+    {
+      "id": 11,
+      "resource": "silicon",
+      "x": 186.8977388809117,
+      "z": -544.5128112722841,
+      "amount": 5556.433173874393,
+      "maxAmount": 5556.433173874393,
+      "radius": 5.3385191983543345,
+      "reservedBy": null
+    },
+    {
+      "id": 12,
+      "resource": "regolith",
+      "x": -469.9093196521552,
+      "z": -1.6170667025473326,
+      "amount": 4146.813517436385,
+      "maxAmount": 4146.813517436385,
+      "radius": 5.905666974931956,
+      "reservedBy": null
+    },
+    {
+      "id": 13,
+      "resource": "regolith",
+      "x": 224.89034267144763,
+      "z": -401.43587954202155,
+      "amount": 3595.935353077948,
+      "maxAmount": 3595.935353077948,
+      "radius": 6.018313153646886,
+      "reservedBy": null
+    },
+    {
+      "id": 14,
+      "resource": "iron",
+      "x": 223.06319097664633,
+      "z": 336.05567946014685,
+      "amount": 6319.7675589472055,
+      "maxAmount": 6319.7675589472055,
+      "radius": 5.6693760054185995,
+      "reservedBy": null
+    },
+    {
+      "id": 15,
+      "resource": "ice",
+      "x": -53.99903550321958,
+      "z": 280.6191501014318,
+      "amount": 5650.847870972939,
+      "maxAmount": 5650.847870972939,
+      "radius": 5.3820801274850965,
+      "reservedBy": null
+    },
+    {
+      "id": 16,
+      "resource": "ice",
+      "x": 612.891098266058,
+      "z": -40.66397339619146,
+      "amount": 5862.903085188009,
+      "maxAmount": 5862.903085188009,
+      "radius": 6.488674497418106,
+      "reservedBy": null
+    },
+    {
+      "id": 17,
+      "resource": "ice",
+      "x": 135.7550922658514,
+      "z": -70.98981798228391,
+      "amount": 3791.972051211633,
+      "maxAmount": 3791.972051211633,
+      "radius": 5.670411582291127,
+      "reservedBy": null
+    },
+    {
+      "id": 18,
+      "resource": "regolith",
+      "x": 50.18913615655851,
+      "z": -104.25104061563442,
+      "amount": 6260.148952715099,
+      "maxAmount": 6260.148952715099,
+      "radius": 7.046275734342635,
+      "reservedBy": null
+    },
+    {
+      "id": 19,
+      "resource": "silicon",
+      "x": 312.50697508629463,
+      "z": 463.41438362444916,
+      "amount": 3072.1086538862437,
+      "maxAmount": 3072.1086538862437,
+      "radius": 4.063492805231363,
+      "reservedBy": null
+    },
+    {
+      "id": 20,
+      "resource": "regolith",
+      "x": 235.22758479692533,
+      "z": 69.2362394426045,
+      "amount": 4783.090341836214,
+      "maxAmount": 4783.090341836214,
+      "radius": 4.892929947562516,
+      "reservedBy": null
+    },
+    {
+      "id": 21,
+      "resource": "ice",
+      "x": 531.3906641040684,
+      "z": -86.76976967141181,
+      "amount": 1396.1430357769136,
+      "maxAmount": 1396.1430357769136,
+      "radius": 6.243661653064192,
+      "reservedBy": null
+    },
+    {
+      "id": 22,
+      "resource": "iron",
+      "x": -29.014743404859797,
+      "z": 300.35734355892066,
+      "amount": 4386.793726682663,
+      "maxAmount": 4386.793726682663,
+      "radius": 4.691886852495372,
+      "reservedBy": null
+    },
+    {
+      "id": 23,
+      "resource": "regolith",
+      "x": 53.29014842842299,
+      "z": 115.63128810461615,
+      "amount": 4304.566001985222,
+      "maxAmount": 4304.566001985222,
+      "radius": 6.447733037173748,
+      "reservedBy": null
+    },
+    {
+      "id": 24,
+      "resource": "ice",
+      "x": 416.4983383299912,
+      "z": 339.2098327950285,
+      "amount": 7424.552245019004,
+      "maxAmount": 7424.552245019004,
+      "radius": 5.7524702360853555,
+      "reservedBy": null
+    },
+    {
+      "id": 25,
+      "resource": "iron",
+      "x": -421.9323602397658,
+      "z": 127.56294147485676,
+      "amount": 4719.67482753098,
+      "maxAmount": 4719.67482753098,
+      "radius": 5.774834149051458,
+      "reservedBy": null
+    },
+    {
+      "id": 26,
+      "resource": "ice",
+      "x": 355.3749809956704,
+      "z": 52.590156651496756,
+      "amount": 7625.733055709861,
+      "maxAmount": 7625.733055709861,
+      "radius": 6.526639240980149,
+      "reservedBy": null
+    },
+    {
+      "id": 27,
+      "resource": "iron",
+      "x": 303.5336768893345,
+      "z": -519.7488774422759,
+      "amount": 4694.016422703862,
+      "maxAmount": 4694.016422703862,
+      "radius": 5.967638893984258,
+      "reservedBy": null
+    },
+    {
+      "id": 28,
+      "resource": "regolith",
+      "x": -441.7852244394001,
+      "z": -34.19436067534607,
+      "amount": 8802.034893538803,
+      "maxAmount": 8802.034893538803,
+      "radius": 6.149671935662628,
+      "reservedBy": null
+    },
+    {
+      "id": 29,
+      "resource": "iron",
+      "x": -300.1445919338199,
+      "z": -286.1656210214529,
+      "amount": 3229.3491899967194,
+      "maxAmount": 3229.3491899967194,
+      "radius": 4.918239533435553,
+      "reservedBy": null
+    },
+    {
+      "id": 30,
+      "resource": "regolith",
+      "x": 8.580047818647593,
+      "z": -240.38640502559485,
+      "amount": 6421.660954132676,
+      "maxAmount": 6421.660954132676,
+      "radius": 7.1223196109756834,
+      "reservedBy": null
+    },
+    {
+      "id": 31,
+      "resource": "silicon",
+      "x": 394.5019103957034,
+      "z": 467.74892987355946,
+      "amount": 3367.2396088484675,
+      "maxAmount": 3367.2396088484675,
+      "radius": 4.628311016596854,
+      "reservedBy": null
+    },
+    {
+      "id": 32,
+      "resource": "iron",
+      "x": -387.0318690253324,
+      "z": 197.7145772525035,
+      "amount": 5099.122156947851,
+      "maxAmount": 5099.122156947851,
+      "radius": 5.185256213881075,
+      "reservedBy": null
+    },
+    {
+      "id": 33,
+      "resource": "regolith",
+      "x": -178.41980544349587,
+      "z": 169.40244890792565,
+      "amount": 3272.014342714101,
+      "maxAmount": 3272.014342714101,
+      "radius": 6.5852874990552674,
+      "reservedBy": null
+    },
+    {
+      "id": 34,
+      "resource": "regolith",
+      "x": 65.03071820121056,
+      "z": 511.79241996589235,
+      "amount": 3546.33906763047,
+      "maxAmount": 3546.33906763047,
+      "radius": 5.535844289325178,
+      "reservedBy": null
+    },
+    {
+      "id": 35,
+      "resource": "iron",
+      "x": 351.9408442343478,
+      "z": -237.18355797525066,
+      "amount": 6347.007414326072,
+      "maxAmount": 6347.007414326072,
+      "radius": 5.438552935607732,
+      "reservedBy": null
+    },
+    {
+      "id": 36,
+      "resource": "silicon",
+      "x": 93.62983709720432,
+      "z": -228.39492259191476,
+      "amount": 5138.016459392384,
+      "maxAmount": 5138.016459392384,
+      "radius": 5.6651763170957565,
+      "reservedBy": null
+    },
+    {
+      "id": 37,
+      "resource": "ice",
+      "x": 379.35163907289046,
+      "z": -223.72504139989,
+      "amount": 5462.7979796379805,
+      "maxAmount": 5462.7979796379805,
+      "radius": 6.607357486523688,
+      "reservedBy": null
+    },
+    {
+      "id": 38,
+      "resource": "iron",
+      "x": 83.20974430006389,
+      "z": -329.550422467883,
+      "amount": 3550.9352795779705,
+      "maxAmount": 3550.9352795779705,
+      "radius": 5.471664306242019,
+      "reservedBy": null
+    },
+    {
+      "id": 39,
+      "resource": "iron",
+      "x": -188.77904422809536,
+      "z": -100.20229139483898,
+      "amount": 3057.093935087323,
+      "maxAmount": 3057.093935087323,
+      "radius": 4.166388894431293,
+      "reservedBy": null
+    },
+    {
+      "id": 40,
+      "resource": "regolith",
+      "x": -154.04740043764593,
+      "z": -262.7845477001008,
+      "amount": 3268.986396957189,
+      "maxAmount": 3268.986396957189,
+      "radius": 6.27752167917788,
+      "reservedBy": null
+    },
+    {
+      "id": 41,
+      "resource": "aluminum",
+      "x": -179.79568830234086,
+      "z": -145.18574000096297,
+      "amount": 3108.3065011538565,
+      "maxAmount": 3108.3065011538565,
+      "radius": 4.092718905117363,
+      "reservedBy": null
+    },
+    {
+      "id": 42,
+      "resource": "iron",
+      "x": 159.56810942678254,
+      "z": 1.7125629470203514,
+      "amount": 3802.4422828108072,
+      "maxAmount": 3802.4422828108072,
+      "radius": 4.313068195711821,
+      "reservedBy": null
+    }
+  ],
+  "pois": [
+    {
+      "id": 1,
+      "kind": "iceCave",
+      "x": 278.7895344695239,
+      "z": -284.1779428841694,
+      "salvage": {
+        "ice": 2167.649178607389
+      },
+      "energyKWh": 0,
+      "discovered": false,
+      "solsToBury": 0,
+      "buried": false,
+      "manifest": ""
+    },
+    {
+      "id": 2,
+      "kind": "wreckRover",
+      "x": 538.0062207651084,
+      "z": 261.7964890058109,
+      "salvage": {
+        "aluminum": 867.9827924771234,
+        "iron": 578.655194984749,
+        "silicon": 173.5965584954247
+      },
+      "energyKWh": 43.39913962385617,
+      "discovered": false,
+      "solsToBury": 0,
+      "buried": false,
+      "manifest": ""
+    },
+    {
+      "id": 3,
+      "kind": "meteorite",
+      "x": 284.04177160941,
+      "z": 290.59288107968655,
+      "salvage": {
+        "iron": 2027.3016785830257,
+        "silicon": 152.04762589372694
+      },
+      "energyKWh": 0,
+      "discovered": false,
+      "solsToBury": 0,
+      "buried": false,
+      "manifest": ""
+    },
+    {
+      "id": 4,
+      "kind": "wreckRover",
+      "x": 147.6309124528227,
+      "z": 75.67917305659715,
+      "salvage": {
+        "aluminum": 1140.7315085828304,
+        "iron": 760.4876723885536,
+        "silicon": 228.1463017165661
+      },
+      "energyKWh": 57.03657542914152,
+      "discovered": false,
+      "solsToBury": 0,
+      "buried": false,
+      "manifest": ""
+    },
+    {
+      "id": 5,
+      "kind": "abandonedMission",
+      "x": -26.296446317172443,
+      "z": 285.7486685344936,
+      "salvage": {
+        "aluminum": 755.6311369454487,
+        "iron": 971.5257475012912,
+        "silicon": 453.37868216726923,
+        "regolith": 539.7365263896062
+      },
+      "energyKWh": 21.58946105558425,
+      "discovered": false,
+      "solsToBury": 0,
+      "buried": false,
+      "manifest": ""
+    },
+    {
+      "id": 6,
+      "kind": "scienceCache",
+      "x": 85.11970884688122,
+      "z": 135.0541004682587,
+      "salvage": {
+        "silicon": 543.2710727723315,
+        "aluminum": 201.78639845829457
+      },
+      "energyKWh": 46.56609195191413,
+      "discovered": false,
+      "solsToBury": 0,
+      "buried": false,
+      "manifest": ""
+    },
+    {
+      "id": 7,
+      "kind": "iceCave",
+      "x": -351.53723843207115,
+      "z": 109.54914336480165,
+      "salvage": {
+        "ice": 2558.493455136195
+      },
+      "energyKWh": 0,
+      "discovered": false,
+      "solsToBury": 0,
+      "buried": false,
+      "manifest": ""
+    },
+    {
+      "id": 8,
+      "kind": "iceCave",
+      "x": 123.18135411948454,
+      "z": -115.5738976283283,
+      "salvage": {
+        "ice": 1709.0044021606445
+      },
+      "energyKWh": 0,
+      "discovered": false,
+      "solsToBury": 0,
+      "buried": false,
+      "manifest": ""
+    },
+    {
+      "id": 9,
+      "kind": "meteorite",
+      "x": -139.19215578387852,
+      "z": 77.63434171534082,
+      "salvage": {
+        "iron": 1143.236825838685,
+        "silicon": 85.74276193790138
+      },
+      "energyKWh": 0,
+      "discovered": false,
+      "solsToBury": 0,
+      "buried": false,
+      "manifest": ""
+    },
+    {
+      "id": 10,
+      "kind": "iceCave",
+      "x": -259.16412888210044,
+      "z": 31.875515718159626,
+      "salvage": {
+        "ice": 2817.3814824223514
+      },
+      "energyKWh": 0,
+      "discovered": false,
+      "solsToBury": 0,
+      "buried": false,
+      "manifest": ""
+    },
+    {
+      "id": 11,
+      "kind": "scienceCache",
+      "x": -72.01674339928108,
+      "z": -568.5270998575713,
+      "salvage": {
+        "silicon": 542.9002772271632,
+        "aluminum": 201.64867439866063
+      },
+      "energyKWh": 46.53430947661399,
+      "discovered": false,
+      "solsToBury": 0,
+      "buried": false,
+      "manifest": ""
+    },
+    {
+      "id": 12,
+      "kind": "wreckRover",
+      "x": 266.55396635083946,
+      "z": -387.94550697305,
+      "salvage": {
+        "aluminum": 732.5071572326124,
+        "iron": 488.3381048217416,
+        "silicon": 146.50143144652247
+      },
+      "energyKWh": 36.62535786163062,
+      "discovered": false,
+      "solsToBury": 0,
+      "buried": false,
+      "manifest": ""
+    },
+    {
+      "id": 13,
+      "kind": "wreckRover",
+      "x": 208.46607452967234,
+      "z": 399.82300441825413,
+      "salvage": {
+        "aluminum": 749.6602743119001,
+        "iron": 499.7735162079334,
+        "silicon": 149.93205486238003
+      },
+      "energyKWh": 37.48301371559501,
+      "discovered": false,
+      "solsToBury": 0,
+      "buried": false,
+      "manifest": ""
+    },
+    {
+      "id": 14,
+      "kind": "iceCave",
+      "x": 200.93198177662592,
+      "z": 289.7174879253878,
+      "salvage": {
+        "ice": 2120.3941959515214
+      },
+      "energyKWh": 0,
+      "discovered": false,
+      "solsToBury": 0,
+      "buried": false,
+      "manifest": ""
+    },
+    {
+      "id": 15,
+      "kind": "supplyDrop",
+      "x": -94.71003645433231,
+      "z": -501.19310747469575,
+      "salvage": {
+        "iron": 1029.7686796984635,
+        "aluminum": 594.9774593813345,
+        "regolith": 343.2562265661545
+      },
+      "energyKWh": 0,
+      "discovered": true,
+      "solsToBury": 0.846616727841661,
+      "buried": false,
+      "manifest": "Specialised machinery"
+    }
+  ],
+  "exploration": {
+    "nextDropSol": 9.49920355855197
+  },
+  "rovers": [
+    {
+      "upgrades": {},
+      "upgradeJob": null,
+      "paint": null,
+      "id": 1000,
+      "kind": "mining",
+      "x": -23.67470902983018,
+      "y": -0.00004807361188793596,
+      "z": -21.861749598454942,
+      "heading": 5.556637240169449,
+      "battery": 0,
+      "cargo": {
+        "regolith": 0,
+        "iron": 0,
+        "silicon": 0,
+        "aluminum": 0,
+        "ice": 0,
+        "steel": 0
+      },
+      "command": {
+        "type": "mine",
+        "depositId": 5,
+        "repeat": true
+      },
+      "pending": [],
+      "condition": 100,
+      "parts": {
+        "motor": 99.13470314881383,
+        "circuitBoard": 99.24917972322288
+      },
+      "rules": {
+        "chargeFloorPct": 20,
+        "autoHaul": true,
+        "autoService": true,
+        "stormShelter": true,
+        "autoRescue": true
+      },
+      "autoTask": false,
+      "recharge": true,
+      "lowBatteryNotified": true,
+      "blockNotified": false,
+      "sheltered": false,
+      "lightsOn": true
+    },
+    {
+      "upgrades": {},
+      "upgradeJob": null,
+      "paint": null,
+      "id": 1001,
+      "kind": "utility",
+      "x": 13.137205358605101,
+      "y": 0,
+      "z": -3.582874188710492,
+      "heading": -1.3045442776439702,
+      "battery": 0,
+      "cargo": {
+        "regolith": 0,
+        "iron": 0,
+        "silicon": 0,
+        "aluminum": 0,
+        "ice": 0,
+        "steel": 0
+      },
+      "command": {
+        "type": "mine",
+        "depositId": 2,
+        "repeat": true
+      },
+      "pending": [],
+      "condition": 98.99849999999883,
+      "parts": {
+        "motor": 97.62273668500707,
+        "circuitBoard": 96.91628002751108
+      },
+      "rules": {
+        "chargeFloorPct": 20,
+        "autoHaul": true,
+        "autoService": true,
+        "stormShelter": true,
+        "autoRescue": true
+      },
+      "autoTask": false,
+      "recharge": true,
+      "lowBatteryNotified": true,
+      "blockNotified": false,
+      "sheltered": false,
+      "lightsOn": true
+    },
+    {
+      "upgrades": {},
+      "upgradeJob": null,
+      "paint": null,
+      "id": 1013,
+      "kind": "cargo",
+      "x": 11.799550166984714,
+      "y": 0,
+      "z": -7.5088046517176235,
+      "heading": 5.279118197908199,
+      "battery": 0,
+      "cargo": {
+        "regolith": 0,
+        "iron": 0,
+        "silicon": 0,
+        "aluminum": 0,
+        "ice": 0,
+        "steel": 0
+      },
+      "command": {
+        "type": "mine",
+        "depositId": 6
+      },
+      "pending": [],
+      "condition": 97.83519999999362,
+      "parts": {
+        "motor": 99.00820000000479,
+        "circuitBoard": 99.36085000001154
+      },
+      "rules": {
+        "chargeFloorPct": 20,
+        "autoHaul": true,
+        "autoService": true,
+        "stormShelter": true,
+        "autoRescue": true
+      },
+      "autoTask": true,
+      "recharge": true,
+      "lowBatteryNotified": true,
+      "blockNotified": false,
+      "sheltered": false,
+      "lightsOn": true
+    }
+  ],
+  "buildings": [
+    {
+      "upgrades": {},
+      "upgradeJob": null,
+      "paint": null,
+      "id": 1002,
+      "kind": "warehouse",
+      "x": 34,
+      "z": 0,
+      "rot": 0,
+      "state": "online",
+      "remainingCost": {
+        "regolith": 0,
+        "iron": 0,
+        "silicon": 0,
+        "aluminum": 0,
+        "ice": 0,
+        "steel": 0
+      },
+      "needsMaterials": false,
+      "progress": 1,
+      "buildTime": 25,
+      "workerId": null,
+      "enabled": true,
+      "health": 85.31041231480143,
+      "cleanliness": 1,
+      "damaged": false,
+      "assembly": null,
+      "recipe": 0,
+      "craft": {
+        "motor": 0,
+        "circuitBoard": 0,
+        "pipe": 0,
+        "batteryPack": 0,
+        "cargoFrame": 0,
+        "drillTeeth": 0
+      },
+      "maintenance": null
+    },
+    {
+      "upgrades": {},
+      "upgradeJob": null,
+      "paint": null,
+      "id": 1003,
+      "kind": "solar",
+      "x": 30.020218157203516,
+      "z": 15.962033134720288,
+      "rot": 0,
+      "state": "online",
+      "remainingCost": {
+        "regolith": 0,
+        "iron": 0,
+        "silicon": 0,
+        "aluminum": 0,
+        "ice": 0,
+        "steel": 0
+      },
+      "needsMaterials": false,
+      "progress": 1,
+      "buildTime": 18,
+      "workerId": null,
+      "enabled": true,
+      "health": 57.1290518483639,
+      "cleanliness": 0.44205873158077913,
+      "damaged": false,
+      "assembly": null,
+      "recipe": 0,
+      "craft": {
+        "motor": 0,
+        "circuitBoard": 0,
+        "pipe": 0,
+        "batteryPack": 0,
+        "cargoFrame": 0,
+        "drillTeeth": 0
+      },
+      "maintenance": null
+    },
+    {
+      "upgrades": {},
+      "upgradeJob": null,
+      "paint": null,
+      "id": 1004,
+      "kind": "battery",
+      "x": 22.306006985677246,
+      "z": 25.660125727574247,
+      "rot": 0,
+      "state": "online",
+      "remainingCost": {
+        "regolith": 0,
+        "iron": 0,
+        "silicon": 0,
+        "aluminum": 0,
+        "ice": 0,
+        "steel": 0
+      },
+      "needsMaterials": false,
+      "progress": 1,
+      "buildTime": 16,
+      "workerId": null,
+      "enabled": true,
+      "health": 78.71201035009511,
+      "cleanliness": 1,
+      "damaged": false,
+      "assembly": null,
+      "recipe": 0,
+      "craft": {
+        "motor": 0,
+        "circuitBoard": 0,
+        "pipe": 0,
+        "batteryPack": 0,
+        "cargoFrame": 0,
+        "drillTeeth": 0
+      },
+      "maintenance": null
+    },
+    {
+      "upgrades": {},
+      "upgradeJob": null,
+      "paint": null,
+      "id": 1005,
+      "kind": "extractor",
+      "x": 11.62868487307274,
+      "z": 31.949549106720884,
+      "rot": 0,
+      "state": "online",
+      "remainingCost": {
+        "regolith": 0,
+        "iron": 0,
+        "silicon": 0,
+        "aluminum": 0,
+        "ice": 0,
+        "steel": 0
+      },
+      "needsMaterials": false,
+      "progress": 1,
+      "buildTime": 30,
+      "workerId": null,
+      "enabled": true,
+      "health": 80.14658265912063,
+      "cleanliness": 1,
+      "damaged": false,
+      "assembly": null,
+      "recipe": 0,
+      "craft": {
+        "motor": 0,
+        "circuitBoard": 0,
+        "pipe": 0,
+        "batteryPack": 0,
+        "cargoFrame": 0,
+        "drillTeeth": 0
+      },
+      "maintenance": null
+    },
+    {
+      "upgrades": {},
+      "upgradeJob": null,
+      "paint": null,
+      "id": 1006,
+      "kind": "oxygenator",
+      "x": -0.5933818188676382,
+      "z": 33.9948216353173,
+      "rot": 0,
+      "state": "online",
+      "remainingCost": {
+        "regolith": 0,
+        "iron": 0,
+        "silicon": 0,
+        "aluminum": 0,
+        "ice": 0,
+        "steel": 0
+      },
+      "needsMaterials": false,
+      "progress": 1,
+      "buildTime": 32,
+      "workerId": null,
+      "enabled": true,
+      "health": 82.54128009767133,
+      "cleanliness": 1,
+      "damaged": false,
+      "assembly": null,
+      "recipe": 0,
+      "craft": {
+        "motor": 0,
+        "circuitBoard": 0,
+        "pipe": 0,
+        "batteryPack": 0,
+        "cargoFrame": 0,
+        "drillTeeth": 0
+      },
+      "maintenance": null
+    },
+    {
+      "upgrades": {},
+      "upgradeJob": null,
+      "paint": null,
+      "id": 1007,
+      "kind": "greenhouse",
+      "x": -16.483527088375457,
+      "z": 29.737070042739457,
+      "rot": 0,
+      "state": "online",
+      "remainingCost": {
+        "regolith": 0,
+        "iron": 0,
+        "silicon": 0,
+        "aluminum": 0,
+        "ice": 0,
+        "steel": 0
+      },
+      "needsMaterials": false,
+      "progress": 1,
+      "buildTime": 38,
+      "workerId": null,
+      "enabled": true,
+      "health": 80.95606998125864,
+      "cleanliness": 1,
+      "damaged": false,
+      "assembly": null,
+      "recipe": 0,
+      "craft": {
+        "motor": 0,
+        "circuitBoard": 0,
+        "pipe": 0,
+        "batteryPack": 0,
+        "cargoFrame": 0,
+        "drillTeeth": 0
+      },
+      "maintenance": null
+    },
+    {
+      "upgrades": {},
+      "upgradeJob": null,
+      "paint": null,
+      "id": 1008,
+      "kind": "refinery",
+      "x": -28.514799310144422,
+      "z": 18.517727190510914,
+      "rot": 0,
+      "state": "online",
+      "remainingCost": {
+        "regolith": 0,
+        "iron": 0,
+        "silicon": 0,
+        "aluminum": 0,
+        "ice": 0,
+        "steel": 0
+      },
+      "needsMaterials": false,
+      "progress": 1,
+      "buildTime": 48,
+      "workerId": null,
+      "enabled": true,
+      "health": 83.21101352102427,
+      "cleanliness": 1,
+      "damaged": false,
+      "assembly": null,
+      "recipe": 0,
+      "craft": {
+        "motor": 0,
+        "circuitBoard": 0,
+        "pipe": 0,
+        "batteryPack": 0,
+        "cargoFrame": 0,
+        "drillTeeth": 0
+      },
+      "maintenance": null
+    },
+    {
+      "upgrades": {},
+      "upgradeJob": null,
+      "paint": null,
+      "id": 1009,
+      "kind": "workshop",
+      "x": -33.87061973511935,
+      "z": 2.9632952534203936,
+      "rot": 0,
+      "state": "online",
+      "remainingCost": {
+        "regolith": 0,
+        "iron": 0,
+        "silicon": 0,
+        "aluminum": 0,
+        "ice": 0,
+        "steel": 0
+      },
+      "needsMaterials": false,
+      "progress": 1,
+      "buildTime": 30,
+      "workerId": null,
+      "enabled": true,
+      "health": 86.6513944326935,
+      "cleanliness": 1,
+      "damaged": false,
+      "assembly": null,
+      "recipe": 0,
+      "craft": {
+        "motor": 0,
+        "circuitBoard": 0,
+        "pipe": 0,
+        "batteryPack": 0,
+        "cargoFrame": 0,
+        "drillTeeth": 0
+      },
+      "maintenance": null
+    },
+    {
+      "upgrades": {},
+      "upgradeJob": null,
+      "paint": null,
+      "id": 1010,
+      "kind": "garage",
+      "x": -31.297165017382973,
+      "z": -13.2848583686353,
+      "rot": 0,
+      "state": "online",
+      "remainingCost": {
+        "regolith": 0,
+        "iron": 0,
+        "silicon": 0,
+        "aluminum": 0,
+        "ice": 0,
+        "steel": 0
+      },
+      "needsMaterials": false,
+      "progress": 1,
+      "buildTime": 34,
+      "workerId": null,
+      "enabled": true,
+      "health": 86.35236722056729,
+      "cleanliness": 1,
+      "damaged": false,
+      "assembly": null,
+      "recipe": 0,
+      "craft": {
+        "motor": 0,
+        "circuitBoard": 0,
+        "pipe": 0,
+        "batteryPack": 0,
+        "cargoFrame": 0,
+        "drillTeeth": 0
+      },
+      "maintenance": null
+    },
+    {
+      "upgrades": {},
+      "upgradeJob": null,
+      "paint": null,
+      "id": 1011,
+      "kind": "waterTank",
+      "x": -21.39689329569446,
+      "z": -26.42296268953702,
+      "rot": 0,
+      "state": "site",
+      "remainingCost": {
+        "regolith": 0,
+        "iron": 0,
+        "silicon": 0,
+        "aluminum": 10,
+        "ice": 0,
+        "steel": 0
+      },
+      "needsMaterials": true,
+      "progress": 0,
+      "buildTime": 24,
+      "workerId": null,
+      "enabled": true,
+      "health": 100,
+      "cleanliness": 1,
+      "damaged": false,
+      "assembly": null,
+      "recipe": 0,
+      "craft": {
+        "motor": 0,
+        "circuitBoard": 0,
+        "pipe": 0,
+        "batteryPack": 0,
+        "cargoFrame": 0,
+        "drillTeeth": 0
+      },
+      "maintenance": null
+    },
+    {
+      "upgrades": {},
+      "upgradeJob": null,
+      "paint": null,
+      "id": 1012,
+      "kind": "pumpStation",
+      "x": -10.506577808748217,
+      "z": -32.33592155403522,
+      "rot": 0,
+      "state": "site",
+      "remainingCost": {
+        "regolith": 0.9000000000000412,
+        "iron": 0,
+        "silicon": 6,
+        "aluminum": 0,
+        "ice": 0,
+        "steel": 6.18596639999987
+      },
+      "needsMaterials": true,
+      "progress": 0,
+      "buildTime": 26,
+      "workerId": null,
+      "enabled": true,
+      "health": 100,
+      "cleanliness": 1,
+      "damaged": false,
+      "assembly": null,
+      "recipe": 0,
+      "craft": {
+        "motor": 0,
+        "circuitBoard": 0,
+        "pipe": 0,
+        "batteryPack": 0,
+        "cargoFrame": 0,
+        "drillTeeth": 0
+      },
+      "maintenance": null
+    }
+  ],
+  "weather": {
+    "rngState": 251216187,
+    "lightningRngState": 3925801090,
+    "nextRollAt": 1260.4999999994777,
+    "lastStormEndAt": 1092.384507616632,
+    "active": [],
+    "scheduled": [],
+    "dust": 0.11761183673871176,
+    "windSpeed": 11.819936760975997,
+    "windDirRad": 4.61985680087283,
+    "frequencyMul": 1,
+    "damageMul": 1,
+    "lightningMul": 1
+  },
+  "alerts": {
+    "active": [
+      {
+        "key": "mats-1011",
+        "severity": "warn",
+        "title": "Water Tank awaiting materials",
+        "detail": "Still needs 10 kg Aluminum Ore.",
+        "since": 4.549999999999992,
+        "lastSeen": 1199.9999999994563,
+        "entityId": 1011
+      },
+      {
+        "key": "mats-1012",
+        "severity": "warn",
+        "title": "Pump Station awaiting materials",
+        "detail": "Still needs 1 kg Regolith, 6 kg Silica, 7 kg Steel.",
+        "since": 5.04999999999999,
+        "lastSeen": 1199.9999999994563,
+        "entityId": 1012
+      },
+      {
+        "key": "brownout-critical",
+        "severity": "crit",
+        "title": "Grid brownout",
+        "detail": "Life-support tiers are being shed. Generation 22.4 kW vs 78.4 kW demand.",
+        "since": 87.0499999999972,
+        "lastSeen": 1199.9999999994563
+      },
+      {
+        "key": "rover-dead-1013",
+        "severity": "warn",
+        "title": "Cargo Rover stranded",
+        "detail": "Battery flat, out in the field — another rover can jump-start it.",
+        "since": 444.30000000006675,
+        "lastSeen": 1199.9999999994563,
+        "entityId": 1013
+      },
+      {
+        "key": "rover-dead-1000",
+        "severity": "warn",
+        "title": "Mining Rover stranded",
+        "detail": "Battery flat, out in the field — another rover can jump-start it.",
+        "since": 645.2499999999609,
+        "lastSeen": 1199.9999999994563,
+        "entityId": 1000
+      },
+      {
+        "key": "drop-live-15",
+        "severity": "crit",
+        "title": "📦 Supply drop — Specialised machinery",
+        "detail": "1968 kg at -95, -501. Buried in 0.8 sols.",
+        "since": 844.2999999997799,
+        "lastSeen": 1199.9999999994563,
+        "entityId": 15
+      },
+      {
+        "key": "panels-dirty",
+        "severity": "warn",
+        "title": "Solar arrays dusted",
+        "detail": "Output down 56% on the dirtiest array — send a rover to clean.",
+        "since": 947.549999999686,
+        "lastSeen": 1199.9999999994563,
+        "entityId": 1003
+      },
+      {
+        "key": "rover-dead-1001",
+        "severity": "warn",
+        "title": "Utility Rover stranded",
+        "detail": "Battery flat, out in the field — another rover can jump-start it.",
+        "since": 1018.1999999996217,
+        "lastSeen": 1199.9999999994563,
+        "entityId": 1001
+      }
+    ],
+    "log": [
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 78.64999999999768,
+        "stamp": "Sol 1 · 16:27"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 78.69999999999767,
+        "stamp": "Sol 1 · 16:28"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 78.74999999999767,
+        "stamp": "Sol 1 · 16:28"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 78.79999999999767,
+        "stamp": "Sol 1 · 16:28"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 78.84999999999766,
+        "stamp": "Sol 1 · 16:29"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 78.89999999999766,
+        "stamp": "Sol 1 · 16:29"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 78.94999999999766,
+        "stamp": "Sol 1 · 16:29"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 78.99999999999766,
+        "stamp": "Sol 1 · 16:30"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 79.04999999999765,
+        "stamp": "Sol 1 · 16:30"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 79.09999999999765,
+        "stamp": "Sol 1 · 16:30"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 79.14999999999765,
+        "stamp": "Sol 1 · 16:31"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 79.19999999999764,
+        "stamp": "Sol 1 · 16:31"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 79.24999999999764,
+        "stamp": "Sol 1 · 16:31"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 79.29999999999764,
+        "stamp": "Sol 1 · 16:31"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 79.34999999999764,
+        "stamp": "Sol 1 · 16:32"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 79.39999999999763,
+        "stamp": "Sol 1 · 16:32"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 79.44999999999763,
+        "stamp": "Sol 1 · 16:32"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 79.49999999999763,
+        "stamp": "Sol 1 · 16:33"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 79.54999999999762,
+        "stamp": "Sol 1 · 16:33"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 79.59999999999762,
+        "stamp": "Sol 1 · 16:33"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 79.64999999999762,
+        "stamp": "Sol 1 · 16:34"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 79.69999999999762,
+        "stamp": "Sol 1 · 16:34"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 79.74999999999761,
+        "stamp": "Sol 1 · 16:34"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 79.79999999999761,
+        "stamp": "Sol 1 · 16:35"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 79.8499999999976,
+        "stamp": "Sol 1 · 16:35"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 79.8999999999976,
+        "stamp": "Sol 1 · 16:35"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 79.9499999999976,
+        "stamp": "Sol 1 · 16:35"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 79.9999999999976,
+        "stamp": "Sol 1 · 16:36"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 80.0499999999976,
+        "stamp": "Sol 1 · 16:36"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 80.09999999999759,
+        "stamp": "Sol 1 · 16:36"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 80.14999999999759,
+        "stamp": "Sol 1 · 16:37"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 80.19999999999759,
+        "stamp": "Sol 1 · 16:37"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 80.24999999999758,
+        "stamp": "Sol 1 · 16:37"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 80.29999999999758,
+        "stamp": "Sol 1 · 16:38"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 80.34999999999758,
+        "stamp": "Sol 1 · 16:38"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 80.39999999999758,
+        "stamp": "Sol 1 · 16:38"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 80.44999999999757,
+        "stamp": "Sol 1 · 16:39"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 80.49999999999757,
+        "stamp": "Sol 1 · 16:39"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 80.54999999999757,
+        "stamp": "Sol 1 · 16:39"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 80.59999999999756,
+        "stamp": "Sol 1 · 16:39"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 80.64999999999756,
+        "stamp": "Sol 1 · 16:40"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 80.69999999999756,
+        "stamp": "Sol 1 · 16:40"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 80.74999999999756,
+        "stamp": "Sol 1 · 16:40"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 80.79999999999755,
+        "stamp": "Sol 1 · 16:41"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 80.84999999999755,
+        "stamp": "Sol 1 · 16:41"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 80.89999999999755,
+        "stamp": "Sol 1 · 16:41"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 80.94999999999754,
+        "stamp": "Sol 1 · 16:42"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 80.99999999999754,
+        "stamp": "Sol 1 · 16:42"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 81.04999999999754,
+        "stamp": "Sol 1 · 16:42"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 81.09999999999754,
+        "stamp": "Sol 1 · 16:43"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 81.14999999999753,
+        "stamp": "Sol 1 · 16:43"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 81.19999999999753,
+        "stamp": "Sol 1 · 16:43"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 81.24999999999753,
+        "stamp": "Sol 1 · 16:43"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 81.29999999999752,
+        "stamp": "Sol 1 · 16:44"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 81.34999999999752,
+        "stamp": "Sol 1 · 16:44"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 81.39999999999752,
+        "stamp": "Sol 1 · 16:44"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 81.44999999999752,
+        "stamp": "Sol 1 · 16:45"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 81.49999999999751,
+        "stamp": "Sol 1 · 16:45"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 81.54999999999751,
+        "stamp": "Sol 1 · 16:45"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 81.59999999999751,
+        "stamp": "Sol 1 · 16:46"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 81.6499999999975,
+        "stamp": "Sol 1 · 16:46"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 81.6999999999975,
+        "stamp": "Sol 1 · 16:46"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 81.7499999999975,
+        "stamp": "Sol 1 · 16:47"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 81.7999999999975,
+        "stamp": "Sol 1 · 16:47"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 81.8499999999975,
+        "stamp": "Sol 1 · 16:47"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 81.89999999999749,
+        "stamp": "Sol 1 · 16:47"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 81.94999999999749,
+        "stamp": "Sol 1 · 16:48"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 81.99999999999748,
+        "stamp": "Sol 1 · 16:48"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 82.04999999999748,
+        "stamp": "Sol 1 · 16:48"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 82.09999999999748,
+        "stamp": "Sol 1 · 16:49"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 82.14999999999748,
+        "stamp": "Sol 1 · 16:49"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 82.19999999999747,
+        "stamp": "Sol 1 · 16:49"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 82.24999999999747,
+        "stamp": "Sol 1 · 16:50"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 82.29999999999747,
+        "stamp": "Sol 1 · 16:50"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 82.34999999999746,
+        "stamp": "Sol 1 · 16:50"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 82.39999999999746,
+        "stamp": "Sol 1 · 16:51"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 82.44999999999746,
+        "stamp": "Sol 1 · 16:51"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 82.49999999999746,
+        "stamp": "Sol 1 · 16:51"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 82.54999999999745,
+        "stamp": "Sol 1 · 16:51"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 82.59999999999745,
+        "stamp": "Sol 1 · 16:52"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 82.64999999999745,
+        "stamp": "Sol 1 · 16:52"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 82.69999999999744,
+        "stamp": "Sol 1 · 16:52"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 82.74999999999744,
+        "stamp": "Sol 1 · 16:53"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 82.79999999999744,
+        "stamp": "Sol 1 · 16:53"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 82.84999999999744,
+        "stamp": "Sol 1 · 16:53"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 82.89999999999743,
+        "stamp": "Sol 1 · 16:54"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 82.94999999999743,
+        "stamp": "Sol 1 · 16:54"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 82.99999999999743,
+        "stamp": "Sol 1 · 16:54"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 83.04999999999742,
+        "stamp": "Sol 1 · 16:55"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 83.09999999999742,
+        "stamp": "Sol 1 · 16:55"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 83.14999999999742,
+        "stamp": "Sol 1 · 16:55"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 83.19999999999742,
+        "stamp": "Sol 1 · 16:55"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 83.24999999999741,
+        "stamp": "Sol 1 · 16:56"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 83.29999999999741,
+        "stamp": "Sol 1 · 16:56"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 83.34999999999741,
+        "stamp": "Sol 1 · 16:56"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 83.3999999999974,
+        "stamp": "Sol 1 · 16:57"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 83.4499999999974,
+        "stamp": "Sol 1 · 16:57"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 83.4999999999974,
+        "stamp": "Sol 1 · 16:57"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 83.5499999999974,
+        "stamp": "Sol 1 · 16:58"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 83.5999999999974,
+        "stamp": "Sol 1 · 16:58"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 83.64999999999739,
+        "stamp": "Sol 1 · 16:58"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 83.69999999999739,
+        "stamp": "Sol 1 · 16:59"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 83.74999999999739,
+        "stamp": "Sol 1 · 16:59"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 83.79999999999738,
+        "stamp": "Sol 1 · 16:59"
+      },
+      {
+        "severity": "ok",
+        "text": "Mining Rover delivered 276 kg to storage.",
+        "time": 83.79999999999738,
+        "stamp": "Sol 1 · 16:59"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Water Tank site.",
+        "time": 83.84999999999738,
+        "stamp": "Sol 1 · 16:59"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 83.84999999999738,
+        "stamp": "Sol 1 · 16:59"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 83.89999999999738,
+        "stamp": "Sol 1 · 17:00"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 83.94999999999737,
+        "stamp": "Sol 1 · 17:00"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 83.99999999999737,
+        "stamp": "Sol 1 · 17:00"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 84.04999999999737,
+        "stamp": "Sol 1 · 17:01"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 84.09999999999737,
+        "stamp": "Sol 1 · 17:01"
+      },
+      {
+        "severity": "warn",
+        "text": "Batteries nearly flat — 29 kWh left, draining at 96.1 kW.",
+        "time": 84.09999999999737,
+        "stamp": "Sol 1 · 17:01"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 84.14999999999736,
+        "stamp": "Sol 1 · 17:01"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 84.19999999999736,
+        "stamp": "Sol 1 · 17:02"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 84.24999999999736,
+        "stamp": "Sol 1 · 17:02"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 84.29999999999735,
+        "stamp": "Sol 1 · 17:02"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 84.34999999999735,
+        "stamp": "Sol 1 · 17:03"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 84.39999999999735,
+        "stamp": "Sol 1 · 17:03"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 84.44999999999735,
+        "stamp": "Sol 1 · 17:03"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 84.49999999999734,
+        "stamp": "Sol 1 · 17:03"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 84.54999999999734,
+        "stamp": "Sol 1 · 17:04"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 84.59999999999734,
+        "stamp": "Sol 1 · 17:04"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 84.64999999999733,
+        "stamp": "Sol 1 · 17:04"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 84.69999999999733,
+        "stamp": "Sol 1 · 17:05"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 84.74999999999733,
+        "stamp": "Sol 1 · 17:05"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 84.79999999999733,
+        "stamp": "Sol 1 · 17:05"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 84.84999999999732,
+        "stamp": "Sol 1 · 17:06"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 84.89999999999732,
+        "stamp": "Sol 1 · 17:06"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 84.94999999999732,
+        "stamp": "Sol 1 · 17:06"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 84.99999999999731,
+        "stamp": "Sol 1 · 17:07"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 85.04999999999731,
+        "stamp": "Sol 1 · 17:07"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 85.09999999999731,
+        "stamp": "Sol 1 · 17:07"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 85.1499999999973,
+        "stamp": "Sol 1 · 17:08"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 85.1999999999973,
+        "stamp": "Sol 1 · 17:08"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 85.2499999999973,
+        "stamp": "Sol 1 · 17:08"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 85.2999999999973,
+        "stamp": "Sol 1 · 17:08"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 85.3499999999973,
+        "stamp": "Sol 1 · 17:09"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 85.39999999999729,
+        "stamp": "Sol 1 · 17:09"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 85.44999999999729,
+        "stamp": "Sol 1 · 17:09"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 85.49999999999729,
+        "stamp": "Sol 1 · 17:10"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 85.54999999999728,
+        "stamp": "Sol 1 · 17:10"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 85.59999999999728,
+        "stamp": "Sol 1 · 17:10"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 85.64999999999728,
+        "stamp": "Sol 1 · 17:11"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 85.69999999999727,
+        "stamp": "Sol 1 · 17:11"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 85.74999999999727,
+        "stamp": "Sol 1 · 17:11"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 85.79999999999727,
+        "stamp": "Sol 1 · 17:12"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 85.84999999999727,
+        "stamp": "Sol 1 · 17:12"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 85.89999999999726,
+        "stamp": "Sol 1 · 17:12"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 85.94999999999726,
+        "stamp": "Sol 1 · 17:12"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 85.99999999999726,
+        "stamp": "Sol 1 · 17:13"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 86.04999999999725,
+        "stamp": "Sol 1 · 17:13"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 86.09999999999725,
+        "stamp": "Sol 1 · 17:13"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 86.14999999999725,
+        "stamp": "Sol 1 · 17:14"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 86.19999999999725,
+        "stamp": "Sol 1 · 17:14"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 86.24999999999724,
+        "stamp": "Sol 1 · 17:14"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 86.29999999999724,
+        "stamp": "Sol 1 · 17:15"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 86.34999999999724,
+        "stamp": "Sol 1 · 17:15"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 86.39999999999723,
+        "stamp": "Sol 1 · 17:15"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 86.44999999999723,
+        "stamp": "Sol 1 · 17:16"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 86.49999999999723,
+        "stamp": "Sol 1 · 17:16"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 86.54999999999723,
+        "stamp": "Sol 1 · 17:16"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 86.59999999999722,
+        "stamp": "Sol 1 · 17:16"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 86.64999999999722,
+        "stamp": "Sol 1 · 17:17"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 86.69999999999722,
+        "stamp": "Sol 1 · 17:17"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 86.74999999999721,
+        "stamp": "Sol 1 · 17:17"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 86.79999999999721,
+        "stamp": "Sol 1 · 17:18"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 86.84999999999721,
+        "stamp": "Sol 1 · 17:18"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 86.8999999999972,
+        "stamp": "Sol 1 · 17:18"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 86.9499999999972,
+        "stamp": "Sol 1 · 17:19"
+      },
+      {
+        "severity": "info",
+        "text": "Materials delivered to the Pump Station site.",
+        "time": 86.9999999999972,
+        "stamp": "Sol 1 · 17:19"
+      },
+      {
+        "severity": "crit",
+        "text": "Grid brownout — Life-support tiers are being shed. Generation 28.1 kW vs 125.5 kW demand.",
+        "time": 87.0499999999972,
+        "stamp": "Sol 1 · 17:19"
+      },
+      {
+        "severity": "warn",
+        "text": "Cargo Rover is low on power — returning to charge.",
+        "time": 153.35000000000062,
+        "stamp": "Sol 1 · 24:08"
+      },
+      {
+        "severity": "info",
+        "text": "A new sol begins. Sol 2.",
+        "time": 158.40000000000177,
+        "stamp": "Sol 2 · 00:00"
+      },
+      {
+        "severity": "ok",
+        "text": "Cargo Rover delivered 73 kg to storage.",
+        "time": 164.7500000000032,
+        "stamp": "Sol 2 · 00:39"
+      },
+      {
+        "severity": "info",
+        "text": "A new sol begins. Sol 3.",
+        "time": 398.4000000000563,
+        "stamp": "Sol 3 · 00:00"
+      },
+      {
+        "severity": "crit",
+        "text": "Cargo Rover is stranded — battery flat. Another rover can jump-start it.",
+        "time": 444.30000000006675,
+        "stamp": "Sol 3 · 04:42"
+      },
+      {
+        "severity": "warn",
+        "text": "Cargo Rover stranded — Battery flat, out in the field — another rover can jump-start it.",
+        "time": 444.30000000006675,
+        "stamp": "Sol 3 · 04:42"
+      },
+      {
+        "severity": "warn",
+        "text": "Dust devil forecast — Winds arrive in about 1 min. Charge batteries, shelter the crews, clean the arrays.",
+        "time": 528.0000000000675,
+        "stamp": "Sol 3 · 13:18"
+      },
+      {
+        "severity": "info",
+        "text": "Dust devil on site — solar output falling, crews recalled.",
+        "time": 538.0500000000584,
+        "stamp": "Sol 3 · 14:20"
+      },
+      {
+        "severity": "info",
+        "text": "Dust devil — Solar −5% from dust · visibility 91% · winds 9 m/s.",
+        "time": 538.0500000000584,
+        "stamp": "Sol 3 · 14:20"
+      },
+      {
+        "severity": "ok",
+        "text": "The storm has passed. Dust is settling; solar recovers as the air clears.",
+        "time": 614.0499999999893,
+        "stamp": "Sol 3 · 22:09"
+      },
+      {
+        "severity": "ok",
+        "text": "Storm passed — skies are settling.",
+        "time": 614.0499999999893,
+        "stamp": "Sol 3 · 22:09"
+      },
+      {
+        "severity": "info",
+        "text": "A new sol begins. Sol 4.",
+        "time": 638.3999999999671,
+        "stamp": "Sol 4 · 00:00"
+      },
+      {
+        "severity": "crit",
+        "text": "Mining Rover is stranded — battery flat. Another rover can jump-start it.",
+        "time": 645.2499999999609,
+        "stamp": "Sol 4 · 00:42"
+      },
+      {
+        "severity": "warn",
+        "text": "Mining Rover stranded — Battery flat, out in the field — another rover can jump-start it.",
+        "time": 645.2499999999609,
+        "stamp": "Sol 4 · 00:42"
+      },
+      {
+        "severity": "warn",
+        "text": "Regional dust storm forecast — Winds arrive in about 1 min. Charge batteries, shelter the crews, clean the arrays.",
+        "time": 782.1999999998363,
+        "stamp": "Sol 4 · 14:46"
+      },
+      {
+        "severity": "warn",
+        "text": "Regional dust storm on site — solar output falling, crews recalled.",
+        "time": 842.2499999997817,
+        "stamp": "Sol 4 · 20:56"
+      },
+      {
+        "severity": "warn",
+        "text": "Regional dust storm — Solar −6% from dust · visibility 89% · winds 9 m/s.",
+        "time": 842.2499999997817,
+        "stamp": "Sol 4 · 20:56"
+      },
+      {
+        "severity": "opportunity",
+        "text": "Transponder contact: a specialised machinery container landed at -95, -501 — 1968 kg, and the dust is already working on it.",
+        "time": 844.2999999997799,
+        "stamp": "Sol 4 · 21:09"
+      },
+      {
+        "severity": "opportunity",
+        "text": "📦 Supply drop — Specialised machinery — 1968 kg at -95, -501. Buried in 3.0 sols.",
+        "time": 844.2999999997799,
+        "stamp": "Sol 4 · 21:09"
+      },
+      {
+        "severity": "info",
+        "text": "A new sol begins. Sol 5.",
+        "time": 878.3999999997488,
+        "stamp": "Sol 5 · 00:00"
+      },
+      {
+        "severity": "warn",
+        "text": "Solar arrays dusted — Output down 40% on the dirtiest array — send a rover to clean.",
+        "time": 947.549999999686,
+        "stamp": "Sol 5 · 07:06"
+      },
+      {
+        "severity": "warn",
+        "text": "⚡ Lightning struck at near the colony — 5 machines singed.",
+        "time": 981.8499999996548,
+        "stamp": "Sol 5 · 10:37"
+      },
+      {
+        "severity": "ok",
+        "text": "The storm has passed. Dust is settling; solar recovers as the air clears.",
+        "time": 1003.2999999996352,
+        "stamp": "Sol 5 · 12:49"
+      },
+      {
+        "severity": "ok",
+        "text": "Storm passed — skies are settling.",
+        "time": 1003.2999999996352,
+        "stamp": "Sol 5 · 12:49"
+      },
+      {
+        "severity": "crit",
+        "text": "Utility Rover is stranded — battery flat. Another rover can jump-start it.",
+        "time": 1018.1999999996217,
+        "stamp": "Sol 5 · 14:21"
+      },
+      {
+        "severity": "warn",
+        "text": "Utility Rover stranded — Battery flat, out in the field — another rover can jump-start it.",
+        "time": 1018.1999999996217,
+        "stamp": "Sol 5 · 14:21"
+      },
+      {
+        "severity": "info",
+        "text": "A new sol begins. Sol 6.",
+        "time": 1118.3999999995306,
+        "stamp": "Sol 6 · 00:00"
+      },
+      {
+        "severity": "crit",
+        "text": "📦 Supply drop — Specialised machinery — 1968 kg at -95, -501. Buried in 1.0 sols.",
+        "time": 1163.1999999994898,
+        "stamp": "Sol 6 · 04:36"
+      }
+    ]
+  }
+}
