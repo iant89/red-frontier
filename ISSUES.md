@@ -1072,6 +1072,94 @@ steel that is not there"). The 1-day stress hash moved when this landed
 
 ---
 
+## 22. A full rover drip-unloading into nearly-full silos spams the colony log
+
+**P1 · Open · `src/sim/systems/RoverSystem.ts`**
+
+> A rover holding cargo when the silos are *nearly* full — exactly the state a
+> haul route parks in by design — drips its hold out a few hundred grams at a
+> time, and every drip logs. The colony log fills with alternating
+> "delivered 0 kg to storage" / "still holds cargo — those silos are full"
+> pairs for as long as the state holds.
+
+### What the code does today
+
+Two logging sites share the same pattern:
+
+- `tryUnload` (`src/sim/systems/RoverSystem.ts:1215-1227`) — runs **every
+  tick** a full rover spends parked at the depot ("Full silos park the rover
+  at the depot — retrying as consumption frees room", `RoverSystem.ts:1345`).
+- `unloadWhenCharging` (`RoverSystem.ts:935-948`) — runs **every tick** the
+  rover spends heading in or plugged in.
+
+```ts
+const { moved, blocked } = LogisticsSystem.unloadCargo(state, r);
+if (moved > 0.01) {
+  log(state, 'ok', `${r.label} delivered ${Math.round(moved)} kg to storage.`);
+  r.blockNotified = false; // ← re-arms the warning latch on every drip
+}
+if (blocked && cargoMass(r) > 0.01 && !r.blockNotified) {
+  log(state, 'warn', `${r.label} still holds cargo — those silos are full.`);
+  r.blockNotified = true;
+}
+```
+
+When the silos are completely full, `moved` stays 0 and the latch works: one
+"still holds cargo" per episode, as designed. The broken case is the one right
+next to it — silos a sliver short of full. Consumption frees room continuously
+(the colonist drinks, the refinery draws ore, the greenhouse harvests), so
+every tick a few hundred grams fit:
+
+1. `moved` is e.g. 0.3 kg → the ok line logs, and `Math.round(0.3)` renders
+   **"delivered 0 kg to storage"**.
+2. The same drip **clears `blockNotified`**, so the warn re-fires on the same
+   tick.
+3. Next tick, repeat — two lines per tick until the hold finally empties.
+
+`goIdle`'s parked-rover pour already got this right: it unloads "in silence",
+with the comment that the warning belongs to the unload task
+(`RoverSystem.ts:884-889`). The two task-path sites never got the same
+discipline.
+
+### Wanted
+
+- One delivery line per **meaningful** delivery, not per-tick slivers — and
+  never a "delivered 0 kg" line (the accumulator should not round away the
+  mass it just logged).
+- "Still holds cargo" at most once per blocked episode: the latch must reset
+  on a *real* delivery or a change of situation, not on a drip.
+- A rover parked and waiting on silo room is normal haul-route behavior, not
+  an event — quiet by default, same spirit as `goIdle`'s silent pour.
+
+### Fix direction (not committed)
+
+- Accumulate `moved` across ticks into a pending counter; log once when it
+  crosses ~1 kg or the episode ends (hold empty, task change), then reset.
+- Reset `blockNotified` only when the accumulated delivery is meaningful.
+- Consider collapsing the two copies into one guarded helper beside
+  `LogisticsSystem.unloadCargo` — the file header already counts "three copies
+  of 'pour the hold into the silos'" (`RoverSystem.ts:39`).
+- Any throttle must run on **sim time** (accumulators/cooldowns in game
+  seconds), never wall clock, so worker/in-process transports and replays stay
+  identical.
+
+### Acceptance criteria
+
+- [ ] A scripted sliver scenario (full hold, silos just short of full, N
+      seconds of consumption freeing room) logs **zero** "delivered 0 kg"
+      lines.
+- [ ] "Still holds cargo" logs at most once per continuous blocked episode; a
+      fresh episode (rover reloaded, returned, silos full again) may warn
+      again.
+- [ ] A normal unload (rover arrives, silos have room) still logs exactly one
+      "delivered N kg" line with the correct rounded mass.
+- [ ] Delivery accumulation and any cooldown are deterministic in sim time;
+      the canonical transcript suites still replay to their pinned hashes.
+- [ ] Pinned by new cases in `tests/sim/rovers` or `tests/sim/logistics-system`
+      asserting log-line counts for the sliver scenario.
+
+---
+
 ## Cross-cutting notes
 
 - **#2 and #7 are coupled.** Both rework `StormEmitter`'s emission volume and
