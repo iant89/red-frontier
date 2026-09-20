@@ -146,6 +146,7 @@ export class WeatherSystem {
     if (!wx.current() && state.stormAnnounced) {
       state.stormAnnounced = false;
       state.domainEvents.push({ type: 'storm/ended' });
+      state.tutorial.stats.stormsSurvived++;
       state.alerts.event(
         'ok',
         'The storm has passed. Dust is settling; solar recovers as the air clears.',

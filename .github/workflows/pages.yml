@@ -49,6 +49,23 @@ jobs:
           npm i --no-save playwright
           npx playwright install --with-deps chromium
 
+      - name: Run simulation test suite (Phase 0 gate)
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee test-output.txt
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+
+      - name: Run canonical transcript replay (Phase 0 gate)
+        run: |
+          set -o pipefail
+          npm run test:replay 2>&1 | tee replay-output.txt
+
+      - name: Check golden colony hash (Phase 0 gate)
+        run: |
+          set -o pipefail
+          node scripts/generate-golden-colony.mjs --check 2>&1 | tee golden-output.txt
+
       - run: npm run build
 
       - name: Serve the build
@@ -100,17 +117,30 @@ jobs:
             worker-smoke-failure.png
             worker-smoke-output.txt
             preview.log
+            test-output.txt
+            replay-output.txt
+            golden-output.txt
           if-no-files-found: ignore
 
       - name: Post failure output to the PR
         if: failure() && github.event_name == 'pull_request'
         run: |
           [ -f smoke-output.txt ] || echo '(no output captured)' > smoke-output.txt
+          [ -f test-output.txt ] || echo '(no test output)' > test-output.txt
+          [ -f replay-output.txt ] || echo '(no replay output)' > replay-output.txt
+          [ -f golden-output.txt ] || echo '(no golden output)' > golden-output.txt
           {
-            echo "Smoke gate failed on ${GITHUB_SHA::7}. Output:"
+            echo "Test/smoke gate failed on ${GITHUB_SHA::7}. Output:"
             echo '```'
+            echo "--- npm test (tail) ---"
+            tail -n 120 test-output.txt
+            echo "--- replay ---"
+            cat replay-output.txt
+            echo "--- golden ---"
+            cat golden-output.txt
+            echo "--- smokes ---"
             cat smoke-output.txt
-            [ -f worker-smoke-output.txt ] && cat worker-smoke-output.txt
+            [ -f worker-smoke-output.txt ] && tail -n 120 worker-smoke-output.txt
             echo '```'
           } > smoke-comment.md
           gh pr comment ${{ github.event.pull_request.number }} --body-file smoke-comment.md
@@ -121,8 +151,9 @@ jobs:
         if: failure() && github.event_name != 'pull_request'
         run: |
           [ -f smoke-output.txt ] || echo '(no output captured)' > smoke-output.txt
-          { echo "The mobile smoke gate failed on \`main@${GITHUB_SHA::7}\` — deploy skipped."; echo; echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"; echo; echo '```'; cat smoke-output.txt; echo '```'; } > smoke-issue.md
-          gh issue create --title "Smoke gate failed on main@${GITHUB_SHA::7}" --body-file smoke-issue.md
+          [ -f test-output.txt ] || echo '(no test output)' > test-output.txt
+          { echo "The test/smoke gate failed on \`main@${GITHUB_SHA::7}\` — deploy skipped."; echo; echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"; echo; echo '```'; tail -n 200 test-output.txt; echo '```'; } > smoke-issue.md
+          gh issue create --title "Test/smoke gate failed on main@${GITHUB_SHA::7}" --body-file smoke-issue.md
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

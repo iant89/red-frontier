@@ -1,0 +1,54 @@
+{
+  "seed": 9001,
+  "totalTicks": 24000,
+  "sols": 5,
+  "hash": "rf1-1ae69385827e00-021ba045379276",
+  "generatedAt": "2026-09-20T19:45:35.416Z",
+  "spots": {
+    "warehouse": {
+      "x": 34,
+      "z": 0
+    },
+    "solar": {
+      "x": 30.020218157203516,
+      "z": 15.962033134720288
+    },
+    "battery": {
+      "x": 22.306006985677246,
+      "z": 25.660125727574247
+    },
+    "extractor": {
+      "x": 11.62868487307274,
+      "z": 31.949549106720884
+    },
+    "oxygenator": {
+      "x": -0.5933818188676382,
+      "z": 33.9948216353173
+    },
+    "greenhouse": {
+      "x": -16.483527088375457,
+      "z": 29.737070042739457
+    },
+    "refinery": {
+      "x": -28.514799310144422,
+      "z": 18.517727190510914
+    },
+    "workshop": {
+      "x": -33.87061973511935,
+      "z": 2.9632952534203936
+    },
+    "garage": {
+      "x": -31.297165017382973,
+      "z": -13.2848583686353
+    },
+    "waterTank": {
+      "x": -21.39689329569446,
+      "z": -26.42296268953702
+    },
+    "pumpStation": {
+      "x": -10.506577808748217,
+      "z": -32.33592155403522
+    }
+  },
+  "description": "Golden colony: viable mid-game colony (warehouse, solar, battery, extractor, oxygenator, greenhouse, refinery, workshop, garage, waterTank, pumpStation) + ice/iron/silicon hauling, 5 sols, dev-completed for determinism"
+}

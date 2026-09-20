@@ -65,6 +65,7 @@ import { PowerSystem } from '../systems/PowerSystem';
 import { LifeSupportSystem } from '../systems/LifeSupportSystem';
 import { RoverSystem } from '../systems/RoverSystem';
 import { HistorySystem } from '../systems/HistorySystem';
+import { emptyTutorialState } from '../state/TutorialState';
 
 /** Build a SaveState from live ColonyState — former Simulation.snapshot body. */
 export function snapshotColony(state: ColonyState): SaveState {
@@ -168,6 +169,14 @@ export function snapshotColony(state: ColonyState): SaveState {
     })),
     weather: state.weather.snapshot() as SaveState['weather'],
     alerts: state.alerts.snapshot() as SaveState['alerts'],
+    tutorial: {
+      milestones: { ...state.tutorial.milestones },
+      warnings: { ...state.tutorial.warnings },
+      seenHints: { ...state.tutorial.seenHints },
+      dismissedHints: { ...state.tutorial.dismissedHints },
+      funnel: [...state.tutorial.funnel],
+      stats: { ...state.tutorial.stats },
+    },
   };
 }
 
@@ -368,6 +377,84 @@ export function restoreColony(state: ColonyState, data: SaveState): void {
   state.alerts.reset();
   state.domainEvents.clear();
   if (data.alerts) state.alerts.restore(data.alerts);
+
+  // v14 tutorial state
+  const savedTut = (data as { tutorial?: unknown }).tutorial as
+    | Record<string, unknown>
+    | undefined;
+  if (savedTut && typeof savedTut === 'object') {
+    const base = emptyTutorialState();
+    // milestones
+    const sm = savedTut['milestones'] as Record<string, unknown> | undefined;
+    if (sm && typeof sm === 'object') {
+      for (const k of Object.keys(base.milestones) as (keyof typeof base.milestones)[]) {
+        const m = sm[k as string] as { completed?: unknown; sol?: unknown; tick?: unknown } | undefined;
+        if (m && typeof m.completed === 'boolean') {
+          base.milestones[k] = {
+            completed: !!m.completed,
+            sol: Number.isFinite(m.sol as number) ? (m.sol as number) : 0,
+            tick: Number.isFinite(m.tick as number) ? (m.tick as number) : 0,
+          };
+        }
+      }
+    }
+    // warnings
+    const sw = savedTut['warnings'] as Record<string, unknown> | undefined;
+    if (sw && typeof sw === 'object') {
+      for (const k of Object.keys(base.warnings) as (keyof typeof base.warnings)[]) {
+        const w = sw[k as string] as
+          | { lastSeenTick?: unknown; lastSeenSol?: unknown; count?: unknown; active?: unknown }
+          | undefined;
+        if (w && Number.isFinite(w.lastSeenTick as number)) {
+          base.warnings[k] = {
+            lastSeenTick: Number(w.lastSeenTick) || -1e12,
+            lastSeenSol: Number(w.lastSeenSol) || -1e12,
+            count: Math.max(0, Math.floor(Number(w.count) || 0)),
+            active: !!w.active,
+          };
+        }
+      }
+    }
+    const sh = savedTut['seenHints'];
+    if (sh && typeof sh === 'object') {
+      base.seenHints = { ...(sh as Record<string, boolean>) };
+    }
+    const dh = savedTut['dismissedHints'];
+    if (dh && typeof dh === 'object') {
+      base.dismissedHints = { ...(dh as Record<string, boolean>) };
+    }
+    const funnel = savedTut['funnel'];
+    if (Array.isArray(funnel)) {
+      base.funnel = funnel.slice(-200).map((e: unknown) => {
+        const rec = e as Record<string, unknown>;
+        return {
+          id: String(rec['id'] ?? ''),
+          type: (rec['type'] === 'warning' || rec['type'] === 'hint' ? rec['type'] : 'milestone') as
+            | 'milestone'
+            | 'warning'
+            | 'hint',
+          sol: Number(rec['sol']) || 0,
+          tick: Math.floor(Number(rec['tick']) || 0),
+          at: Number(rec['at']) || 0,
+        };
+      });
+    }
+    const st = savedTut['stats'] as Record<string, unknown> | undefined;
+    if (st && typeof st === 'object') {
+      base.stats = {
+        moves: Math.max(0, Math.floor(Number(st['moves']) || 0)),
+        mines: Math.max(0, Math.floor(Number(st['mines']) || 0)),
+        hauls: Math.max(0, Math.floor(Number(st['hauls']) || 0)),
+        builds: Math.max(0, Math.floor(Number(st['builds']) || 0)),
+        automations: Math.max(0, Math.floor(Number(st['automations']) || 0)),
+        stormsSurvived: Math.max(0, Math.floor(Number(st['stormsSurvived']) || 0)),
+      };
+    }
+    state.tutorial = base;
+  } else {
+    state.tutorial = emptyTutorialState();
+  }
+
   HistorySystem.clear(state);
 
   let maxId = state.nextId;

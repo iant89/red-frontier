@@ -1436,6 +1436,130 @@ body {
   border-color: rgba(23, 18, 12, 0.4);
 }
 
+/* --------------------------------------------------------- tutorial --- */
+#tutorial-panel {
+  top: 62px;
+  left: 310px;
+  width: 340px;
+  max-height: calc(100vh - 180px);
+  overflow-y: auto;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 9;
+  border-color: var(--cyan);
+}
+
+.tut-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tut-warning {
+  padding: 7px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--warn);
+  background: rgba(56, 40, 12, 0.9);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.tut-warning.crit {
+  border-color: var(--crit);
+  background: rgba(60, 18, 12, 0.92);
+}
+
+.tut-w-title {
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  margin-bottom: 3px;
+}
+
+.tut-hint {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--cyan);
+  background: rgba(16, 32, 42, 0.9);
+}
+
+.tut-h-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 5px;
+}
+
+.tut-h-head b {
+  font-size: 13px;
+  color: var(--cyan);
+}
+
+.tut-h-body {
+  font-size: 12px;
+  color: var(--ui-text);
+  line-height: 1.5;
+}
+
+.tut-h-why {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--ui-text-dim);
+  line-height: 1.4;
+  border-left: 2px solid var(--cyan);
+  padding-left: 7px;
+}
+
+.tut-h-why .k {
+  color: var(--ui-text-faint);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-right: 4px;
+}
+
+.tut-progress {
+  margin-top: 4px;
+  font-size: 10.5px;
+  color: var(--ui-text-dim);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.tut-progress .k {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.tut-progress .v {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 1080px) {
+  #tutorial-panel {
+    left: 8px;
+    right: auto;
+    top: 360px;
+    width: min(340px, calc(100vw - 16px));
+  }
+}
+
+@media (max-width: 760px) {
+  #tutorial-panel {
+    top: auto;
+    bottom: 140px;
+    left: 6px;
+    right: 6px;
+    width: auto;
+    max-height: 40vh;
+  }
+}
+
 /* ------------------------------------------------------------ hintbar --- */
 #hintbar {
   bottom: 96px;

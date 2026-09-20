@@ -37,6 +37,7 @@ import type {
   ResourceView,
   RoverView,
   WeatherView,
+  TutorialView,
 } from './viewModels';
 
 export type {
@@ -47,6 +48,7 @@ export type {
   ResourceView,
   RoverView,
   WeatherView,
+  TutorialView,
 } from './viewModels';
 
 /**
@@ -101,6 +103,7 @@ export type SimFields = ResourceView & {
   readonly alerts: AlertsView;
   readonly clock: ClockView;
   readonly weather: WeatherView;
+  readonly tutorial: TutorialView;
 };
 
 // ---------------------------------------------------------- pure queries ----

@@ -27,6 +27,15 @@ import type {
 } from '../state/RoverState';
 import type { ColonistActivity, ColonistOrder } from '../lifesupport';
 import type { StormCell, StormKind, StormKindReal, WeatherRadar } from '../weather';
+import type { TutorialState, MilestoneId, WarningId, HintId } from '../state/TutorialState';
+
+export interface TutorialView {
+  readonly milestones: Readonly<Record<MilestoneId, { completed: boolean; sol: number; tick: number }>>;
+  readonly activeWarnings: ReadonlyArray<WarningId>;
+  readonly nextHint: HintId | null;
+  readonly funnel: ReadonlyArray<{ id: string; type: string; sol: number; tick: number; at: number }>;
+  readonly stats: Readonly<{ moves: number; mines: number; hauls: number; builds: number; automations: number; stormsSurvived: number }>;
+}
 
 /** One rover as the HUD / renderer may see it — nested bags are owned copies. */
 export interface RoverView {

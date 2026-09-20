@@ -1,0 +1,246 @@
+{
+  "seed": 9001,
+  "commands": [
+    {
+      "tick": 0,
+      "command": {
+        "type": "building/place",
+        "kind": "warehouse",
+        "x": 34,
+        "z": 0
+      }
+    },
+    {
+      "tick": 10,
+      "command": {
+        "type": "building/place",
+        "kind": "solar",
+        "x": 30.020218157203516,
+        "z": 15.962033134720288
+      }
+    },
+    {
+      "tick": 20,
+      "command": {
+        "type": "building/place",
+        "kind": "battery",
+        "x": 22.306006985677246,
+        "z": 25.660125727574247
+      }
+    },
+    {
+      "tick": 30,
+      "command": {
+        "type": "building/place",
+        "kind": "extractor",
+        "x": 11.62868487307274,
+        "z": 31.949549106720884
+      }
+    },
+    {
+      "tick": 40,
+      "command": {
+        "type": "building/place",
+        "kind": "oxygenator",
+        "x": -0.5933818188676382,
+        "z": 33.9948216353173
+      }
+    },
+    {
+      "tick": 50,
+      "command": {
+        "type": "building/place",
+        "kind": "greenhouse",
+        "x": -16.483527088375457,
+        "z": 29.737070042739457
+      }
+    },
+    {
+      "tick": 60,
+      "command": {
+        "type": "building/place",
+        "kind": "refinery",
+        "x": -28.514799310144422,
+        "z": 18.517727190510914
+      }
+    },
+    {
+      "tick": 70,
+      "command": {
+        "type": "building/place",
+        "kind": "workshop",
+        "x": -33.87061973511935,
+        "z": 2.9632952534203936
+      }
+    },
+    {
+      "tick": 80,
+      "command": {
+        "type": "building/place",
+        "kind": "garage",
+        "x": -31.297165017382973,
+        "z": -13.2848583686353
+      }
+    },
+    {
+      "tick": 90,
+      "command": {
+        "type": "building/place",
+        "kind": "waterTank",
+        "x": -21.39689329569446,
+        "z": -26.42296268953702
+      }
+    },
+    {
+      "tick": 100,
+      "command": {
+        "type": "building/place",
+        "kind": "pumpStation",
+        "x": -10.506577808748217,
+        "z": -32.33592155403522
+      }
+    },
+    {
+      "tick": 110,
+      "command": {
+        "type": "dev/building/complete",
+        "buildingId": 1000
+      }
+    },
+    {
+      "tick": 120,
+      "command": {
+        "type": "dev/building/complete",
+        "buildingId": 1001
+      }
+    },
+    {
+      "tick": 130,
+      "command": {
+        "type": "dev/building/complete",
+        "buildingId": 1002
+      }
+    },
+    {
+      "tick": 140,
+      "command": {
+        "type": "dev/building/complete",
+        "buildingId": 1003
+      }
+    },
+    {
+      "tick": 150,
+      "command": {
+        "type": "dev/building/complete",
+        "buildingId": 1004
+      }
+    },
+    {
+      "tick": 160,
+      "command": {
+        "type": "dev/building/complete",
+        "buildingId": 1005
+      }
+    },
+    {
+      "tick": 170,
+      "command": {
+        "type": "dev/building/complete",
+        "buildingId": 1006
+      }
+    },
+    {
+      "tick": 180,
+      "command": {
+        "type": "dev/building/complete",
+        "buildingId": 1007
+      }
+    },
+    {
+      "tick": 190,
+      "command": {
+        "type": "dev/building/complete",
+        "buildingId": 1008
+      }
+    },
+    {
+      "tick": 200,
+      "command": {
+        "type": "dev/building/complete",
+        "buildingId": 1009
+      }
+    },
+    {
+      "tick": 210,
+      "command": {
+        "type": "dev/building/complete",
+        "buildingId": 1010
+      }
+    },
+    {
+      "tick": 220,
+      "command": {
+        "type": "rover/mine",
+        "roverId": 1000,
+        "depositId": 5,
+        "queue": false
+      }
+    },
+    {
+      "tick": 420,
+      "command": {
+        "type": "rover/repeatRoute",
+        "roverId": 1000,
+        "on": true
+      }
+    },
+    {
+      "tick": 430,
+      "command": {
+        "type": "rover/mine",
+        "roverId": 1001,
+        "depositId": 2,
+        "queue": false
+      }
+    },
+    {
+      "tick": 630,
+      "command": {
+        "type": "rover/repeatRoute",
+        "roverId": 1001,
+        "on": true
+      }
+    },
+    {
+      "tick": 640,
+      "command": {
+        "type": "dev/spawn/rover",
+        "kind": "cargo",
+        "x": 10,
+        "z": 10
+      }
+    },
+    {
+      "tick": 650,
+      "command": {
+        "type": "rover/mine",
+        "roverId": 1002,
+        "depositId": 4,
+        "queue": false
+      }
+    },
+    {
+      "tick": 850,
+      "command": {
+        "type": "rover/repeatRoute",
+        "roverId": 1002,
+        "on": true
+      }
+    }
+  ],
+  "difficulty": "pioneer",
+  "worldOptions": {
+    "nearDeposits": 0.2
+  },
+  "durationTicks": 24000
+}

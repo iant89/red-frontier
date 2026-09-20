@@ -259,7 +259,7 @@ test('current save persists owned parts and in-flight jobs; resume spends only o
   service(sim, 6);
   const snap = sim.snapshot();
   assert.equal(snap.version, SAVE_VERSION);
-  assert.equal(SAVE_VERSION, 13);
+  assert.equal(SAVE_VERSION, 14);
   snap.rovers[0].parts!.motor = 49;
   assert.equal(r.parts.motor, 50, 'snapshot does not alias live parts');
   const restored = new Simulation({ seed: 2 });

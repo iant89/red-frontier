@@ -164,6 +164,7 @@ const COMMAND_CUES: Record<SimCommandType, AudioCue> = {
   'dev/rover/condition': 'developer',
   'dev/colonist/health': 'developer',
   'dev/colonist/suit': 'suit',
+  'tutorial/dismiss': 'ui',
 };
 
 export function cueForCommand(type: SimCommandType): AudioCue {

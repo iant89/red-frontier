@@ -140,6 +140,13 @@ export interface ViewPayload {
   reserveSols: Record<FluidId, number>;
   netRatePerSol: Record<FluidId, number>;
   storageCapacity: number;
+  tutorial: {
+    milestones: Record<string, { completed: boolean; sol: number; tick: number }>;
+    activeWarnings: string[];
+    nextHint: string | null;
+    funnel: Array<{ id: string; type: string; sol: number; tick: number; at: number }>;
+    stats: { moves: number; mines: number; hauls: number; builds: number; automations: number; stormsSurvived: number };
+  };
   /** Echoed back so the panel can show what the world is actually doing. */
   pinnedRovers: number[];
 }
@@ -284,6 +291,13 @@ export function projectView(
     reserveSols: fluidMap((f) => sim.reserveSols(f)),
     netRatePerSol: fluidMap((f) => sim.netRatePerSol(f)),
     storageCapacity: sim.storageCapacity(),
+    tutorial: {
+      milestones: { ...sim.state.tutorial.milestones } as any,
+      activeWarnings: [...(sim.state.tutorial._activeWarnings ?? [])],
+      nextHint: sim.state.tutorial._nextHint ?? null,
+      funnel: [...sim.state.tutorial.funnel],
+      stats: { ...sim.state.tutorial.stats },
+    },
     pinnedRovers: livePins(sim, overlays),
   };
   if (t0) getProfiler().recordViewGeneration(performance.now() - t0);

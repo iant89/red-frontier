@@ -84,6 +84,7 @@ import { AlertSystem } from './systems/AlertSystem';
 import { HistorySystem } from './systems/HistorySystem';
 import { GarageSystem } from './systems/GarageSystem';
 import { MaintenanceSystem } from './systems/MaintenanceSystem';
+import { TutorialSystem } from './systems/TutorialSystem';
 import { DevBackdoors } from './DevBackdoors';
 
 import {
@@ -427,14 +428,17 @@ export class Simulation {
 
   issueMove(roverId: number, x: number, z: number, queued = false): void {
     RoverSystem.issueMove(this.state, roverId, x, z, queued);
+    this.state.tutorial.stats.moves++;
   }
 
   issueMine(roverId: number, depositId: number, queued = false): void {
     RoverSystem.issueMine(this.state, roverId, depositId, queued);
+    this.state.tutorial.stats.mines++;
   }
 
   issueUnload(roverId: number, queued = false): void {
     RoverSystem.issueUnload(this.state, roverId, queued);
+    this.state.tutorial.stats.hauls++;
   }
 
   issueWait(roverId: number, seconds: number, queued = false): void {
@@ -451,6 +455,7 @@ export class Simulation {
 
   setRepeatRoute(roverId: number, on: boolean): void {
     RoverSystem.setRepeatRoute(this.state, roverId, on);
+    if (on) this.state.tutorial.stats.automations++;
   }
 
   setRoverRule(
@@ -459,6 +464,7 @@ export class Simulation {
     on: boolean,
   ): void {
     RoverSystem.setRoverRule(this.state, roverId, rule, on);
+    if (on) this.state.tutorial.stats.automations++;
   }
 
   setChargeFloor(roverId: number, pct: number): void {
@@ -517,6 +523,10 @@ export class Simulation {
 
   orderColonist(order: ColonistOrder): void {
     LifeSupportSystem.order(this.state, order);
+  }
+
+  dismissTutorialHint(hintId: string): void {
+    TutorialSystem.dismissHint(this.state, hintId);
   }
 
   // -------------------------------------------------------- placement ----
@@ -679,8 +689,13 @@ export class Simulation {
     LifeSupportSystem.tickColonist(this.state, this.lifeSupportHooks);
     MaintenanceSystem.tickWear(this.state);
 
-    // 9. failure checks → alerts → history
+    // 9. failure checks → alerts → tutorial → history
     this.evaluateAlerts();
+    TutorialSystem.tick(this.state, {
+      reserveSols: (f) => this.reserveSols(f),
+      netRatePerSol: (f) => this.netRatePerSol(f),
+      instantRatePerSol: (f) => this.instantRatePerSol(f),
+    });
     HistorySystem.tick(this.state);
   }
 
@@ -714,6 +729,16 @@ export class Simulation {
   }
 
   // ------------------------------------------------------------ alerts ----
+
+  get tutorial(): import('./host/viewModels').TutorialView {
+    return {
+      milestones: { ...this.state.tutorial.milestones } as any,
+      activeWarnings: [...(this.state.tutorial._activeWarnings ?? [])],
+      nextHint: this.state.tutorial._nextHint ?? null,
+      funnel: [...this.state.tutorial.funnel],
+      stats: { ...this.state.tutorial.stats },
+    };
+  }
 
   solsOfReserve(f: FluidId): number {
     return this.reserveSols(f);

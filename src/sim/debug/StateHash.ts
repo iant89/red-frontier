@@ -123,6 +123,14 @@ function project(sim: Simulation): unknown {
     // different number of motors are different colonies.
     components: sim.components,
     water: { active: sim.state.water.active, links: sim.state.water.links, tanks: sim.state.water.tanks },
+    tutorial: {
+      milestones: sim.state.tutorial.milestones,
+      warnings: sim.state.tutorial.warnings,
+      seenHints: sim.state.tutorial.seenHints,
+      dismissedHints: sim.state.tutorial.dismissedHints,
+      funnel: sim.state.tutorial.funnel,
+      stats: sim.state.tutorial.stats,
+    },
     componentCapacity: sim.componentCapacity(),
     fluids: sim.pools.amounts,
     fluidCapacity: sim.pools.capacity,
@@ -279,6 +287,7 @@ export function hashSimulationSection(sim: Simulation, section: StateSection): s
         clock: p.clock,
         nextDropSol: p.nextDropSol,
         history: p.history,
+        tutorial: (p as any).tutorial,
       };
       break;
     case 'weather':
