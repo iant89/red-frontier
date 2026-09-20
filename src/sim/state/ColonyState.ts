@@ -67,6 +67,7 @@ import { defaultRoverRules, type Rover, type RoverTask } from './RoverState';
 import type { Building } from './BuildingState';
 import type { HistorySample } from './HistoryState';
 import { emptyFlows, type FluidFlow } from './ResourceState';
+import { emptyTutorialState, type TutorialState } from './TutorialState';
 import type { Poi } from '../pois';
 
 export interface ColonyState {
@@ -111,6 +112,8 @@ export interface ColonyState {
 
   nextDropSol: number;
   dropRng: () => number;
+
+  tutorial: TutorialState;
 
   simTime: number;
   ticksRun: number;
@@ -229,6 +232,8 @@ export function createColonyState(params: ColonyStateParams): ColonyState {
   let dropRng = mulberry32(seed ^ 0x2f6e2b1);
   let nextDropSol = DROP_FIRST_SOL_MIN + dropRng() * (DROP_FIRST_SOL_MAX - DROP_FIRST_SOL_MIN);
 
+  const tutorial = emptyTutorialState();
+
   const supplies = diff.suppliesMul * suppliesMulFor(worldOptions.supplies);
   pools.amounts = {
     water: POD_STARTING_FLUIDS.water * supplies,
@@ -265,6 +270,7 @@ export function createColonyState(params: ColonyStateParams): ColonyState {
     dustTransmission: BASE_DUST_TRANSMISSION,
     nextDropSol,
     dropRng,
+    tutorial,
     simTime: 0,
     ticksRun: 0,
     remainder: 0,

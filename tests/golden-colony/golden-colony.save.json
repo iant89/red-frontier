@@ -1,5 +1,5 @@
 {
-  "version": 13,
+  "version": 14,
   "seed": 9001,
   "difficulty": "pioneer",
   "worldHalf": 640,
@@ -1358,18 +1358,6 @@
       {
         "severity": "info",
         "text": "Materials delivered to the Pump Station site.",
-        "time": 78.64999999999768,
-        "stamp": "Sol 1 · 16:27"
-      },
-      {
-        "severity": "info",
-        "text": "Materials delivered to the Pump Station site.",
-        "time": 78.69999999999767,
-        "stamp": "Sol 1 · 16:28"
-      },
-      {
-        "severity": "info",
-        "text": "Materials delivered to the Pump Station site.",
         "time": 78.74999999999767,
         "stamp": "Sol 1 · 16:28"
       },
@@ -2412,6 +2400,12 @@
         "stamp": "Sol 3 · 00:00"
       },
       {
+        "severity": "ok",
+        "text": "Milestone: first-objective",
+        "time": 398.4000000000563,
+        "stamp": "Sol 3 · 00:00"
+      },
+      {
         "severity": "crit",
         "text": "Cargo Rover is stranded — battery flat. Another rover can jump-start it.",
         "time": 444.30000000006675,
@@ -2450,6 +2444,12 @@
       {
         "severity": "ok",
         "text": "Storm passed — skies are settling.",
+        "time": 614.0499999999893,
+        "stamp": "Sol 3 · 22:09"
+      },
+      {
+        "severity": "ok",
+        "text": "Milestone: first-storm-survived",
         "time": 614.0499999999893,
         "stamp": "Sol 3 · 22:09"
       },
@@ -2556,5 +2556,394 @@
         "stamp": "Sol 6 · 04:36"
       }
     ]
+  },
+  "tutorial": {
+    "milestones": {
+      "first-move": {
+        "completed": true,
+        "sol": 0,
+        "tick": 23
+      },
+      "first-resource-found": {
+        "completed": true,
+        "sol": 0,
+        "tick": 1
+      },
+      "first-mine": {
+        "completed": true,
+        "sol": 0,
+        "tick": 1
+      },
+      "first-haul": {
+        "completed": true,
+        "sol": 0,
+        "tick": 1276
+      },
+      "first-build": {
+        "completed": true,
+        "sol": 0,
+        "tick": 1
+      },
+      "first-power": {
+        "completed": true,
+        "sol": 0,
+        "tick": 1
+      },
+      "first-water": {
+        "completed": true,
+        "sol": 0,
+        "tick": 161
+      },
+      "first-oxygen": {
+        "completed": true,
+        "sol": 0,
+        "tick": 171
+      },
+      "first-food": {
+        "completed": true,
+        "sol": 0,
+        "tick": 181
+      },
+      "first-automation": {
+        "completed": true,
+        "sol": 0,
+        "tick": 1
+      },
+      "first-storm-survived": {
+        "completed": true,
+        "sol": 2,
+        "tick": 12281
+      },
+      "first-objective": {
+        "completed": true,
+        "sol": 2,
+        "tick": 7968
+      }
+    },
+    "warnings": {
+      "water-low": {
+        "lastSeenTick": -1000000000000,
+        "lastSeenSol": -1000000000000,
+        "count": 0,
+        "active": false
+      },
+      "water-critical": {
+        "lastSeenTick": -1000000000000,
+        "lastSeenSol": -1000000000000,
+        "count": 0,
+        "active": false
+      },
+      "oxygen-low": {
+        "lastSeenTick": -1000000000000,
+        "lastSeenSol": -1000000000000,
+        "count": 0,
+        "active": false
+      },
+      "oxygen-critical": {
+        "lastSeenTick": -1000000000000,
+        "lastSeenSol": -1000000000000,
+        "count": 0,
+        "active": false
+      },
+      "food-low": {
+        "lastSeenTick": -1000000000000,
+        "lastSeenSol": -1000000000000,
+        "count": 0,
+        "active": false
+      },
+      "power-low": {
+        "lastSeenTick": 1567,
+        "lastSeenSol": 0,
+        "count": 1,
+        "active": true
+      },
+      "battery-low": {
+        "lastSeenTick": 23228,
+        "lastSeenSol": 5,
+        "count": 10,
+        "active": true
+      },
+      "panels-dirty": {
+        "lastSeenTick": 22330,
+        "lastSeenSol": 4,
+        "count": 3,
+        "active": true
+      },
+      "rover-stranded": {
+        "lastSeenTick": 23286,
+        "lastSeenSol": 5,
+        "count": 7,
+        "active": true
+      },
+      "storm-inbound": {
+        "lastSeenTick": 15644,
+        "lastSeenSol": 3,
+        "count": 2,
+        "active": false
+      },
+      "building-damaged": {
+        "lastSeenTick": -1000000000000,
+        "lastSeenSol": -1000000000000,
+        "count": 0,
+        "active": false
+      }
+    },
+    "seenHints": {},
+    "dismissedHints": {},
+    "funnel": [
+      {
+        "id": "first-resource-found",
+        "type": "milestone",
+        "sol": 0,
+        "tick": 1,
+        "at": 0.05
+      },
+      {
+        "id": "first-mine",
+        "type": "milestone",
+        "sol": 0,
+        "tick": 1,
+        "at": 0.05
+      },
+      {
+        "id": "first-build",
+        "type": "milestone",
+        "sol": 0,
+        "tick": 1,
+        "at": 0.05
+      },
+      {
+        "id": "first-power",
+        "type": "milestone",
+        "sol": 0,
+        "tick": 1,
+        "at": 0.05
+      },
+      {
+        "id": "first-automation",
+        "type": "milestone",
+        "sol": 0,
+        "tick": 1,
+        "at": 0.05
+      },
+      {
+        "id": "first-move",
+        "type": "milestone",
+        "sol": 0,
+        "tick": 23,
+        "at": 1.1500000000000004
+      },
+      {
+        "id": "first-water",
+        "type": "milestone",
+        "sol": 0,
+        "tick": 161,
+        "at": 8.04999999999998
+      },
+      {
+        "id": "first-oxygen",
+        "type": "milestone",
+        "sol": 0,
+        "tick": 171,
+        "at": 8.549999999999986
+      },
+      {
+        "id": "first-food",
+        "type": "milestone",
+        "sol": 0,
+        "tick": 181,
+        "at": 9.049999999999994
+      },
+      {
+        "id": "first-haul",
+        "type": "milestone",
+        "sol": 0,
+        "tick": 1276,
+        "at": 63.79999999999851
+      },
+      {
+        "id": "power-low",
+        "type": "warning",
+        "sol": 0,
+        "tick": 1567,
+        "at": 78.34999999999769
+      },
+      {
+        "id": "battery-low",
+        "type": "warning",
+        "sol": 0,
+        "tick": 1628,
+        "at": 81.39999999999752
+      },
+      {
+        "id": "battery-low",
+        "type": "warning",
+        "sol": 1,
+        "tick": 4028,
+        "at": 201.40000000001154
+      },
+      {
+        "id": "battery-low",
+        "type": "warning",
+        "sol": 1,
+        "tick": 6428,
+        "at": 321.4000000000388
+      },
+      {
+        "id": "first-objective",
+        "type": "milestone",
+        "sol": 2,
+        "tick": 7968,
+        "at": 398.4000000000563
+      },
+      {
+        "id": "battery-low",
+        "type": "warning",
+        "sol": 2,
+        "tick": 8828,
+        "at": 441.4000000000661
+      },
+      {
+        "id": "rover-stranded",
+        "type": "warning",
+        "sol": 2,
+        "tick": 8886,
+        "at": 444.30000000006675
+      },
+      {
+        "id": "storm-inbound",
+        "type": "warning",
+        "sol": 2,
+        "tick": 10560,
+        "at": 528.0000000000675
+      },
+      {
+        "id": "battery-low",
+        "type": "warning",
+        "sol": 2,
+        "tick": 11228,
+        "at": 561.4000000000372
+      },
+      {
+        "id": "rover-stranded",
+        "type": "warning",
+        "sol": 2,
+        "tick": 11286,
+        "at": 564.3000000000345
+      },
+      {
+        "id": "first-storm-survived",
+        "type": "milestone",
+        "sol": 2,
+        "tick": 12281,
+        "at": 614.0499999999893
+      },
+      {
+        "id": "battery-low",
+        "type": "warning",
+        "sol": 3,
+        "tick": 13628,
+        "at": 681.399999999928
+      },
+      {
+        "id": "rover-stranded",
+        "type": "warning",
+        "sol": 3,
+        "tick": 13686,
+        "at": 684.2999999999254
+      },
+      {
+        "id": "storm-inbound",
+        "type": "warning",
+        "sol": 3,
+        "tick": 15644,
+        "at": 782.1999999998363
+      },
+      {
+        "id": "battery-low",
+        "type": "warning",
+        "sol": 3,
+        "tick": 16028,
+        "at": 801.3999999998189
+      },
+      {
+        "id": "rover-stranded",
+        "type": "warning",
+        "sol": 3,
+        "tick": 16086,
+        "at": 804.2999999998162
+      },
+      {
+        "id": "panels-dirty",
+        "type": "warning",
+        "sol": 3,
+        "tick": 17530,
+        "at": 876.4999999997506
+      },
+      {
+        "id": "battery-low",
+        "type": "warning",
+        "sol": 4,
+        "tick": 18428,
+        "at": 921.3999999997097
+      },
+      {
+        "id": "rover-stranded",
+        "type": "warning",
+        "sol": 4,
+        "tick": 18486,
+        "at": 924.2999999997071
+      },
+      {
+        "id": "panels-dirty",
+        "type": "warning",
+        "sol": 4,
+        "tick": 19930,
+        "at": 996.4999999996414
+      },
+      {
+        "id": "battery-low",
+        "type": "warning",
+        "sol": 4,
+        "tick": 20828,
+        "at": 1041.3999999996006
+      },
+      {
+        "id": "rover-stranded",
+        "type": "warning",
+        "sol": 4,
+        "tick": 20886,
+        "at": 1044.299999999598
+      },
+      {
+        "id": "panels-dirty",
+        "type": "warning",
+        "sol": 4,
+        "tick": 22330,
+        "at": 1116.4999999995323
+      },
+      {
+        "id": "battery-low",
+        "type": "warning",
+        "sol": 5,
+        "tick": 23228,
+        "at": 1161.3999999994915
+      },
+      {
+        "id": "rover-stranded",
+        "type": "warning",
+        "sol": 5,
+        "tick": 23286,
+        "at": 1164.2999999994888
+      }
+    ],
+    "stats": {
+      "moves": 0,
+      "mines": 3,
+      "hauls": 0,
+      "builds": 11,
+      "automations": 3,
+      "stormsSurvived": 2
+    }
   }
 }

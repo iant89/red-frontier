@@ -47,6 +47,7 @@ import { BuildController } from './BuildController';
 import { SaveController } from './SaveController';
 import { MenuController } from './MenuController';
 import { UpdateController } from './UpdateController';
+import { TutorialPanel } from '../ui/TutorialPanel';
 
 void SAVE_VERSION;
 
@@ -89,6 +90,7 @@ export class Game {
   private readonly menuCtrl: MenuController;
   private readonly engineeringCtrl: EngineeringController;
   private readonly updateCtrl: UpdateController;
+  private readonly tutorialPanel: TutorialPanel;
 
   // ---- smoke / test field aliases (same names as pre-Phase-19 Game) ----
   /** @internal pause-smoke / pause-save read this */
@@ -331,6 +333,13 @@ export class Game {
     });
 
     hudBag.hud = this.hud;
+
+    this.tutorialPanel = new TutorialPanel({
+      onDismissHint: (hintId) => {
+        this.host?.send({ type: 'tutorial/dismiss', hintId } as any);
+      },
+      onAction: (a, arg) => this.handleAction(a, arg),
+    });
 
     this.dev = new DevMode(
       (sev, text) => this.hud.addLog(sev, text),
@@ -605,6 +614,7 @@ export class Game {
     // the frame loop no longer mentions developer mode at all.
     this.dev.attach(host);
     this.hud.updateVitals(host.view);
+    this.tutorialPanel.update(host.view);
     this.syncUI(true);
     this.started = true;
     // In production builds, watch for a newer deploy while playing (TDD §23).
@@ -832,6 +842,7 @@ export class Game {
     this.hud.updateVitals(this.sim);
     this.hud.updateAlerts(this.sim.alerts.list(), this.sim.alerts);
     this.hud.updateAffordability(this.sim);
+    this.tutorialPanel.update(this.sim);
     // minimap — cheap, throttled inside HUD by key
     try {
       const cam = this.rig ? { x: this.rig.target.x, z: this.rig.target.z } : null;

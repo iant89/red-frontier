@@ -68,7 +68,10 @@ export type DomainEvent =
       kg: number;
     }
   | { type: 'colonist/critical'; colonistId: number; health: number }
-  | { type: 'game/over'; reason: string; sol: number };
+  | { type: 'game/over'; reason: string; sol: number }
+  | { type: 'tutorial/milestone'; milestone: string; sol: number }
+  | { type: 'tutorial/warning'; warning: string; sol: number }
+  | { type: 'tutorial/hint'; hint: string; sol: number };
 
 /** Catalog discriminants — derived from the union so they cannot drift. */
 export type DomainEventType = DomainEvent['type'];

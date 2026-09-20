@@ -39,6 +39,7 @@ import { WeatherSystem } from './systems/WeatherSystem';
 import { ConstructionSystem, type ConstructionHostHooks } from './systems/ConstructionSystem';
 import { RoverSystem } from './systems/RoverSystem';
 import { HistorySystem } from './systems/HistorySystem';
+import { TutorialSystem } from './systems/TutorialSystem';
 
 function event(state: ColonyState, severity: 'ok' | 'info' | 'warn', text: string): void {
   state.alerts.event(severity, text, state.simTime, state.clock.format());
@@ -191,6 +192,7 @@ export const DevBackdoors = {
     ClockSystem.setTime(state, sol, frac);
     WeatherSystem.afterTimeJump(state);
     HistorySystem.afterTimeJump(state);
+    TutorialSystem.afterTimeJump(state);
   },
 
   forceLightningStrike(

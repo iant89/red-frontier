@@ -67,6 +67,7 @@ const SAMPLES: Record<SimCommand['type'], SimCommand> = {
   'building/maintain': { type: 'building/maintain', buildingId: 1 },
   'building/assemble': { type: 'building/assemble', buildingId: 1, kind: 'cargo' },
   'building/recipe': { type: 'building/recipe', buildingId: 1, recipe: 1 },
+  'tutorial/dismiss': { type: 'tutorial/dismiss', hintId: 'welcome' },
   'colonist/order': { type: 'colonist/order', order: { type: 'shelter' } },
   'dev/time': { type: 'dev/time', sol: 3, frac: 0.5 },
   'dev/storm/force': { type: 'dev/storm/force', kind: 'severe' },

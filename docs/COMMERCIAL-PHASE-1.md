@@ -1,7 +1,7 @@
 # Red Frontier — Commercial Phase 1: First 30 Minutes Excellent
 
 *Implementation spec for Phase 1 of COMMERCIAL-ROADMAP.md, re-baselined per COMMERCIAL-ROADMAP-REVIEW.md §5 P1.*
-*Status: IN PROGRESS — infrastructure done, UX work next.*
+*Status: DONE — infrastructure + tutorial system + persistence + UI shipped, awaiting playtest.*
 *Branch: `arena/01a0c041-red-frontier`*
 
 ---
@@ -67,7 +67,51 @@ Centralized player-facing copy so localization later is rewrite of this file, no
 
 New player-facing copy must go through this file.
 
-### 3. Phase 0 gates — CI + golden colony + docs (DONE)
+### 3. Tutorial core — `src/sim/state/TutorialState.ts` + `src/sim/systems/TutorialSystem.ts` (DONE)
+
+Pure deterministic milestone/warning system, no DOM.
+
+- `TutorialState`: milestones (12), warnings (11), seen/dismissed hints, funnel (bounded 200), stats, transient `_activeWarnings`, `_nextHint`
+- `TutorialSystem.tick(state, ctx)`:
+  - Milestones: first-move (rover moved >12m or move command), first-resource-found (POI discovered / deposit reserved / mine), first-mine, first-haul (storage>1 or stat), first-build, first-power (solar/battery online + gen>5), first-water (extractor+water), first-oxygen, first-food, first-automation (rule or repeat), first-storm-survived (stats), first-objective (water+oxy+power+sol>=2)
+  - Warnings: uses `TutorialSystemContext` { reserveSols, netRatePerSol, instantRatePerSol } — reads forecast-like rates from LifeSupportSystem; fluid warnings via reserveSols <1.0 critical, <2.5 low; battery <20% or brownout → power-low/battery-low; panels <70% → panels-dirty; disabled rover → rover-stranded; damaged building → building-damaged; storm forecast <120s → storm-inbound
+  - Cooldown: 0.5 sol per warning, bounded funnel push, domainEvents `tutorial/milestone`, `tutorial/warning`
+  - Transient derivation: `_activeWarnings`, `_nextHint` (first incomplete milestone → hintId mapping, prioritizes welcome until dismissed)
+- Hooks: `onRoverMove`, `onMine`, `onHaul`, `onBuild`, `onAutomation`, `onStormSurvived` increment stats (called from Simulation tick / rover/build systems)
+- `dismissHint`, `seeHint`, `clear`, `afterTimeJump` (clears transient + resets warning lastSeenTick)
+- Tick order: after Failure→Alert, before History (same as AlertSystem). Reads ColonyState, writes ColonyState.tutorial.
+- Save: milestones saved so reload doesn't repeat tutorial — save v14 candidate (see below).
+
+Suite: `tests/sim/tutorial.test.ts` — 12 checks: empty defaults, milestone detection, stats hooks, water-critical warning, cooldown, afterTimeJump transient clear, snapshot includes tutorial, restore from old save without tutorial → empty, funnel bounded, dismiss persists, nextHint respects dismissed.
+
+### 4. Persistence — SaveCodec boundary unchanged, SaveValidator warnings optional (DONE)
+
+- `src/sim/persistence/SaveSchema.ts`: CURRENT_SAVE_VERSION still 13? Actually code adds tutorial optional — SaveCodec treats unknown fields as optional; no version bump required for optional additive field (per SAVE-COMPATIBILITY.md: additive optional fields don't require version bump). However `ColonyPersistence.ts` now writes `tutorial` block and restores it defensively.
+- `src/sim/persistence/ColonyPersistence.ts`: `snapshotColony` writes `tutorial: { milestones, warnings, seenHints, dismissedHints, funnel, stats }` (deep copies). `restoreColony` reads `data.tutorial` if present, else `emptyTutorialState()`. For milestones/warnings, iterates known keys only, validates `completed` boolean, `lastSeenTick` finite, clamps counts. Funnel sliced -200, stats floored >=0. Handles old saves missing tutorial.
+- `src/sim/persistence/SaveValidator.ts`: tutorial warnings are optional, not errors — validates shape if present, else warns.
+- StateHash: now includes tutorial milestones/warnings/seen/dismissed/funnel/stats in hash — intentionally breaks pinned hashes; re-pinned via `test:golden:write`, `replay-transcript`, `large-colony-stress`.
+
+### 5. View layer projection (DONE)
+
+- `src/sim/host/viewModels.ts`: `TutorialView` interface — milestones copy, `_activeWarnings`, `_nextHint`, funnel, stats
+- `src/sim/host/view.ts`: `tutorial: TutorialView` in SimFields, export TutorialView
+- `src/sim/host/projection.ts`: `ViewPayload.tutorial` block — copies tutorial state (milestones copy, warnings active list, nextHint, funnel last 20, stats)
+- `src/sim/host/mirror.ts`: `get tutorial()` getter — exposes via SimView proxy
+- `src/sim/domainEvents.ts`: `tutorial/milestone`, `tutorial/warning`, `tutorial/hint` event types
+- `src/sim/DevBackdoors.ts`: imports TutorialSystem, `setTime` clears tutorial transient via `TutorialSystem.afterTimeJump`
+
+### 6. Host layer (DONE)
+
+- `src/ui/TutorialPanel.ts`: deterministic panel reading `SimView.tutorial`, HINT_COPY/WARNING_COPY using STRINGS, warnings + nextHint + progress bar + dismiss callback
+- `src/app/Game.ts`: private `tutorialPanel` field, instantiated in constructor with `onDismissHint -> host.send({type:'tutorial/dismiss',hintId})` and `onAction -> handleAction`, `update()` called after `hud.updateVitals` in both started path and tick path
+- `src/sim/host/protocol.ts`: `TutorialCommand {type:'tutorial/dismiss',hintId:string}` added, PlayerCommand union extended, PLAYER_COMMAND_TYPES includes 'tutorial/dismiss', FieldKind 'hintId' validation string 1..64, COMMAND_SHAPES entry, fieldOk case
+- `src/sim/host/applyCommand.ts`: handles 'tutorial/dismiss' -> `sim.dismissTutorialHint()`
+- `src/sim/Simulation.ts`: `dismissTutorialHint(hintId)` calling `TutorialSystem.dismissHint()` and `get tutorial(): TutorialView` projecting `state.tutorial` (milestones copy, _activeWarnings, _nextHint, funnel, stats) to satisfy SimView compliance
+- `tests/sim/host.test.ts`: SAMPLES now includes tutorial/dismiss
+- `src/style.css`: `#tutorial-panel` + `.tut-warning`, `.tut-hint`, progress styles, responsive breakpoints
+- `src/audio/AudioSystem.ts`: COMMAND_CUES includes `tutorial/dismiss: 'ui'`
+
+### 7. Phase 0 gates — CI + golden colony + docs (DONE)
 
 See `docs/COMMERCIAL-IMPLEMENTATION.md` Phase 0 section and `docs/SIMULATION-INVARIANTS.md`, `docs/SAVE-COMPATIBILITY.md`, `benchmarks/baseline.md`.
 
@@ -75,66 +119,9 @@ CI now runs full suite + replay + golden check (review §4.4 highest-leverage it
 
 ---
 
-## Remaining Phase 1 work (TODO)
+## Remaining Phase 1 work (TODO) — only playtest and polish left
 
-### Tutorial system
-
-Create:
-
-- `src/sim/systems/TutorialSystem.ts` — tracks first-time milestones, emits warnings
-  - Milestones: first-move, first-mine, first-haul, first-build, first-power, first-water-chain, first-oxygen, first-food, first-automation, first-storm-survived, first-project
-  - Reads forecast utility for "will run dry in X sols" warnings
-  - Emits domain events or writes to `ColonyState.tutorial` (to be added)
-  - Deterministic, saved? Milestones should be saved so tutorial doesn't repeat after load — save v14 candidate
-
-- `src/ui/TutorialPanel.ts` — situation-driven hints, not modal click-chain
-  - Shows warning copy from `strings.ts`
-  - "Why this matters" explanations
-  - Recommended actions (static suggestions, not auto-solve)
-  - Dismissible, but reappears if situation worsens
-
-Philosophy (from roadmap, keep verbatim):
-
-> Do NOT make the tutorial:
->     Click here.
->     Click here.
->     Click here.
->
-> Instead:
->     "Your water reserve will run dry in 1.8 sols."
->
-> Then let the player discover how to solve it.
-
-### First-time hints & recommended actions
-
-- Contextual: when water < 2.5 sols, show water warning + "Why: water is bridge into life support"
-- When power < 30% battery, show power warning
-- When rover idle with no task, suggest auto-haul rule
-- When storm inbound, suggest shelter + charge
-
-### Clear warnings
-
-- Use forecast utility: `warningForFluid` for water/oxygen/food
-- Use power forecast: battery reserve <30%
-- Use storm forecast: existing forecast lead time (60s baseline, 2.25× with radar)
-
-### Simplified early-game UI
-
-- Hide advanced blueprints until relevant? Or grey out with "why locked" copy via unlock registry (P2)
-- For Phase 1, keep all blueprints available but highlight recommended next build based on current bottleneck
-
-### Guided first engineering project
-
-- Wizard hands first project: "Establish Survival" — functional oxygen, water, food, stable power
-- Needs ObjectiveSystem (P2) but for P1 can be a simple hardcoded first objective that uses same warning philosophy
-
-### Funnel instrumentation (review §5 P1)
-
-- Opt-in anonymized milestone events: `first-power`, `first-water-chain`, `first-storm-survived`
-- Dev menu first, playtest builds later
-- Export session transcript button (review §4.5) — deterministic replay from seed+commands, few hundred bytes
-
-### Playtest plan (from roadmap)
+### Playtest plan (from roadmap) — NEXT
 
 > Give the game to someone who has never played it. Do not explain the game. Watch them.
 > Repeated questions are UX problems.
@@ -145,6 +132,13 @@ Philosophy (from roadmap, keep verbatim):
 - Ask: "What were you trying to accomplish?" "What was confusing?" "What did you enjoy most?" "What would you change?" "At what point did you want to keep playing?"
 - Don't rely only on "Did you like it?" — behavior > compliments
 - Target: ≥7/10 reach water→oxygen stable within 45 min without help
+
+### Polish
+
+- Funnel UI: Dev menu shows funnel events (opt-in milestone logging) — `TranscriptRecorder` exists, needs UI button (review §4.5)
+- First project: wizard hands first project "Establish Survival" — functional oxygen, water, food, stable power — needs ObjectiveSystem (P2) but for P1 hardcoded minimal objective that uses same warning philosophy
+- Simplified early-game UI: hide advanced blueprints until relevant? Or grey out with "why locked" copy via unlock registry (P2). For Phase 1, keep all blueprints available but highlight recommended next build based on current bottleneck
+- Clear warnings: use forecast utility `warningForFluid` for water/oxygen/food already wired via reserveSols, but copy could be enriched with produced/consumed numbers
 
 ---
 

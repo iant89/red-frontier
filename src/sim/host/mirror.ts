@@ -385,4 +385,8 @@ export class ColonyMirror implements SimView {
   netRatePerSol(f: FluidId): number {
     return this.payload.netRatePerSol[f];
   }
+
+  get tutorial() {
+    return this.payload.tutorial as any;
+  }
 }

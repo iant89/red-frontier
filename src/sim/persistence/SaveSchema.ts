@@ -21,6 +21,7 @@ import type { DifficultyId, WorldOptions } from '../difficulty';
 import type { PoiKind } from '../pois';
 import type { RoverTask, RoverRules, RoverPartHealth } from '../state/RoverState';
 import type { PartReplacement } from '../state/BuildingState';
+import type { TutorialState } from '../state/TutorialState';
 import { SAVE_VERSION } from '../config';
 
 // ---- sub-schemas -----------------------------------------------------------
@@ -192,6 +193,7 @@ export interface SaveState {
   buildings: BuildingSave[];
   weather: WeatherSave;
   alerts: AlertSave;
+  tutorial?: TutorialState | null;
 }
 
 /**

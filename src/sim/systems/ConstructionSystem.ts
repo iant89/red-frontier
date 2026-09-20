@@ -142,6 +142,7 @@ export class ConstructionSystem {
       x,
       z,
     });
+    state.tutorial.stats.builds++;
     ConstructionSystem.log(state, 'info', `${def.label} sited — assigning a builder.`);
     return b;
   }

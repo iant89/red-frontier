@@ -26,6 +26,7 @@ import './sim/save-validation.test';
 import './sim/transcript.test';
 import './sim/golden-colony.test';
 import './sim/forecast.test';
+import './sim/tutorial.test';
 import './sim/life-support.test';
 import './sim/life-support-system.test';
 import './sim/logistics-system.test';
@@ -107,4 +108,4 @@ import './hud/pause-menu.test';
 
 // Each suite prints one line as it runs; `report` prints the total, every
 // failure, and exits non-zero if anything broke.
-report(91);
+report(92);

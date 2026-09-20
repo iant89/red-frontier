@@ -114,6 +114,11 @@ export function applyPlayerCommand(sim: Simulation, cmd: PlayerCommand): SimAck 
       // rather than assuming the switch took, and the sim logs the reason.
       return { ok: sim.setBuildingRecipe(cmd.buildingId, cmd.recipe) };
 
+    // ------------------------------------------------------- tutorial ----
+    case 'tutorial/dismiss':
+      sim.dismissTutorialHint(cmd.hintId);
+      return ACK;
+
     // ---------------------------------------------------------- the human ----
     case 'colonist/order':
       sim.orderColonist(cmd.order);

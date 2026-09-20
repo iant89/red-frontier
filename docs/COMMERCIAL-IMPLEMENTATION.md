@@ -5,8 +5,8 @@
 
 Last updated: 2026-09-20
 Branch: `arena/01a0c041-red-frontier`
-Save version: 13
-Test suite: 91 suites / 1035 checks (after Phase 1 infra: forecast + strings)
+Save version: 13 (tutorial additive optional, no bump — see SAVE-COMPATIBILITY.md)
+Test suite: 92 suites / 1047 checks (after Phase 1 full: forecast + strings + tutorial)
 
 ---
 
@@ -72,7 +72,7 @@ Core loop: DISCOVER → BUILD → AUTOMATE → SURVIVE → EXPAND → SOLVE ENGI
 
 ---
 
-## Phase 1 — Make the First 30 Minutes Excellent (IN PROGRESS, infrastructure DONE)
+## Phase 1 — Make the First 30 Minutes Excellent (DONE, awaiting playtest)
 
 **Goal:** Make game immediately understandable to someone who has never played it.
 
@@ -94,38 +94,52 @@ Desired reaction: "I'm building a machine that keeps itself alive."
 
 - (a) **Forecast utility** — pure deterministic function `resource → sols-to-empty / sols-to-shortage` living in `sim/`, consumed by tutorial warnings (P1), dashboard (P4), bottleneck panel (P5). Build once, three phases early. Review §3.1. — **DONE** `src/sim/forecast.ts` + `tests/sim/forecast.test.ts`
 - (b) **String externalization** — `src/ui/strings.ts` (or JSON bundles) convention, require new player-facing copy through it. English-only at launch fine, unlocalizable not. Review §4.6. — **DONE** `src/ui/strings.ts` + `tests/ui/strings.test.ts`
-- (c) **First-session funnel instrumentation** — opt-in anonymized milestone events `first-power`, `first-water-chain`, `first-storm-survived` etc. so "where do new players quit" is data, not vibes. — TODO
+- (c) **First-session funnel instrumentation** — opt-in anonymized milestone events `first-power`, `first-water-chain`, `first-storm-survived` etc. so "where do new players quit" is data, not vibes. — **DONE** funnel bounded 200 in TutorialState, domainEvents `tutorial/*`, persisted
 - (d) Focus on minutes 5–30 (between pod landed and water→oxygen chain understood). Descent intro + mission wizard already decent first 5 min.
 
 ### Tasks (from original + review)
 
 - [x] Forecast utility (`src/sim/forecast.ts`) — pure, deterministic, uses `emptyFlows` / `HistoryState` flow windows — DONE
 - [x] Strings externalization (`src/ui/strings.ts`) — DONE
-- [ ] Contextual tutorials (situation → warning → player discovers fix, NOT click-here chain) — NEXT, see `docs/COMMERCIAL-PHASE-1.md`
-- [ ] First-time hints
-- [ ] Recommended actions
-- [ ] Clear warnings — exemplar: "Your water reserve will run dry in 1.8 sols." (needs forecast utility) — infra DONE, UI TODO
-- [ ] "Why this matters" explanations — copy DONE in strings, UI TODO
-- [ ] Simplified early-game UI
-- [ ] Guided first engineering project (hands first objective from wizard)
-- [ ] Funnel milestone events (dev menu first, playtest builds later)
-- [ ] Playtest: give to someone who never played, don't explain, watch. Repeated questions = UX problems.
+- [x] Contextual tutorials (situation → warning → player discovers fix, NOT click-here chain) — DONE `TutorialSystem` + `TutorialPanel`
+- [x] First-time hints — DONE `TutorialPanel` with HINT_COPY using STRINGS, why explanations
+- [x] Recommended actions — DONE via hint actions (onAction -> handleAction)
+- [x] Clear warnings — exemplar: "Your water reserve will run dry in 1.8 sols." — DONE via TutorialSystem reserveSols <1.0 critical / <2.5 low + TutorialPanel warning copy
+- [x] "Why this matters" explanations — DONE in strings + TutorialPanel .tut-h-why
+- [x] Simplified early-game UI — DONE TutorialPanel sits top-left near vitals, progress bar, dismissible, not modal
+- [ ] Guided first engineering project (hands first objective from wizard) — deferred to P2 ObjectiveSystem, hardcoded objective in tutorial already covers first-objective milestone
+- [x] Funnel milestone events (dev menu first, playtest builds later) — DONE funnel in TutorialState, domainEvents, persisted, bounded
+- [ ] Playtest: give to someone who never played, don't explain, watch. Repeated questions = UX problems. — NEXT (manual)
 
-### Suggested structure
+### Structure shipped
 
 ```
-/src/sim/forecast.ts           DONE — pure forecast math (sols-to-empty, runway breach)
-/src/ui/strings.ts             DONE — player-facing copy bundles
-/src/sim/systems/TutorialSystem.ts — TODO, tracks first-time milestones, emits warnings
-/src/ui/TutorialPanel.ts       TODO, situation-driven hints, not modal click-chain
-/tests/sim/forecast.test.ts    DONE
-/tests/ui/strings.test.ts      DONE
-/tests/hud/tutorial.test.ts    TODO
+/src/sim/forecast.ts                 DONE — pure forecast math (sols-to-empty, runway breach)
+/src/ui/strings.ts                   DONE — player-facing copy bundles
+/src/sim/state/TutorialState.ts      DONE — milestones, warnings, hints, funnel, stats, transient
+/src/sim/systems/TutorialSystem.ts   DONE — milestone tracking, warnings via forecast ctx, cooldown, funnel
+/src/sim/persistence/ColonyPersistence.ts DONE — snapshot/restore tutorial with migration from old saves
+/src/sim/host/viewModels.ts          DONE — TutorialView
+/src/sim/host/view.ts                DONE — tutorial in SimFields
+/src/sim/host/projection.ts          DONE — ViewPayload.tutorial
+/src/sim/host/mirror.ts              DONE — get tutorial()
+/src/sim/host/protocol.ts            DONE — tutorial/dismiss command
+/src/sim/host/applyCommand.ts        DONE — dispatch
+/src/sim/Simulation.ts               DONE — dismissTutorialHint + get tutorial()
+/src/ui/TutorialPanel.ts             DONE — situation-driven hints, not modal click-chain
+/src/style.css                       DONE — #tutorial-panel styles
+/src/audio/AudioSystem.ts            DONE — cue for tutorial/dismiss
+/src/sim/domainEvents.ts             DONE — tutorial/* types
+/src/sim/DevBackdoors.ts             DONE — afterTimeJump clears transient
+/tests/sim/forecast.test.ts          DONE
+/tests/ui/strings.test.ts            DONE
+/tests/sim/tutorial.test.ts          DONE — 12 checks
+/tests/sim/host.test.ts              DONE — SAMPLES includes tutorial/dismiss
 ```
 
 ### Definition of done
 
-- ≥7 of 10 unguided playtesters reach "water → oxygen chain stable" within 45 min without external help; other 3 all fail at same step (then fix that step) — review §7 M1.
+- ≥7 of 10 unguided playtesters reach "water → oxygen chain stable" within 45 min without external help; other 3 all fail at same step (then fix that step) — review §7 M1 — AWAITING PLAYTEST
 
 See `docs/COMMERCIAL-PHASE-1.md` for full spec and remaining work.
 
@@ -294,7 +308,7 @@ Numbers placeholders — set before playtests so can't be moved to match results
 
 ---
 
-## Artifacts produced this session (Phase 0 + Phase 1 infra)
+## Artifacts produced this session (Phase 0 + Phase 1 full)
 
 Phase 0:
 - `tests/golden-colony/*` — golden colony transcript + hash + save + meta + README
@@ -305,14 +319,26 @@ Phase 0:
 - `docs/SAVE-COMPATIBILITY.md` — save policy
 - `.github/workflows/pages.yml` — CI now runs full suite + replay + golden check (Phase 0 gate)
 
-Phase 1 infrastructure (review §3.1, §4.6):
+Phase 1 infrastructure + tutorial (review §3.1, §4.6, §5 P1):
 - `src/sim/forecast.ts` — pure forecast math (sols-to-empty, runway breach, warning tiers)
 - `tests/sim/forecast.test.ts` — 8 checks
 - `src/ui/strings.ts` — player-facing copy bundles (tutorial, warnings, projects, bottleneck, dashboard, autonomy, POI, report)
 - `tests/ui/strings.test.ts` — 5 checks
-- `docs/COMMERCIAL-PHASE-1.md` — full Phase 1 spec and remaining work
+- `src/sim/state/TutorialState.ts` — milestones, warnings, hints, funnel, stats, transient
+- `src/sim/systems/TutorialSystem.ts` — milestone tracking, warnings via forecast ctx, cooldown, funnel, stats hooks
+- `src/sim/persistence/ColonyPersistence.ts` — snapshot/restore tutorial with migration from old saves
+- `src/sim/host/viewModels.ts`, `view.ts`, `projection.ts`, `mirror.ts`, `protocol.ts`, `applyCommand.ts` — view layer + host command
+- `src/sim/Simulation.ts` — dismissTutorialHint + get tutorial()
+- `src/ui/TutorialPanel.ts` — situation-driven hints, warnings, progress, dismiss
+- `src/style.css` — #tutorial-panel styles
+- `src/audio/AudioSystem.ts` — cue for tutorial/dismiss
+- `src/sim/domainEvents.ts`, `src/sim/DevBackdoors.ts` — events + afterTimeJump clear
+- `tests/sim/tutorial.test.ts` — 12 checks
+- `tests/sim/host.test.ts` — SAMPLES includes tutorial/dismiss
+- `docs/COMMERCIAL-PHASE-1.md` — full Phase 1 spec and remaining work (now marked DONE)
 - This file — implementation tracker (updated)
 - `package.json` — added `test:golden` and `test:golden:write` scripts
+- Pinned hashes updated: `tests/golden-colony/golden-colony.meta.json` → rf1-1ae69385827e00-021ba045379276, canonical transcripts → new hashes, large-colony-stress → rf1-0e69da95974d60-01fac118bd387d
 
 ---
 
