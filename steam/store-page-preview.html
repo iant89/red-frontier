@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Red Frontier — Store Page Preview</title>
+<style>
+  :root{
+    --bg:#0e141b; --panel:#1b2838; --panel2:#16202d; --text:#c6d4df;
+    --muted:#8091a2; --accent:#66c0f4; --price:#beee11; --price-bg:#4c6b22;
+    --orange:#e8681c; --cream:#f5ead1;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    font-family:"Motiva Sans","Helvetica Neue",Arial,sans-serif;
+    background:linear-gradient(#1b2838 0, #0e141b 320px);
+    color:var(--text); font-size:14px; line-height:1.45;
+  }
+  body::after{
+    content:""; position:fixed; inset:0; z-index:-1;
+    background:url("assets/page-background.jpg") center/cover no-repeat;
+    opacity:.25;
+  }
+  .wrap{max-width:940px; margin:0 auto; padding:24px 16px 80px;}
+  .mock-banner{
+    background:#2a475e; color:#fff; text-align:center; padding:6px;
+    font-size:12px; letter-spacing:.08em; text-transform:uppercase;
+    border-radius:4px; margin-bottom:12px;
+  }
+  .breadcrumb{color:var(--muted); font-size:12px; margin:8px 0 4px;}
+  .breadcrumb b{color:#d6ded8;}
+  h1.title{color:#fff; font-size:26px; margin:6px 0 2px;}
+  .subtitle{color:var(--orange); font-style:italic; margin-bottom:14px;}
+
+  .hero{display:grid; grid-template-columns:1.4fr .8fr; gap:14px;}
+  .hero img{width:100%; border-radius:2px; display:block;}
+  .glance{background:rgba(0,0,0,.35); padding:12px; border-radius:2px;}
+  .glance img.logo{width:60%; margin-bottom:10px;}
+  .glance p{margin-bottom:10px;}
+  .tagline{color:var(--cream); font-style:italic;}
+  .stat{display:flex; justify-content:space-between; color:var(--muted);
+        font-size:12px; border-top:1px solid #2a3a4a; padding:6px 0;}
+  .stat b{color:var(--text); font-weight:normal;}
+  .tag{background:#2a475e; color:#67c1f5; font-size:11px; padding:3px 8px;
+       border-radius:2px; margin:2px 2px 2px 0; display:inline-block; cursor:pointer;}
+
+  .buy{background:linear-gradient(180deg,#667582,#384959); border-radius:3px;
+       margin:28px 0; padding:14px;}
+  .buy h3{color:#fff; font-weight:normal; margin-bottom:10px;}
+  .buyrow{display:flex; justify-content:flex-end; align-items:flex-end; gap:10px;}
+  .disc{font-size:22px; color:#000; background:var(--price); padding:4px 8px;
+        font-weight:bold; border-radius:2px;}
+  .price{text-align:right;}
+  .price s{display:block; color:var(--muted); font-size:11px;}
+  .price strong{color:var(--price); font-size:13px;}
+  .btn{background:linear-gradient(180deg,#75b022,#588a1b); color:#d2e885;
+       border:none; border-radius:2px; padding:8px 22px; font-size:14px; cursor:pointer;}
+
+  h2{color:#fff; font-size:15px; text-transform:uppercase; letter-spacing:.04em;
+     border-bottom:1px solid #3a4552; padding-bottom:4px; margin:30px 0 14px;}
+  .about{color:var(--text); font-size:14px;}
+  .about p{margin-bottom:12px;}
+  .about em{color:var(--cream);}
+  .about h4{color:var(--accent); font-size:13px; text-transform:uppercase;
+            letter-spacing:.06em; margin:22px 0 6px;}
+  .about ul{margin:6px 0 12px 18px;}
+  .about li{margin-bottom:4px;}
+  .feats{background:rgba(0,0,0,.3); border-radius:4px; padding:14px 16px; margin-top:14px;}
+  .feats li{margin:8px 0 8px 18px; color:var(--cream);}
+  footer{color:var(--muted); font-size:11px; margin-top:60px; text-align:center;}
+  @media(max-width:760px){ .hero{grid-template-columns:1fr;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="mock-banner">Store page mockup — generated launch kit, not the live Steam page</div>
+  <div class="breadcrumb">All Games &gt; Strategy Games &gt; <b>Red Frontier</b></div>
+  <h1 class="title">Red Frontier</h1>
+  <div class="subtitle">One human. A handful of machines. An entire planet that does not want you there.</div>
+
+  <div class="hero">
+    <img src="assets/capsule-main.jpg" alt="Red Frontier key art">
+    <div class="glance">
+      <img class="logo" src="assets/red-frontier-logo.png" alt="Red Frontier logo">
+      <p class="tagline">Mars · 2066 — Real-Time Strategy · Survival · Automation · Exploration</p>
+      <p>Mars, 2066. One human, a handful of machines, and an entire planet that
+      does not want you there. Command autonomous rovers, build an industrial
+      colony from ice and rust, forecast the storms before they strike — a
+      hard-sci-fi survival strategy game where oxygen is the real clock.</p>
+      <div class="stat"><span>Developer</span><b>[Your studio]</b></div>
+      <div class="stat"><span>Publisher</span><b>[Your studio]</b></div>
+      <div class="stat"><span>Genres</span><b>Strategy, Simulation, Survival, Indie</b></div>
+      <div style="margin-top:8px;">
+        <span class="tag">Real-Time Strategy</span><span class="tag">Survival</span>
+        <span class="tag">Base Building</span><span class="tag">Automation</span>
+        <span class="tag">Space Sim</span><span class="tag">Colony Sim</span>
+        <span class="tag">Mars</span><span class="tag">Resource Management</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="buy">
+    <h3>Buy Red Frontier</h3>
+    <div class="buyrow">
+      <span class="disc">-10%</span>
+      <span class="price"><s>$19.99</s><strong>$17.99</strong></span>
+      <button class="btn">Add to Cart</button>
+    </div>
+  </div>
+
+  <h2>About This Game</h2>
+  <div class="about">
+    <p><em>One human. A handful of machines. An entire planet that does not want you there.</em></p>
+    <p>Mars, 2066. You are the sole crew of a planetary survey claim, and the
+    landing was only the easy part. With four sols of air, water and rations in
+    reserve, everything after "touchdown" is something you must build — from the
+    ice up. Oxygen kills in hours. Water in days. Food in weeks. Build in that
+    order, and the Red Planet still has a vote.</p>
+
+    <div class="feats">
+      <ul>
+        <li>Keep one human alive on a world that kills with air, water and time</li>
+        <li>Command an autonomous rover fleet — queues, haul routes, rules, assembly</li>
+        <li>Build an industry: mine, refine, manufacture, repair, refit, expand</li>
+        <li>Forecast travelling dust storms — and the lightning inside them</li>
+        <li>Salvage wrecks, claim Earth supply drops, map what the map won't show</li>
+        <li>A full sol cycle with day and night, plus a procedural ambient soundscape</li>
+      </ul>
+    </div>
+
+    <h4>The Real Clock Is Oxygen</h4>
+    <p>Keep a single human alive with a chain that never sleeps: haul ice,
+    extract water, split oxygen, grow food. Every structure has tanks, every
+    tank runs dry. Your commander can walk the surface on EVA suit oxygen — but
+    the suit is the smallest tank in the colony.</p>
+
+    <h4>Command Machines, Not Peons</h4>
+    <p>Your crew is a fleet of rugged rovers that work while you think. Queue
+    orders, set repeating haul routes from seam to silo, write automation rules,
+    and let idle machines assign themselves. Keep them on the road: the Rover
+    Garage fast-charges their batteries, services their drivetrains, and
+    assembles new rolling stock from parts — including long-haul cargo rovers
+    for the far seams.</p>
+
+    <h4>From Ore to Industry</h4>
+    <p>Iron ore is dug. Steel is made. Run the Refinery, feed the Workshop, and
+    choose a production line — electric motors, circuit boards, or water pipe —
+    to fit out structures, refit rovers, and grow the fleet. Parts wear out;
+    machines limp; the Repair Bay brings them back. Every kilowatt on the grid
+    is spent visibly: at 35 kW, a furnace is a promise, not a plan.</p>
+
+    <img src="assets/library-hero.jpg" alt="Rover convoy crossing Mars" style="width:100%; border-radius:2px; margin:10px 0;">
+
+    <h4>Weather Is a Field, Not a Mood</h4>
+    <p>Storms are travelling systems, not screen filters. A rover twenty meters
+    away can sit in clear air while the pad takes fifty-meter-per-second dust
+    head-on — and dust that thick carries lightning. It singes arrays, dumps
+    batteries, buries panels and rovers alike, and it will kill a colonist
+    caught outside. Build the Weather Radar Station and the sky stops being a
+    surprise: track storm cells on the world map, extend your forecast, and
+    decide what gets bolted down before the front arrives.</p>
+
+    <h4>A Planet With Somewhere to Go</h4>
+    <p>The map does not show you everything. Points of interest surface only
+    when a rover finds them — wrecks to cut apart with a salvage torch and haul
+    home, Earth supply drops that land under your transponder and start burying
+    themselves the moment they touch. Distance is a resource. Dust is a clock.</p>
+
+    <h4>Your Claim, Your Rules</h4>
+    <ul>
+      <li>Pick your landing site and shape the world from its seed</li>
+      <li>A living sol cycle — harsh days, colder nights, dust devils at noon</li>
+      <li>Pause any time and think; the machines hold your orders</li>
+      <li>Autosaves and multiple slots — a hard planet, a forgiving journal</li>
+      <li>An ambient procedural soundscape: wind, radio, machinery, thunder</li>
+    </ul>
+
+    <p><em>The Red Planet is patient. It can wait for your batteries to die.</em></p>
+  </div>
+
+  <h2>System Requirements</h2>
+  <div class="about">
+    <p style="color:var(--muted)">Minimum: Windows 10 (64-bit) · dual-core 2.5 GHz ·
+    8 GB RAM · integrated GPU (Intel UHD 620 equivalent) · 1 GB storage.
+    Recommended: quad-core 3.0 GHz · 16 GB RAM · discrete GPU
+    (GTX 1050 / RX 560 class or better). Confirm against the final build
+    before publishing.</p>
+  </div>
+
+  <footer>Mockup generated 2026-09-20 · Companion to steam-launch-kit.md · Pricing: US$19.99 base, 10% launch discount</footer>
+</div>
+</body>
+</html>
