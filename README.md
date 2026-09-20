@@ -108,7 +108,7 @@ npm run test:sim        # every tests/sim suite
 npm run test:hud        # every tests/hud suite
 npm run test:unit       # the fast formula-level suites
 npm test -- power       # any suite whose name/desc matches "power"
-npm run test:list       # all 87 suites and what each covers
+npm run test:list       # all 88 suites and what each covers
 ```
 
 One URL flag is worth knowing while developing:
@@ -694,7 +694,7 @@ public/             terrain PBR atlas, menu art, and the GLB drop folder (empty 
 
 ### Testing
 
-The tests are split into **79 small suites / 913 checks** that each pin one corner
+The tests are split into **88 small suites / 1020 checks** that each pin one corner
 of the game, plus one linked serial entry point. A suite is a plain module that
 registers cases with `test()` and finishes with `await finish()`; `scripts/run-tests.mjs`
 bundles and runs any subset in isolated processes. Full runs schedule the
@@ -703,7 +703,7 @@ historically slowest suites first across the available CPU workers.
 ```
 tests/
   harness.ts          test()/group()/finish(), the per-suite report, the roll-up
-  full.test.ts        optional serial run: imports all 87 suites, prints the total
+  full.test.ts        optional serial run: imports all 88 suites, prints the total
   fixtures/sim.ts     shared sim setup (place a building, run N sols, find a seam)
   fixtures/hud.ts     jsdom bootstrap, a recording 2D canvas stub, one mounted
                       HUD + sim per suite
@@ -725,6 +725,7 @@ tests/
                       · selection · solar
   audio/  system      ui/ build-status · gestures      app/ game-controllers
                       · pause-save · update-check
+  scripts/            wiki-url — the publisher's `<owner>/<repo>.wiki.git` derivation
 ```
 
 Run the piece you touched, not the whole planet:
@@ -816,7 +817,7 @@ What is covered, by TDD §21's categories:
   the pure audio mix and the exhaustive command→cue map; the Game-level save/pause
   hand-off and the update-check poller.
 
-`npm test` runs all 913 checks in isolated parallel child processes, with the
+`npm test` runs all 1020 checks in isolated parallel child processes, with the
 longest suites launched first; it takes about three and a half minutes.
 `npm run test:serial` keeps the linked single-process run available for debugging.
 The renderer needs a GPU and is covered separately by the mobile smoke test — note
@@ -833,7 +834,7 @@ shipped slices of **P5** (the Refinery and `steel`; the Workshop's six lines,
 the component rack, and rovers priced in motors and boards; rover component wear
 and the Repair Bay; commissioned water pipes, pumps and local tanks). The MVP building set
 from GDD §16 is complete, and so is GDD §03's replication chain: ore → steel →
-components → machine. `npm test` is green at 87 suites / 983 checks. The **30-phase architectural refactor roadmap is also complete**: systems
+components → machine. `npm test` is green at 88 suites / 1020 checks. The **30-phase architectural refactor roadmap is also complete**: systems
 extracted, `ColonyState` formalised, persistence and app controllers split out,
 the host seam strengthened, and the debug/perf harness in place.
 

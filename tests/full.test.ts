@@ -82,6 +82,7 @@ import './render/glb-assets.test';
 import './app/update-check.test';
 import './app/game-controllers.test';
 import './app/pause-save.test';
+import './scripts/wiki-url.test';
 import './ui/build-status.test';
 import './ui/gestures.test';
 import './hud/chrome.test';
@@ -103,4 +104,4 @@ import './hud/pause-menu.test';
 
 // Each suite prints one line as it runs; `report` prints the total, every
 // failure, and exits non-zero if anything broke.
-report(76);
+report(88);

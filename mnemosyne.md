@@ -19,7 +19,7 @@ Persistent notes for future coding sessions.
 - **Numbers are quoted from code, never remembered:** balance and status claims come
   from `src/sim/config.ts`, `src/sim/defs.ts`, `difficulty.ts`,
   `engineering/upgrades.ts`, the docs, and a live `npm test` (currently
-  *87 suites / 983 checks*). If you change a constant that a page quotes, change the
+  *88 suites / 1020 checks*). If you change a constant that a page quotes, change the
   page in the same PR — `Grep: wiki/ <old-value>` finds them.
 - **`npm run wiki:preview` serves `wiki/` like the GitHub wiki does**
   (`scripts/preview-wiki.mjs`, `marked` resolved at runtime via
@@ -593,7 +593,19 @@ Persistent notes for future coding sessions.
   GitHub's rename live on `master`, and pushing `main` beside one produces a branch
   nobody renders. `publish-wiki.mjs` therefore resolves the target from
   `git ls-remote --symref <wiki-url> HEAD` (falling back to the source repo's default,
-  then `main`) unless `--branch` is given explicitly.
+  then `main`) unless `--branch` is given explicitly. The wiki url itself is derived
+  from `origin` by `scripts/wiki-url.mjs`, which accepts every spelling a remote appears
+  in (HTTPS, `git@github.com:…`, `ssh://`, `git://`, a trailing slash copied out of a
+  browser address bar, extra path segments such as `/tree/main`, a token in the
+  authority — kept, because that is how the push authenticates) and returns `null` for
+  anything that is not a GitHub repository, so the caller reports it instead of
+  guessing. Two bugs lived in the inline regex this replaced: a trailing slash on
+  `origin` failed `([^/]+?)(?:\.git)?$` and died with *cannot derive a wiki url from
+  remote*, and `if (!remote)` never fired because `git(…, {allowFail: true})` returns the
+  **truthy** `FAIL` symbol — a missing `origin` crashed with `remote.match is not a
+  function` instead of printing the intended message. `tests/scripts/wiki-url.test.ts`
+  pins the spellings; the runner's bundle cache hashes the whole import closure, so an
+  edit to a shared `scripts/*.mjs` module is picked up without `--force`.
 
 ## Descent stage (the pod, given a body)
 
