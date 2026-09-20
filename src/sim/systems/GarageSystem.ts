@@ -25,6 +25,8 @@
  * persistence schema.
  */
 
+import { UpgradeSystem } from './UpgradeSystem';
+import { upgradeMul } from '../engineering/upgrades';
 import type { ColonyState } from '../state/ColonyState';
 import type { Building } from '../state/BuildingState';
 import { ConstructionSystem } from './ConstructionSystem';
@@ -57,6 +59,10 @@ export class GarageSystem {
     }
     if (b.assembly) {
       event(state, 'info', `The garage line is already building a ${ROVERS[b.assembly.kind].label}.`);
+      return false;
+    }
+    if (state.rovers.some(r => r.upgradeJob?.facilityId === b.id)) {
+      event(state, 'warn', 'This Garage installation bay is reserved for a rover refit.');
       return false;
     }
     const def = ROVERS[kind];
@@ -107,7 +113,7 @@ export class GarageSystem {
       if (b.kind !== 'garage' || !runnable(b) || !b.enabled) continue;
       const reach = BUILDINGS.garage.radius + 5;
       const service =
-        GARAGE_SERVICE_RATE * devLevelMul(b.level) * SIM_TICK * (0.3 + 0.7 * b.powerSat);
+        GARAGE_SERVICE_RATE * devLevelMul(b.level) * upgradeMul(b, 'service') * SIM_TICK * (0.3 + 0.7 * b.powerSat);
       for (const r of state.rovers) {
         if (r.phase === 'disabled' || r.condition >= 100) continue;
         if (Math.hypot(b.x - r.x, b.z - r.z) <= reach) {
@@ -124,7 +130,7 @@ export class GarageSystem {
       }
       if (b.assembly) {
         const def = ROVERS[b.assembly.kind];
-        b.assembly.progress += (SIM_TICK * b.powerSat) / def.buildTime;
+        b.assembly.progress += (SIM_TICK * b.powerSat * upgradeMul(b, 'service')) / def.buildTime;
         if (b.assembly.progress >= 1) {
           const kind = b.assembly.kind;
           b.assembly = null;

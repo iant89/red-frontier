@@ -17,6 +17,7 @@
  * the world is doing rather than what the panel last asked for.
  */
 
+import { effectiveRoverDef } from '../engineering/upgrades';
 import type { SimWritable } from './view';
 import { enterIdle } from '../state/RoverState';
 import { ROVERS } from '../defs';
@@ -42,7 +43,7 @@ function applyBatteryPins(sim: SimWritable, ids: readonly number[]): void {
   for (const id of ids) {
     const r = sim.rovers.find((rv) => rv.id === id);
     if (!r) continue;
-    const def = ROVERS[r.kind];
+    const def = effectiveRoverDef(r);
     if (r.battery >= def.maxBatteryKWh) continue;
     r.battery = def.maxBatteryKWh;
     if (r.phase === 'disabled') {

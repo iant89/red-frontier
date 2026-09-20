@@ -34,6 +34,9 @@
  * Does NOT know about: Three.js, DOM, renderer, UI, Simulation, hosts.
  */
 
+import { effectiveBuildingDef } from '../engineering/upgrades';
+import { WaterSystem } from './WaterSystem';
+
 import {
   applyColonistNeeds,
   makeColonist,
@@ -139,7 +142,13 @@ export class LifeSupportSystem {
       );
     }
 
-    const outcome = applyColonistNeeds(c, state.pools, sols, recycles);
+    // EVA provisioning still debits the pod in this first utility slice;
+    // indoor drinking/reclamation uses the actual shelter's local buffer.
+    const waterId = inside ? shelterId : 0;
+    const outcome = applyColonistNeeds(c, state.pools, sols, recycles, {
+      take: (kg) => WaterSystem.take(state, waterId, kg),
+      add: (kg) => WaterSystem.add(state, waterId, kg),
+    });
 
     state.flows.oxygen.consumed += COLONIST_O2_PER_SOL * sols * outcome.met.oxygen;
     state.flows.water.consumed += COLONIST_WATER_PER_SOL * sols * outcome.met.water;
@@ -318,7 +327,7 @@ export class LifeSupportSystem {
     ];
     for (const b of state.buildings) {
       if (b.state !== 'online' || b.damaged) continue;
-      const def = BUILDINGS[b.kind];
+      const def = effectiveBuildingDef(b);
       if (!def.pressurized) continue;
       out.push({
         id: b.id,

@@ -34,7 +34,12 @@
  *    ever disappears from the sim, tighten the check to match.
  */
 
-import { ROVERS, ALL_RESOURCES, ALL_FLUIDS, ALL_COMPONENTS } from '../defs';
+import { roverUpgrades, buildingUpgrades, PAINTS, type EngineeringState } from '../engineering/upgrades';
+import { effectiveRoverDef } from '../engineering/upgrades';
+import { waterPorts, waterLinkKey, pipeCost } from '../utilities/WaterNetwork';
+import { WATER_PIPE_MAX_RUN } from '../config';
+
+import { ROVER_PARTS, ROVERS, ALL_RESOURCES, ALL_FLUIDS, ALL_COMPONENTS } from '../defs';
 import { SUIT_O2_CAPACITY } from '../config';
 import type { Simulation, Rover, Building, RoverPhase, RoverTask } from '../Simulation';
 
@@ -168,7 +173,7 @@ function checkIds(sim: Simulation, out: InvariantViolation[]): {
 
 function checkRovers(sim: Simulation, out: InvariantViolation[]): void {
   for (const r of sim.rovers) {
-    const def = ROVERS[r.kind];
+    const def = effectiveRoverDef(r);
     const who = roverName(r);
 
     // Battery: never negative. The upper bound is deliberately generous: a
@@ -219,6 +224,13 @@ function checkRovers(sim: Simulation, out: InvariantViolation[]): void {
         code: 'rover-condition',
         subject: who,
         message: `condition must be within 0..100, found ${r.condition}`,
+      });
+    }
+
+    for (const c of ROVER_PARTS) {
+      if (!inRange(r.parts[c], 0, 100)) out.push({
+        code: 'rover-part-health', subject: who,
+        message: `parts.${c} must be within 0..100, found ${r.parts[c]}`,
       });
     }
 
@@ -333,6 +345,13 @@ function checkBuildings(sim: Simulation, roverIds: Set<number>, out: InvariantVi
         subject: what,
         message: `cleanliness must be within 0..1, found ${b.cleanliness}`,
       });
+    }
+
+    if (b.maintenance && (b.kind !== 'repairBay' ||
+        !roverIds.has(b.maintenance.roverId) ||
+        !ROVER_PARTS.includes(b.maintenance.component) ||
+        !inRange(b.maintenance.progress, 0, 1))) {
+      out.push({ code: 'building-maintenance', subject: what, message: 'Invalid Repair Bay job' });
     }
 
     if (b.workerId !== null && !roverIds.has(b.workerId)) {
@@ -581,6 +600,8 @@ export function checkInvariants(sim: Simulation): InvariantViolation[] {
   checkRoverExecution(sim, out);
   checkBuildings(sim, ids.rovers, out);
   checkResources(sim, out);
+  checkWater(sim, out);
+  checkEngineering(sim, out);
   checkWorld(sim, ids.rovers, out);
   checkTasks(sim, ids, out);
   checkColonist(sim, ids.buildings, out);
@@ -595,4 +616,43 @@ export function checkInvariants(sim: Simulation): InvariantViolation[] {
 export function assertInvariants(sim: Simulation, label = 'check'): void {
   const violations = checkInvariants(sim);
   if (violations.length > 0) throw new InvariantError(violations, label);
+}
+
+function checkWater(sim: Simulation, out: InvariantViolation[]): void {
+  const state = sim.state.water, ports = waterPorts(sim.buildings);
+  const bad = (message: string) => out.push({ code: 'water-network', subject: 'water network', message });
+  const seen = new Set<string>();
+  for (const l of state.links) {
+    const a=ports.find((p) => p.id===l.a), b=ports.find((p) => p.id===l.b), key=waterLinkKey(l.a,l.b);
+    if (!a || !b || l.a>=l.b || seen.has(key) || l.pipes!==pipeCost(a,b) || Math.hypot(a.x-b.x,a.z-b.z)>WATER_PIPE_MAX_RUN) bad(`Invalid pipe link ${key}`);
+    seen.add(key);
+  }
+  if (!state.active) {
+    if (Object.keys(state.tanks).length) bad('Uncommissioned networks cannot hold local water');
+    return;
+  }
+  for (const p of ports) if (!inRange(state.tanks[p.id],0,p.capacity)) bad(`Invalid water tank at port ${p.id}`);
+  for (const id of Object.keys(state.tanks)) if (!ports.some((p) => String(p.id)===id)) bad(`Orphan tank ${id}`);
+  const sum=Object.values(state.tanks).reduce((s,n) => s+n,0);
+  if (!Number.isFinite(sum) || Math.abs(sum-sim.pools.amounts.water)>1e-6) bad('Water total differs from local tanks');
+}
+
+function checkEngineering(sim: Simulation, out: InvariantViolation[]): void {
+  const garages = new Set<number>();
+  for (const e of [...sim.rovers, ...sim.buildings]) {
+    const rover = 'cargo' in e;
+    const allowed = rover ? roverUpgrades(e.kind) : buildingUpgrades(e.kind);
+    const bad = (message: string) => out.push({ code: 'engineering-state', subject: `entity #${e.id}`, message });
+    for (const [id, tier] of Object.entries(e.upgrades ?? {})) {
+      if (!(allowed as string[]).includes(id) || !Number.isInteger(tier) || tier<1 || tier>3) bad(`Invalid upgrade ${id}:${tier}`);
+    }
+    if (e.paint != null && !(PAINTS as readonly string[]).includes(e.paint)) bad('Unknown paint finish');
+    const j = e.upgradeJob;
+    if (!j) continue;
+    if (!allowed.includes(j.upgrade) || j.tier !== (e.upgrades?.[j.upgrade] ?? 0)+1 || j.tier>3 || !inRange(j.progress,0,1)) bad('Invalid installation job');
+    if (rover) {
+      if (j.facilityId == null || garages.has(j.facilityId) || !sim.buildings.some(b=>b.id===j.facilityId && b.kind==='garage')) bad('Invalid or duplicate installation bay reservation');
+      if (j.facilityId != null) garages.add(j.facilityId);
+    } else if (j.facilityId !== null || e.state !== 'online') bad('Refit must belong to an online structure');
+  }
 }

@@ -4,7 +4,8 @@
  * Simulation.ts re-exports these for backward compat.
  */
 
-import type { ResourceAmounts, RoverKind } from '../defs';
+import type { EngineeringState } from '../engineering/upgrades';
+import type { RoverPartId, ResourceAmounts, RoverKind } from '../defs';
 import { ALL_RESOURCES } from '../defs';
 import { ROVER_CHARGE_THRESHOLD } from '../config';
 
@@ -38,6 +39,14 @@ export function taskTargetsBuilding(task: RoverTask, buildingId: number): boolea
     default:
       return false;
   }
+}
+
+/** Installed health percentages, not component inventory counts. */
+export type RoverPartHealth = Record<RoverPartId, number>;
+
+/** Older saves and newly assembled rovers start with unworn components. */
+export function freshRoverParts(): RoverPartHealth {
+  return { motor: 100, circuitBoard: 100 };
 }
 
 export interface RoverRules {
@@ -76,7 +85,7 @@ export type RoverGoal =
 
 export type RoverPhase = 'idle' | 'moving' | 'working' | 'charging' | 'disabled';
 
-export interface Rover {
+export interface Rover extends EngineeringState {
   id: number;
   kind: RoverKind;
   label: string;
@@ -98,6 +107,8 @@ export interface Rover {
   chargeSat: number;
   autoTask: boolean;
   condition: number;
+  /** Installed components: health percentages, NOT units on the colony rack. */
+  parts: RoverPartHealth;
   rules: RoverRules;
   routePaused: boolean;
   blockNotified: boolean;

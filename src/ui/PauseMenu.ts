@@ -83,7 +83,7 @@ export interface PauseMenuOptions {
   getStats: () => ColonyStats | null;
   settings: PauseMenuSettings;
   onResume: () => void;
-  /** Manual save — the save progress dialog covers this menu while it runs. */
+  /** Manual save — the menu hides while the save progress dialog runs. */
   onSave: () => void;
   /** Save (with the progress dialog) and hand back to the main menu. */
   onReturnToMenu: () => void;
@@ -456,6 +456,10 @@ export class PauseMenu {
   private setClock(text: string): void {
     const el = this.root.querySelector('[data-part="clock"]') as HTMLElement;
     el.textContent = text || 'Sol 1 · 08:00';
+  }
+
+  setSaveEnabled(enabled: boolean): void {
+    this.root.querySelector<HTMLButtonElement>('[data-act="save"]')!.disabled = !enabled;
   }
 
   mount(parent: HTMLElement = document.body): void {

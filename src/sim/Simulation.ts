@@ -19,6 +19,8 @@
  * for backward compatibility.
  */
 
+import { UpgradeSystem } from './systems/UpgradeSystem';
+import type { EntityTarget, UpgradeId } from './engineering/upgrades';
 import { World } from './World';
 import { maintenanceNeed } from './rules';
 import type { Deposit } from './World';
@@ -62,6 +64,7 @@ import type { SaveState } from './persistence/SaveSchema';
 import { ClockSystem } from './systems/ClockSystem';
 import { WeatherSystem, type WeatherHostHooks } from './systems/WeatherSystem';
 import { PowerSystem, type PowerSystemContext } from './systems/PowerSystem';
+import { WaterSystem } from './systems/WaterSystem';
 import { ProductionSystem } from './systems/ProductionSystem';
 import { ComponentSystem } from './systems/ComponentSystem';
 import { LifeSupportSystem, type LifeSupportHostHooks } from './systems/LifeSupportSystem';
@@ -80,6 +83,7 @@ import {
 import { AlertSystem } from './systems/AlertSystem';
 import { HistorySystem } from './systems/HistorySystem';
 import { GarageSystem } from './systems/GarageSystem';
+import { MaintenanceSystem } from './systems/MaintenanceSystem';
 import { DevBackdoors } from './DevBackdoors';
 
 import {
@@ -273,6 +277,15 @@ export class Simulation {
   get nextEntityId(): number {
     return this.state.nextId;
   }
+
+  startUpgrade(target: EntityTarget, upgrade: UpgradeId): boolean { return UpgradeSystem.start(this.state, target, upgrade); }
+  cancelUpgrade(target: EntityTarget): boolean { return UpgradeSystem.cancel(this.state, target); }
+  paintEntity(target: EntityTarget, paint: string): boolean { return UpgradeSystem.paint(this.state, target, paint); }
+
+  get waterNetwork() { return WaterSystem.view(this.state); }
+  connectWater(a: number, b: number): boolean { return WaterSystem.connect(this.state, a, b); }
+  disconnectWater(a: number, b: number): boolean { return WaterSystem.disconnect(this.state, a, b); }
+  commissionWater(): boolean { return WaterSystem.commission(this.state); }
 
   recomputeCapacities(): void {
     recomputeCapacitiesState(this.state);
@@ -642,7 +655,10 @@ export class Simulation {
 
     // 3 & 4. power network, then garage bay (consumes powerSat)
     PowerSystem.tick(this.state, this.powerContext);
+    WaterSystem.tick(this.state);
     GarageSystem.tick(this.state);
+    UpgradeSystem.tick(this.state);
+    MaintenanceSystem.tickBays(this.state);
 
     // 5. life support & the human
     LifeSupportSystem.tick(this.state, this.lifeSupportHooks);
@@ -661,6 +677,7 @@ export class Simulation {
       RoverSystem.moveRover(this.state, r);
     }
     LifeSupportSystem.tickColonist(this.state, this.lifeSupportHooks);
+    MaintenanceSystem.tickWear(this.state);
 
     // 9. failure checks → alerts → history
     this.evaluateAlerts();

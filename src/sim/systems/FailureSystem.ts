@@ -55,6 +55,7 @@
  * persistence schema.
  */
 
+import { effectiveBuildingDef } from '../engineering/upgrades';
 import type { ColonyState } from '../state/ColonyState';
 import type { Building } from '../state/BuildingState';
 import type { Rover } from '../state/RoverState';
@@ -123,6 +124,14 @@ export type FailureEvent =
       roverId: number;
       label: string;
       condition: number;
+      active: boolean;
+    }
+  | {
+      kind: 'RoverPartWear';
+      roverId: number;
+      label: string;
+      motor: number;
+      circuitBoard: number;
       active: boolean;
     }
   | {
@@ -198,7 +207,7 @@ export class FailureSystem {
     hooks: FailureHostHooks,
   ): FailureEvent {
     b.damaged = true;
-    const def = BUILDINGS[b.kind];
+    const def = effectiveBuildingDef(b);
     recomputeCapacitiesState(state);
     // Any builder pointed at it can do nothing; release the crew.
     for (const r of state.rovers) {
@@ -350,6 +359,11 @@ export class FailureSystem {
         condition: r.condition,
         active: r.condition < ROVER_CONDITION_ALERT,
       });
+      events.push({
+        kind: 'RoverPartWear', roverId: r.id, label: r.label,
+        motor: r.parts.motor, circuitBoard: r.parts.circuitBoard,
+        active: Math.min(r.parts.motor, r.parts.circuitBoard) < ROVER_CONDITION_ALERT,
+      });
     }
 
     // ---- storage ----------------------------------------------------------
@@ -395,12 +409,12 @@ export class FailureSystem {
     events.push({
       kind: 'BuildingFailed',
       buildingIds: hurt.map((b) => b.id),
-      labels: hurt.map((b) => BUILDINGS[b.kind].label),
+      labels: hurt.map((b) => effectiveBuildingDef(b).label),
       active: hurt.length > 0,
     });
 
     const panels = state.buildings.filter(
-      (b) => ctx.runnable(b) && BUILDINGS[b.kind].generation === 'solar',
+      (b) => ctx.runnable(b) && effectiveBuildingDef(b).generation === 'solar',
     );
     if (panels.length > 0) {
       const worst = Math.min(...panels.map((b) => b.cleanliness));

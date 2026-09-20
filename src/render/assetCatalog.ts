@@ -36,6 +36,9 @@ export const DEFAULT_ASSET_CATALOG: Readonly<Record<string, string>> = Object.fr
   'building/rtg': '/models/buildings/rtg.glb',
   'building/weatherStation': '/models/buildings/weatherStation.glb',
   'building/refinery': '/models/buildings/refinery.glb',
+  'building/pumpStation': '/models/buildings/pumpStation.glb',
+  'building/waterTank': '/models/buildings/waterTank.glb',
+  'building/repairBay': '/models/buildings/repairBay.glb',
 });
 
 export function roverAssetId(kind: RoverKind): RoverAssetId {

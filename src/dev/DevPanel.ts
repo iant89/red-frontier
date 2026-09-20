@@ -12,6 +12,7 @@
  * by sim design; fabricated entities are ordinary world objects afterwards.
  */
 
+import { effectiveRoverDef } from '../sim/engineering/upgrades';
 import type { RoverView, BuildingView, ColonistView } from '../sim/host';
 import type { SimView } from '../sim/host';
 import type { BuildingKind, ResourceId, RoverKind } from '../sim/defs';
@@ -487,7 +488,7 @@ export class DevPanel {
   // ------------------------------------------------------------- rover ----
 
   private roverEditorHtml(r: RoverView): string {
-    const def = ROVERS[r.kind];
+    const def = effectiveRoverDef(r);
     return `
       <div class="sub">${def.label} · ${def.role}</div>
       <div class="stat"><span class="k">Battery</span><span class="v" id="dvs-batv">—</span></div>
@@ -559,7 +560,7 @@ export class DevPanel {
   }
 
   private patchRover(r: RoverView): void {
-    const def = ROVERS[r.kind];
+    const def = effectiveRoverDef(r);
     const bat = this.root.querySelector('#dvs-bat') as HTMLInputElement | null;
     if (!bat) return;
     const pct = Math.round((r.battery / def.maxBatteryKWh) * 100);

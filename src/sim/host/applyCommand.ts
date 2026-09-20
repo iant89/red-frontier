@@ -103,6 +103,12 @@ export function applyPlayerCommand(sim: Simulation, cmd: PlayerCommand): SimAck 
       // The one boolean worth forwarding: the palette's Assemble button greys
       // itself out from the view, so a refusal here is a state the UI reads back.
       return { ok: sim.assembleRover(cmd.buildingId, cmd.kind) };
+    case 'water/connect': return { ok: sim.connectWater(cmd.a, cmd.b) };
+    case 'water/disconnect': return { ok: sim.disconnectWater(cmd.a, cmd.b) };
+    case 'engineering/upgrade': return { ok: sim.startUpgrade(cmd, cmd.upgrade) };
+    case 'engineering/cancel': return { ok: sim.cancelUpgrade(cmd) };
+    case 'engineering/paint': return { ok: sim.paintEntity(cmd, cmd.paint) };
+    case 'water/commission': return { ok: sim.commissionWater() };
     case 'building/recipe':
       // Same deal as assemble (P5): the recipe selector reads the refusal back
       // rather than assuming the switch took, and the sim logs the reason.

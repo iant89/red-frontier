@@ -23,6 +23,8 @@
  * (`mirror.ts`) rather than streaming a grid nobody asked for.
  */
 
+import type { WaterNetworkView } from '../utilities/WaterNetwork';
+
 import type { Simulation, HistorySample, FluidFlow, Rover, Building } from '../Simulation';
 import type { ComponentAmounts } from '../defs';
 import type { Deposit } from '../World';
@@ -112,6 +114,7 @@ export interface ViewPayload {
   storage: ResourceAmounts;
   /** Manufactured components on the rack (P5) — whole units. */
   components: ComponentAmounts;
+  waterNetwork: WaterNetworkView;
   /** Rack capacity per component (P5). */
   componentCapacity: number;
   pools: { amounts: Record<FluidId, number>; capacity: Record<FluidId, number> };
@@ -157,6 +160,8 @@ function projectRover(r: Rover): RoverView {
   return {
     ...r,
     cargo: { ...r.cargo },
+    parts: { ...r.parts },
+    upgrades: { ...r.upgrades }, upgradeJob: r.upgradeJob ? { ...r.upgradeJob } : null, paint: r.paint ?? null,
     command: { ...r.command },
     pending: r.pending.map((t) => ({ ...t })),
     rules: { ...r.rules },
@@ -170,6 +175,8 @@ function projectBuilding(b: Building): BuildingView {
     remainingCost: { ...b.remainingCost },
     assembly: b.assembly ? { ...b.assembly } : null,
     craft: { ...b.craft },
+    upgrades: { ...b.upgrades }, upgradeJob: b.upgradeJob ? { ...b.upgradeJob } : null, paint: b.paint ?? null,
+    maintenance: b.maintenance ? { ...b.maintenance } : null,
   };
 }
 
@@ -249,6 +256,7 @@ export function projectView(
     },
     storage: { ...sim.storage },
     components: { ...sim.components },
+    waterNetwork: sim.waterNetwork,
     componentCapacity: sim.componentCapacity(),
     pools: { amounts: { ...sim.pools.amounts }, capacity: { ...sim.pools.capacity } },
     flows: copyFlows(sim.flows),

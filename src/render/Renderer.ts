@@ -1,3 +1,9 @@
+/** Sky tint the dust drags everything toward during a storm. */
+
+import { applyEntityPaint, clonePreviewModel } from './EntityAppearance';
+import type { EntityTarget } from '../sim/engineering/upgrades';
+import { effectiveRoverDef } from '../sim/engineering/upgrades';
+import { WaterNetworkOverlay } from './WaterNetworkOverlay';
 import * as THREE from 'three';
 import { WORLD_HALF, SPAWN_X, SPAWN_Z, SPAWN_RADIUS } from '../sim/config';
 import type { Deposit } from '../sim/World';
@@ -29,9 +35,7 @@ import { buildWeatherStation, syncWeatherStation } from './WeatherStation';
 import { ModelRegistry } from './ModelRegistry';
 import { buildingAssetId, roverAssetId } from './assetCatalog';
 
-export type OverlayMode = 'none' | 'power' | 'life' | 'weather';
-
-/** Sky tint the dust drags everything toward during a storm. */
+export type OverlayMode = 'none' | 'power' | 'life' | 'weather' | 'water';
 const DUST_HAZE = new THREE.Color(0x9a5f33);
 
 /** Sky/light keyframes across a sol. The renderer reads the sim's sun only. */
@@ -136,6 +140,7 @@ export class GameRenderer {
   private overlayRoot = new THREE.Group();
   private overlayMarks = new Map<number, THREE.Group>();
   private overlayMode: OverlayMode = 'none';
+  private waterOverlay = new WaterNetworkOverlay();
   private hemi!: THREE.HemisphereLight;
   private fillLight!: THREE.DirectionalLight;
   private skyMat!: THREE.MeshBasicMaterial;
@@ -225,6 +230,7 @@ export class GameRenderer {
     this.scene.add(this.depositRoot);
     this.scene.add(this.poiRoot);
     this.scene.add(this.overlayRoot);
+    this.scene.add(this.waterOverlay.root);
 
     this.selectionRing = this.makeGroundRing(0xffffff, SELECTION_RING_RADIUS, SELECTION_RING_THICKNESS);
     this.selectionRing.visible = false;
@@ -770,7 +776,8 @@ export class GameRenderer {
   // ---------------- overlays ----------------
   setOverlay(mode: OverlayMode): void {
     this.overlayMode = mode;
-    this.overlayRoot.visible = mode !== 'none';
+    this.overlayRoot.visible = mode !== 'none' && mode !== 'water';
+    this.waterOverlay.root.visible = mode === 'water';
     if (mode === 'none') {
       for (const [, m] of this.overlayMarks) m.visible = false;
     }
@@ -782,6 +789,7 @@ export class GameRenderer {
    * for colour-independent icons, so each mark carries a distinct shape too).
    */
   private syncOverlay(sim: SimView): void {
+    if (this.overlayMode === 'water') { this.waterOverlay.sync(sim); return; }
     if (this.overlayMode === 'none') return;
     const seen = new Set<number>();
     for (const b of sim.buildings) {
@@ -889,13 +897,14 @@ export class GameRenderer {
       // swings the nose onto the direction of travel — without it rovers
       // drive visibly sideways.
       g.rotation.y = r.heading - Math.PI / 2;
-      g.userData.battery = r.battery / ROVERS[r.kind].maxBatteryKWh;
+      g.userData.battery = r.battery / effectiveRoverDef(r).maxBatteryKWh;
 
       // A battery-flat rover goes dark and flashes its reserve-powered yellow
       // strobe — "come get me". Live rovers burn headlights and a white rear
       // strobe whenever the sim has the lights lit (night / blowing dust).
       const stranded = r.phase === 'disabled';
       this.syncRoverLights(g, r.id, r.lightsActive && !stranded, stranded);
+      applyEntityPaint(g, r.paint);
       this.setGroupBrightness(g, stranded ? 0.55 : 1);
     }
     for (const [id, g] of this.roverMeshes) {
@@ -1034,6 +1043,7 @@ export class GameRenderer {
         if (BUILDINGS[b.kind].generation === 'solar') {
           dim *= 0.55 + 0.45 * b.cleanliness;
         }
+        applyEntityPaint(rec.body, b.paint);
         this.setGroupBrightness(rec.body, dim);
         rec.damageRing.visible = b.damaged;
         if (b.damaged) {
@@ -1606,6 +1616,56 @@ export class GameRenderer {
         }
         break;
       }
+      case 'pumpStation':
+      case 'waterTank': {
+        const pump = kind === 'pumpStation';
+        const shell = mat(0xb7cad0, { metal: 0.65, rough: 0.4 });
+        const blue = mat(0x347fa3, { metal: 0.5, rough: 0.45 });
+        const plinth = new THREE.Mesh(new THREE.BoxGeometry(pump ? 7 : 8, 0.45, 7), mat(0x52616a));
+        plinth.position.y = 0.25; g.add(plinth);
+        const tank = new THREE.Mesh(new THREE.CylinderGeometry(pump ? 1.6 : 3, pump ? 1.6 : 3, pump ? 3.5 : 6, 20), shell);
+        tank.position.set(pump ? -1.5 : 0, pump ? 2.2 : 3.5, 0); g.add(tank);
+        for (const y of pump ? [1, 3.4] : [1.5, 3.5, 5.5]) {
+          const band = new THREE.Mesh(new THREE.TorusGeometry(pump ? 1.62 : 3.02, 0.12, 6, 20), blue);
+          band.rotation.x = Math.PI/2; band.position.set(pump ? -1.5 : 0, y, 0); g.add(band);
+        }
+        if (pump) {
+          const motor = new THREE.Mesh(new THREE.BoxGeometry(2.4, 2.3, 3), blue);
+          motor.position.set(1.7, 1.6, 0); g.add(motor);
+          for (const z of [-1.2, 1.2]) {
+            const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 5.8, 10), shell);
+            pipe.rotation.z = Math.PI/2; pipe.position.set(0, 0.9, z); g.add(pipe);
+          }
+        }
+        break;
+      }
+      case 'repairBay': {
+        // Open service gantry, inspection pit and component cabinets. The
+        // orange hoist distinguishes advanced repair from the arched garage.
+        const steel = mat(0x485b63, { rough: 0.5, metal: 0.6 });
+        const safety = mat(0xe8a343, { rough: 0.5, metal: 0.3 });
+        const box = (w: number, h: number, d: number, x: number, y: number, z: number, m = steel) => {
+          const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+          mesh.position.set(x, y, z);
+          g.add(mesh);
+        };
+        box(9.6, 0.25, 8, 0, 0.15, 0);
+        box(3, 0.12, 6, 0, 0.32, 0, mat(0x20282b));
+        for (const x of [-4.2, 4.2]) {
+          for (const z of [-3, 3]) box(0.5, 5, 0.5, x, 2.6, z);
+          box(0.65, 0.5, 7.2, x, 5.3, 0, safety);
+        }
+        box(9, 0.6, 0.8, 0, 5.6, 0, safety);
+        box(1.3, 0.7, 1.2, 0.6, 5, 0);
+        box(0.1, 2.1, 0.1, 0.6, 3.6, 0);
+        box(0.8, 0.15, 0.4, 0.9, 2.55, 0, safety);
+        const cabinet = mat(0x68b5af, { rough: 0.45, metal: 0.35 });
+        for (const x of [-2.8, 0, 2.8]) {
+          box(2, 2.1, 1, x, 1.4, -3, cabinet);
+          for (const y of [0.9, 1.5, 2.1]) box(1.6, 0.08, 0.12, x, y, -2.45);
+        }
+        break;
+      }
       case 'garage': {
         // A Quonset-style vehicle bay: half-barrel roof, end walls, a charge
         // post with a glowing wand, and a hardstand apron out front.
@@ -1819,12 +1879,14 @@ export class GameRenderer {
       new THREE.MeshStandardMaterial({ color: def.bodyColor, roughness: 0.5, metalness: 0.35 }),
     );
     body.position.y = 1.15;
+    body.userData.paintable = true;
     body.castShadow = true;
     const cab = new THREE.Mesh(
       new THREE.BoxGeometry(1.4, 0.9, W * 0.55),
       new THREE.MeshStandardMaterial({ color: 0xe8e6da, roughness: 0.35, metalness: 0.1 }),
     );
     cab.position.set(L / 2 - 0.7, 2.0, 0);
+    cab.userData.paintable = true;
     const chassis = new THREE.Mesh(
       new THREE.BoxGeometry(L + 0.4, 0.5, W + 0.4),
       new THREE.MeshStandardMaterial({ color: def.accentColor, roughness: 0.7 }),
@@ -1938,6 +2000,12 @@ export class GameRenderer {
     g.userData.pickType = 'rover';
     g.userData.pickId = id;
     return g;
+  }
+
+  /** Owned model for a presentation-only turntable; no second entity factory. */
+  previewEntity(target: EntityTarget): THREE.Object3D | null {
+    const source = target.entity === 'rover' ? this.roverMeshes.get(target.id) : this.buildingMeshes.get(target.id)?.body;
+    return source ? clonePreviewModel(source) : null;
   }
 
   // ---------------- selection / ghost ----------------

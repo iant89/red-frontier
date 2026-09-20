@@ -3708,7 +3708,8 @@ Canonical `rf1-1d7ae6c1b30534-0db8f0413ab365` (foundation),
   parts; revisit when there is a catalogue.
 - *Phase 27 — procedural bodies.* Unchanged, and the workshop now has a state worth
   showing: nothing on the body reads as "a line is running" beyond the overlay ring.
-- *New — nothing wears a component out.* Maintenance depth (P5's remaining item) now
+- *New — nothing wears a component out.* **Closed for rovers by slice 3 below;
+  building components remain open.** Maintenance depth (P5's remaining item) now
   has something to consume: parts exist, are crafted, and are spent exactly once, at
   assembly.
 
@@ -3722,6 +3723,187 @@ Canonical `rf1-1d7ae6c1b30534-0db8f0413ab365` (foundation),
 | `npm run test:replay` | green — all three canonical scenarios match the re-pinned hashes |
 | `npm run test:stress` | green — 4 800 ticks, invariants satisfied, hash re-pinned and stable |
 
+
+## Recorded (P5 slice 3 — rover maintenance, 2026-09-20)
+
+Intentional product change, not an architectural extraction. `MaintenanceSystem`
+owns installed motor/board wear and the Repair Bay's timed replacements. Installed
+health lives in `Rover.parts` (`RoverPartHealth`); the unpaid active job lives in
+`Building.maintenance`. Inventory still has exactly one owner, ComponentSystem.
+
+- Bay: thirteenth blueprint, 8 kW active / 1 kW idle, tier 2, 20 kg steel + ore,
+  38 s build. At ≤70% health, parked customers receive one replacement per 12
+  powered seconds. A matching spare is debited only at completion. A second bay
+  cannot concurrently service the same rover; departure cancels unpaid work.
+- `ProductionSystem.desiredThroughput` delegates the bay's demand to the owner.
+  `tickBays` is inserted after GarageSystem; `tickWear` after rover movement and
+  colonist work. No pre-existing system is reordered. Construction and fleet
+  dispatch consult the bay's funded reservation; player intent and battery safety
+  still take priority. No new command/task kind or host protocol is needed:
+  ordinary move/stop/wait orders park the rover, just as for garage servicing.
+- `roverWorkMul` uses the weakest of routine condition and installed parts. The
+  existing 50% floor prevents an industry bootstrap deadlock. Building structural
+  repairs and panel cleaning remain independent of manufactured stock.
+- FailureSystem emits part-wear facts; AlertSystem owns warnings; the HUD only
+  reads owned health/job copies and shows prices, progress and refusal reasons.
+- Save v11 is additive: healthy parts/empty jobs for old saves, clamped numeric
+  health/progress, invalid job references dropped. Historical v7/v8/v9 migrators
+  now step to their named adjacent version instead of jumping to CURRENT.
+- Hashes intentionally changed (new authoritative fields and wear): foundation
+  `rf1-0c8ea29bf65ec4-1ddbca6058e53d`, logistics
+  `rf1-1ca9dfaacf9b91-1ff3cb9bc00375`, severe storm
+  `rf1-02bb9bacda012b-0b3e3c47d3a04c`, one-sol stress
+  `rf1-01b6d9c75f237e-1779e17dc23916`. Older recorded values above are historical.
+
+**Scoped follow-ups against existing phases**
+
+- **Phase 15 (failure/maintenance depth):** this closes slice 2's "nothing wears
+  a component out" for rovers only. Building-specific replaceable components and
+  their failure effects remain a later product slice; do not bolt them onto
+  Simulation. Extend MaintenanceSystem/state when they have a defined design.
+- **Phase 12 (fleet scheduling):** bay reservations prevent accidental dispatch,
+  but there is no automatic long-distance service trip/appointment task yet.
+  Players park beside the bay with existing orders. If added, it belongs in the
+  task/command model and fleet scheduler, not UI mutation or a parallel queue.
+- **Phase 27 (rendering):** Repair Bay uses a procedural gantry fallback and an
+  asset-catalog slot. The earlier procedural-body extraction/GLB art debt remains;
+  neither gantry animation nor bespoke GLB art is claimed by this slice.
+
+**Validation surfaces:** `sim/maintenance` (17 checks), `hud/maintenance` (4),
+`maintenance-smoke.mjs` (local + worker, timed replacement across save/load),
+canonical transcripts and large-colony stress. Final gate: **81 suites / 939
+checks**, typecheck, production build, test linkage, canonical replay and both
+browser transports green.
+
+
+## Recorded (P5 slice 4 — water utility networks, 2026-09-20)
+
+Intentional gameplay extension, not an architectural extraction. `WaterState`
+owns commissioned local tanks and paid links. `utilities/WaterNetwork` provides
+pure sorted topology; `WaterSystem` owns commands, local access and pumped
+transport. Simulation only delegates commands, projects a view and inserts one
+post-power/pre-life-support tick. Production and drinking use local water after
+commissioning; oxygen and food are still shared. Indoor reclamation returns to
+the same shelter tank; EVA provisioning debits the pod.
+
+- Fifteen blueprints: Pump Station (6 kW, tier 1, 20 kg buffer, 6 kg/h at full
+  power) and Water Tank (250 kg passive) join the existing thirteen. Oxygenator
+  gains a 10 kg local buffer. Workshop's third line makes 2 pipe units/h from
+  1 kg steel; counted pipes are **not** installed rover parts (`RoverPartId`).
+- A direct link costs ceil(distance/20 m), maximum 200 m, spent once. Removal
+  returns half the sections (floor), bounded by rack space. Demolition deletes
+  incident links without refund. Capacity loss/damage clamps only that tank.
+- New and old colonies use shared bootstrap plumbing until explicit one-way
+  commissioning: all online water ports including pod, an enabled extractor
+  and a powered pump must be connected and undamaged, with water in reserve.
+  Transition distributes the existing reserve proportionally without mass loss.
+  New buildings then start empty; isolated stores never satisfy remote consumers.
+- Pumps share a component budget among proportional tank deficits; deterministic
+  BFS records signed link flow. Brownouts scale flow, off/damaged pumps move
+  nothing. Buffered local use remains possible without transport. The budget
+  is a simplified network throughput, not pressure or per-edge capacity.
+- Intent protocol: `water/connect`, `water/disconnect`, `water/commission`;
+  nested host views own their nodes/links. WaterPanel preserves DOM/focus and
+  emits intents; WaterNetworkOverlay owns cached terrain-following geometry,
+  direction beads and attention markers. Procedural pump/tank art has GLB slots.
+- Save v12: adjacent v11 migration keeps older colonies uncommissioned. Separate
+  WaterPersistence validates endpoints, duplicates, costs, distance and tank
+  bounds; malformed tanks never manufacture a reserve. Hashes include active
+  state/topology/tanks, exclude transient flow. Invariants pin local/total parity.
+
+**Scoped follow-ups against existing phases**
+
+- **Phases 7/15 (life support / failure feedback):** shared bootstrap is explicit
+  and permanent until the user opts in, not a fake connectivity gate. Oxygen,
+  food and EVA provisioning have not gained physical transport inventories.
+  Aggregate reserve histories/alerts remain colony totals; inspector/overlay
+  report local isolation/no pump/no water. Network-aware reserve warnings and
+  carried EVA water belong with these owners in a later slice.
+- **Phase 9 (construction):** pipes currently install instantly along straight
+  endpoint links, paying inventory via commands. Trench routing, obstacle checks,
+  staged pipe construction and valves need a dedicated utility-construction
+  model, not UI writes or more Simulation logic.
+- **Phases 8/27 (utility/presentation scale):** proportional pumping deliberately
+  omits pressure, head loss, leaks and edge capacity. Topology is recomputed from
+  plain data; cache only if commissioned-network profiling justifies it. The
+  overlay is separate; procedural building bodies still use the pre-existing
+  Renderer switch, inheriting its planned model-extraction debt.
+
+**Validation:** typecheck, build (120 modules), **84 suites / 959 checks** green,
+linkage metadata, canonical replay and one-sol stress invariants pass. New
+checks: sim/water 15, hud/water 4, render/water-overlay 1. Water browser smoke
+passes worker and in-process, including paid UI links, commissioning mass,
+disconnection/reconnection, actual pumped supply, save/load and WebGL overlay.
+Pins intentionally change for new component/state fields and water capacity:
+foundation `rf1-150b8afdaf2d47-021a099501d17f`, logistics
+`rf1-1ee38a25171a21-04bbb238dea72b`, severe storm
+`rf1-1e4b4910ff8f60-004d5acbd00d1e`, stress
+`rf1-09b6f5c6ffd13e-020b2da0f43c5b`.
+
+## Recorded (Engineering & customization — 2026-09-20)
+
+User-approved interaction/product extension: right-click/long-press built rover
+or building entities for a paused Engineering dialog, a slowly rotating 3D
+preview and right-side controls (stacked on mobile). Previous speed is restored
+on close. Installs are timed, not instant: rovers park at a powered Garage and
+buildings receive on-site construction work. Empty-ground context orders stay.
+
+**Ownership and contracts**
+
+- `sim/engineering/upgrades.ts` owns the typed 11-system, three-tier catalogue,
+  prices and effective rover/building definitions. Permanent engineering is
+  separate from wear/condition and runtime-only developer levels. No scattered
+  UI-only multipliers: movement, charge/rescue, haul estimates, mining, power,
+  production, water/radar/storage and presentation use the same effective stats.
+- `UpgradeSystem` validates eligibility, bay reservations and both ledgers,
+  spends once when a job is queued, advances powered rover installs and exposes
+  building work progress to ConstructionSystem. Departures/power loss pause jobs;
+  cancel refunds to available capacity. Garage demolition cancels customer jobs;
+  building demolition loses that building's own refit. New capacity adds no mass
+  or energy. Jobs use saved typed data, not callbacks or a second task queue.
+- Existing `construct` tasks now also target funded online refits. Builder
+  arbitration/fleet priority remain with their existing owners. Job progress is
+  separate from construction progress. Garage assembly/refit reservations are
+  mutually exclusive; automation holds parked customers but player orders win.
+- `EngineeringController` owns the modal and pause lease, and `EngineeringPanel`
+  owns responsive DOM, focus, icon prices, recipe/actions and intent emission.
+  Game/Selection/Input remain thin wiring. EntityPreview owns independent RAF,
+  camera/lights, resize and disposal; clones actual renderer models without
+  duplicating model factories. EntityAppearance clones materials, retains factory
+  finish and avoids tinting mechanical/glass details. ItemIcons are reusable SVG.
+- New battery packs, cargo frames and drill teeth extend the counted inventory
+  and Workshop to six recipes, never the rover wear-part type. Palette cosmetics
+  are free and apply to rover/building entities. v13 saves default older colonies
+  to unmodified hardware; validator bounds tiers and jobs, owns nested copies and
+  rejects duplicate/dangling Garage reservations. Hashes include permanent state.
+
+**Scoped follow-ups / explicit limitations**
+
+- **Phases 9/12:** reuse of construct tasks for online refits is deliberate, not
+  a second queue. A future specialised retrofit task must be introduced through
+  the task/command model; currently no automatic service appointments or module
+  swaps/downgrades. A player can use Drive to nearest Garage, then queue the refit.
+- **Phase 18:** funded jobs use a saved tier ID and current catalogue price for
+  cancellation; changing prices in a future release needs a migration or saved
+  paid-cost receipt to preserve exact cross-version refunds. Do not silently
+  rebalance a live funded job. Capacity-limited refunds are explicitly disclosed.
+- **Phase 27:** preview uses the live model via an owned clone, not an alternative
+  entity renderer. Permanent stat tiers do not add attachment meshes; palette
+  finishes use body tags/neutral-surface fallback. Custom GLBs should tag paintable
+  surfaces; arbitrary texture remapping and an RGB picker remain future work.
+  Preview adds an on-demand WebGL context and disposes it on close. The main
+  production bundle now crosses the existing 1200 kB warning (~1224 kB, ~358 kB
+  gzip); lazy loading engineering UI/vendor splitting is a measured follow-up,
+  not a reason to raise the warning threshold. No renderer-side sim logic.
+- **Phase 8:** existing manufacturing benches cap in-flight progress at one unit.
+  Throughput upgrades retain that bounded-progress convention; very coarse manual
+  test steps can lose overflow, so use fixed ticks when checking long-run yields.
+
+**Validation surfaces:** sim/engineering (15), hud/engineering (6),
+render/entity-preview (3), plus right-click and trusted touch long-press browser
+smokes on both transports. Baseline replay pins intentionally change for the
+expanded component catalogue and permanent entity fields. Full gate results are
+recorded in mnemosyne after validation.
 
 # 35. Things NOT to Modify
 

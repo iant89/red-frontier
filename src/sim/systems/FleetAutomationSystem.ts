@@ -80,6 +80,10 @@
  * Does NOT know about: Three.js, DOM, renderer, UI, hosts, persistence schema.
  */
 
+import { UpgradeSystem } from './UpgradeSystem';
+import { effectiveBuildingDef } from '../engineering/upgrades';
+import { effectiveRoverDef } from '../engineering/upgrades';
+import { MaintenanceSystem } from './MaintenanceSystem';
 import type { ColonyState } from '../state/ColonyState';
 import type { Building } from '../state/BuildingState';
 import { remainingCostTotal } from '../state/BuildingState';
@@ -173,6 +177,7 @@ export function idlePool(
       !r.recharge &&
       (!opts.excludeSheltered || !r.sheltered) &&
       r.command.type === 'idle' &&
+      !MaintenanceSystem.holdsRover(state, r) && !UpgradeSystem.holdsRover(state, r) &&
       (!opts.requireEmptyQueue || r.pending.length === 0),
   );
 }
@@ -191,7 +196,7 @@ export function maintenancePending(state: ColonyState): boolean {
   for (const b of state.buildings) {
     if (b.state !== 'online' || servicingRover(state, b.id)) continue;
     if (b.damaged) return true;
-    if (BUILDINGS[b.kind].generation === 'solar' && b.cleanliness < AUTO_CLEAN_THRESHOLD) {
+    if (effectiveBuildingDef(b).generation === 'solar' && b.cleanliness < AUTO_CLEAN_THRESHOLD) {
       return true;
     }
   }
@@ -250,7 +255,7 @@ export function maintenanceJobs(state: ColonyState): MaintenanceJob[] {
       (b) =>
         b.state === 'online' &&
         !b.damaged &&
-        BUILDINGS[b.kind].generation === 'solar' &&
+        effectiveBuildingDef(b).generation === 'solar' &&
         b.cleanliness < AUTO_CLEAN_THRESHOLD,
     )
     .sort((a, c) => a.cleanliness - c.cleanliness || a.id - c.id)
@@ -288,7 +293,7 @@ export function rescueJobs(state: ColonyState): RescueJob[] {
 
 /** The charge a stranded rover needs handed to it to get home (TDD §8). */
 export function rescueGiftKWh(state: ColonyState, stranded: Rover): number {
-  const sDef = ROVERS[stranded.kind];
+  const sDef = effectiveRoverDef(stranded);
   const home = RoverSystem.nearestChargerPoint(state, stranded.x, stranded.z);
   return Math.max(
     RoverSystem.travelKWh(stranded.x, stranded.z, home.x, home.z, sDef) * 1.25,
@@ -308,7 +313,7 @@ export function rescueFeasible(
   stranded: Rover,
   giftKWh: number,
 ): boolean {
-  const rDef = ROVERS[cand.kind];
+  const rDef = effectiveRoverDef(cand);
   const home = RoverSystem.nearestChargerPoint(state, stranded.x, stranded.z);
   const reserve = Math.max(
     rDef.maxBatteryKWh * (cand.rules.chargeFloorPct / 100),
@@ -364,7 +369,7 @@ export function haulTripKWh(
   dep: Deposit,
   res: ResourceId,
 ): { oneWayKWh: number; totalKWh: number } {
-  const rd = ROVERS[rover.kind];
+  const rd = effectiveRoverDef(rover);
   const oneWayKWh = RoverSystem.travelKWh(rover.x, rover.z, dep.x, dep.z, rd);
   const loadTimeS = 60 / (RESOURCES[res].mineRateKg * rd.mineSpeedMul);
   const digKWh = rd.workPowerKw * HOURS_PER_SEC * loadTimeS;
@@ -379,7 +384,7 @@ export function haulTripKWh(
  * the ride home.
  */
 export function canMakeRun(rover: Rover, dep: Deposit, res: ResourceId): boolean {
-  const rd = ROVERS[rover.kind];
+  const rd = effectiveRoverDef(rover);
   const { oneWayKWh, totalKWh } = haulTripKWh(rover, dep, res);
   const reserveKWh = Math.max(
     rd.maxBatteryKWh * (rover.rules.chargeFloorPct / 100),
@@ -417,7 +422,7 @@ export function pickHaul(
       const held =
         d.reservedBy != null &&
         d.reservedBy !== rover.id &&
-        d.amount <= ROVERS[rover.kind].capacityKg * 2.5;
+        d.amount <= effectiveRoverDef(rover).capacityKg * 2.5;
       if (held) {
         if (score < sharedScore) {
           sharedScore = score;
@@ -464,7 +469,7 @@ export function pickHaul(
 export function waitingSite(state: ColonyState): Building | null {
   return (
     state.buildings.find(
-      (b) => b.state !== 'online' && b.workerId === null && remainingCostTotal(b) <= 0,
+      (b) => (b.state !== 'online' || !!b.upgradeJob) && b.workerId === null && remainingCostTotal(b) <= 0,
     ) ?? null
   );
 }
@@ -566,7 +571,7 @@ export function dispatchSupplyRuns(state: ColonyState, hooks: FleetAutomationHos
     if (!pick) continue;
     RoverSystem.autoAssign(rover, { type: 'mine', depositId: pick.deposit.id });
     RoverSystem.claimDeposit(state, rover, pick.deposit.id);
-    shortfall[pick.resource] -= ROVERS[rover.kind].capacityKg;
+    shortfall[pick.resource] -= effectiveRoverDef(rover).capacityKg;
     if (shortfall[pick.resource] <= 1) {
       const i = wanted.indexOf(pick.resource);
       if (i >= 0) wanted.splice(i, 1);

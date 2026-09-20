@@ -20,6 +20,15 @@ benchmark / replay harness that turned TDD §20's budgets into tests (§15).
 
 ## 0 — Implementation status (living)
 
+**Engineering update (2026-09-20):** right-click/long-press Engineering screen,
+paused rotating model, icon costs, three-tier rover and role-specific building
+upgrades, timed Garage/on-site installations, three new Workshop components and
+saved free palette finishes are **IN**. Authoritative player refits use `upgrades`
+and `upgradeJob`, never the developer-only `level`. Save v13 defaults old colonies
+to stock hardware. See README’s Engineering section and the corresponding
+architectural roadmap record for costs, lifecycle, limits and ownership.
+
+
 This document is still the **design target**. Section 0 is the honest map of what
 the browser build actually does today versus what the later vertical slices still
 owe. Status vocabulary:
@@ -31,13 +40,14 @@ owe. Status vocabulary:
 | **OUT** | Not in `src/` yet — still a design commitment |
 
 **Where the build sits on the §16 roadmap:** **P1–P4 are IN**, plus the first slice
-of **P6** (POIs, SALVAGE, supply drops) and **both shipped slices of P5** —
+of **P6** (POIs, SALVAGE, supply drops) and **four shipped slices of P5** —
 refining (the Refinery, `steel`, heavy blueprints priced in it) and manufacturing
-(the Workshop's two selectable lines, a counted component rack, and rovers priced
-in motors and boards as well as metal). What is left of **P5** is multi-utility
-networks and maintenance depth; **P7–P8** are OUT. TDD §25 **T1–T5** are IN;
+(the Workshop's three selectable lines, a counted component rack, and rovers priced
+in motors and boards as well as metal), plus rover component wear and the Repair
+Bay, plus commissioned water pipes, pumps and local tanks. What is left of **P5** is further utility networks, broader materials/parts
+and building-level component wear; **P7–P8** are OUT. TDD §25 **T1–T5** are IN;
 **T6** is PARTIAL; **T8** is PARTIAL but no longer unmeasured — save migrations
-v3→v10 are IN and the performance budgets are now enforced by a regression
+v3→v13 are IN and the performance budgets are now enforced by a regression
 suite.
 
 | Pillar / system | Status | Notes |
@@ -57,14 +67,35 @@ suite.
 | Minimap + zoomable world map | **IN** | Canvas chrome over the read model; closes without moving the camera |
 | Audio (procedural soundscape) | **IN** | Web Audio, synthesised in-browser, no fetched assets; presentation only |
 | Refining (ore → steel) | **IN** | Refinery: 2.6 kg iron ore → 1.6 kg steel / Mars hour at 35 kW; steel gates the garage + radar station |
-| Manufacturing, component recipes | **IN** (P5 slice 2) | Workshop runs motors *or* boards; counted rack; rovers cost parts as well as metal |
-| Water / atmosphere / heat / data / logistics nets | **OUT** | Power is the only utility network |
+| Manufacturing, component recipes | **IN** (P5 slice 2) | Workshop runs motors, boards *or* water pipes; counted rack; rovers cost parts as well as metal |
+| Rover component wear / Repair Bay | **IN** (P5 slice 3) | Installed motor/board health, timed powered replacement, Workshop spare costs; routine Garage service stays separate |
+| Water / atmosphere / heat / data / logistics nets | **PARTIAL** | Power + commissioned water networks IN; atmosphere/heat/data graphs and general logistics nets OUT |
 | Research tech tree | **OUT** | No `research` symbol in `src/` |
 | Multi-colonist skills / medicine | **OUT** | Architecture hooks only (one `Colonist`) |
 | Nuclear / underground / closed-loop endgame | **OUT** | RTG Array is a small baseload stand-in, not a reactor |
 | Desktop + mobile UI, alerts, save/load | **IN** | localStorage slots; configurable autosave; in-play update card |
 | Developer mode panel | **IN** | Runtime-only overlays; fabrications save |
 | Profiling / benchmarking / replay harness | **IN** | Dev-only counters, fleet benchmarks, canonical transcripts, state hash |
+
+### P5 slice 4 — water utilities (2026-09-20)
+
+**IN:** counted Water Pipes from steel, a 6 kW tier-1 Pump Station (20 kg buffer),
+a 250 kg Water Tank, pipe connection/disconnection controls and a water overlay.
+New and old colonies retain shared plumbing until **Commission network** is
+explicitly selected with every existing online water port (including the pod),
+an enabled extractor and a powered pump connected, and a nonempty reserve.
+Commissioning preserves the reserve; subsequent production and indoor drinking /
+reclamation use local tanks only. Pumps move 6 kg/Mars hour at full power, scaled
+by brownouts, with fair proportional distribution within each connected component.
+Disconnected buffers still work until empty; new buildings start empty. The
+oxygenator now has a 10 kg water buffer. EVA water still debits the pod.
+
+One pipe section spans 20 m (round up), maximum direct run 200 m; the Workshop
+makes 2 sections per hour from 1 kg steel. Disconnect returns half the sections,
+rounded down and rack-limited. Demolition removes incident pipes without salvage;
+tank damage/demolition loses local contents. **OUT:** pressure, leaks, valves,
+trench routing and oxygen networks. Save v12 preserves tanks/topology and migrates
+older colonies without forcing them off shared plumbing. There are 15 blueprints.
 
 **MVP feature set (§16) — scorecard**
 
@@ -78,7 +109,7 @@ suite.
 | Sim: mining, construction, electricity, water, oxygen, food | **IN** |
 | Environment: dust accumulation, dust storm, wind damage | **IN** (+ lightning) |
 | UI: responsive desktop + mobile | **IN** |
-| Persistence: local save/load | **IN** (localStorage, versioned v3→v10) |
+| Persistence: local save/load | **IN** (localStorage, versioned v3→v13) |
 
 **Deliberate design locks already enforced in code** (do not "fix" without a design change):
 
@@ -121,7 +152,7 @@ suite.
 
 ## 02 — Core Gameplay & Simulation Systems
 
-- Interacting systems; failure propagates (emergent stories). — **PARTIAL** (power ↔ weather ↔ life support ↔ rover work ↔ refining ↔ manufacturing: a stalled line, a full rack and a garage short of motors all propagate; part-level *wear* still waits on maintenance depth)
+- Interacting systems; failure propagates (emergent stories). — **PARTIAL** (power ↔ weather ↔ life support ↔ rover work ↔ refining ↔ manufacturing: a stalled line, a full rack and a garage short of motors all propagate; worn rover parts consume Workshop spares through the Repair Bay; building-level part wear remains OUT)
 - Dependency chain: Weather → Solar/Terrain/Damage → Power/Mining/Maintenance → Life Support/Industry → Food/Population → Labor → Automation → Expansion.
 - Time: Martian sols (≈24h 39m 35s). Pause, 1×, 2×, 4× speed. Fixed timestep independent of rendering. — **IN** (`SIM_TICK` 20 Hz; sol = 240 game seconds at 1×)
 - Survival systems:
@@ -131,7 +162,7 @@ suite.
   - Food (controlled agriculture) — **PARTIAL** (single greenhouse process; no crop varieties)
   - Temperature, radiation — **OUT**
   - Electrostatic discharge (lightning) — **IN** as a storm hazard (see §07)
-  - Maintenance / component wear — **PARTIAL** (building health + cleanliness + rover drivetrain; components are now crafted and spent, but nothing wears one out yet — part-level replacement waits on maintenance depth)
+  - Maintenance / component wear — **PARTIAL** (building health + cleanliness + rover drivetrain; installed rover motors/boards now wear and are replaced at the Repair Bay; building-specific components still OUT)
 
 Cascading failure example (dust storm → solar drops → batteries drain → …) — **IN** for the power and exposure path; irrigation stoppage follows if the extractor browns out. A storm now also brings **bolts**: the same dust that dims the panels is what electrifies the sky, so the cascade has a second, sharper edge.
 
@@ -156,9 +187,8 @@ GDD-original extras (Magnesium, Sulfur, carbon-bearing, rare minerals) — **OUT
 iron ore into 1.6 kg of steel per Mars hour for 35 kW (tier 2 — industry is shed
 before life support, so smelting is a power *decision*, not a free tap). Steel
 sits on the bulk ledger beside the ores, with one difference: it has no seam, so
-the only way to own it is to make it. `glass` and the rest are **OUT** — a
-building runs one process today, so a second refined output would need recipe
-selection first.
+the only way to own it is to make it. `glass` and the rest are **OUT**; per-building recipe selection now provides
+the foundation for additional outputs.
 
 **Industrial components** (motors, circuit boards, pipes, …) — **PARTIAL** (P5
 slice 2). Drive motors and circuit boards are **IN**: the Workshop runs one of two
@@ -196,7 +226,7 @@ loads, wear, failure modes, maintenance. — **PARTIAL** (power + process + expo
 | Weather Radar Station | 10 kW (2 kW idle) | **IN** (beyond original table) | 520 km radar scope, storm cells + predicted tracks, 2.25× forecast lead; costs 25 kg steel |
 | Refinery | 35 kW (4 kW idle) | **IN** (P5 slice 1) | iron ore → steel, +150 kg per silo, blast-furnace body; the gate on heavy construction |
 | Laboratory | 10 kW | **OUT** | research |
-| Repair Bay | 8 kW | **OUT** | advanced maintenance |
+| Repair Bay | 8 kW | **IN** (P5 slice 3) | 1 kW idle; parked rover motor/board replacement at ≤70% health; 12 powered seconds and 1 matching Workshop spare per job |
 | Nuclear Reactor | variable | **OUT** | base-load power |
 
 Landing pod (not a blueprint): 14 kW RTG, 90 kWh battery, 2 kW of its own
@@ -467,7 +497,7 @@ Vertical slices and current state:
 | **P2** | power / batteries / O₂ / water / food / day-night | **IN** |
 | **P3** | wind / dust / storms / degradation | **IN** |
 | **P4** | rover tasks / automation / logistics / charging / mining routes / garage | **IN** |
-| **P5** | refining / manufacturing / utility networks / maintenance depth | **PARTIAL** — refining IN (Refinery + steel + steel-priced blueprints) and manufacturing IN (Workshop lines + component rack + part-priced rovers, save v10); utility networks and maintenance depth OUT |
+| **P5** | refining / manufacturing / utility networks / maintenance depth | **PARTIAL** — refining IN (Refinery + steel + steel-priced blueprints), manufacturing IN (Workshop lines + component rack + part-priced rovers), and rover part maintenance IN (Repair Bay, save v11); utility networks and building component wear OUT |
 | **P6** | procedural exploration / supply drops / salvage / expeditions | **PARTIAL** — discover/salvage/drops IN; survey, narrative, repairable wrecks, multi-site expeditions OUT |
 | **P7** | colonists / skills / agriculture depth / medicine | **OUT** |
 | **P8** | nuclear / underground / advanced robotics / closed-loop | **OUT** |
@@ -475,12 +505,12 @@ Vertical slices and current state:
 **Ordering note (conflict with TDD §25, now resolved for engineering):** GDD puts
 refining at P5 and exploration at P6; TDD folds POIs into T6 and never gives
 refining its own tier. The live project took **P4 → first P6 slice → P5 slice 1 →
-P5 slice 2**, so the open product call recorded two realignments ago
+P5 slice 2 → P5 slice 3**, so the open product call recorded two realignments ago
 ("Engineering vs finishing Exploration") was answered in favour of Engineering and
 then paid off: the one-process-per-building model that blocked the second slice is
 gone, replaced by a per-building line selection (`RECIPES` + `Building.recipe`).
-What remains of P5 is the unglamorous half — multi-utility networks and
-maintenance depth — and neither blocks anything the current build promises.
+The next engineering slice added rover component maintenance. Multi-utility
+networks, additional materials/parts, and building-level component wear remain.
 
 **P5 slice 1 — refining (shipped):**
 
@@ -532,6 +562,23 @@ maintenance depth — and neither blocks anything the current build promises.
   every building on its first line, every bench empty), and a hand-edited rack is
   sanitised on restore — whole non-negative units, bench fractions clamped to
   0…1.
+
+**P5 slice 3 — rover component maintenance (shipped):**
+
+- Installed motors and circuit boards have independent 0–100 health. Driving,
+  tool work and unsheltered storms wear them; below 45%, the weakest installed
+  part or routine condition reduces work rate, with a 50% floor. No part failure
+  permanently strands the bootstrap fleet.
+- Repair Bay: 20 kg steel + raw materials, 38 s build, tier 2, 8 kW active / 1 kW
+  idle. Park beside it (within 12 m of centre); parts at ≤70% are eligible.
+- One bay works on one rover/part at a time, 12 s at full power. Brownouts slow
+  work, shortages pause it, and one matching Workshop spare is spent only on
+  completion. New orders/charging take priority; departure cancels without cost.
+- The Garage still handles routine drivetrain service and charging. Structural
+  building repair and solar cleaning remain available without manufactured parts.
+- Save v11 preserves part health and pending replacements. Older colonies begin
+  with unworn components. Inspectors show both health and replacement progress;
+  alerts below 35% name the Repair Bay and spare cost.
 
 **What actually shipped between P4 and this realignment** (none of it a new
 pillar, all of it depth the pillars stand on):

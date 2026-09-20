@@ -58,6 +58,7 @@
  * Determinism: pure arithmetic over state, no RNG, no clock, no DOM.
  */
 
+import { effectiveRoverDef } from '../engineering/upgrades';
 import type { ColonyState } from '../state/ColonyState';
 import type { Building } from '../state/BuildingState';
 import type { Rover } from '../state/RoverState';
@@ -187,7 +188,7 @@ export class LogisticsSystem {
    */
   static loadCargo(r: Rover, res: ResourceId, kg: number): number {
     if (!(kg > 0) || !Number.isFinite(kg)) return 0;
-    const space = Math.max(0, ROVERS[r.kind].capacityKg - cargoMass(r));
+    const space = Math.max(0, effectiveRoverDef(r).capacityKg - cargoMass(r));
     const loaded = Math.min(kg, space);
     r.cargo[res] += loaded;
     return loaded;

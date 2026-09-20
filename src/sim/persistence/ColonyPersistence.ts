@@ -15,6 +15,10 @@
  * hosts.
  */
 
+import { copyEngineering, restoreEngineering } from './EngineeringPersistence';
+import { roverUpgrades, buildingUpgrades } from '../engineering/upgrades';
+import { restoreWater } from './WaterPersistence';
+import { emptyWaterState } from '../state/WaterState';
 import { World } from '../World';
 import {
   SAVE_VERSION,
@@ -25,6 +29,7 @@ import {
   BUILDINGS,
   MINEABLE_RESOURCES,
   ALL_COMPONENTS,
+  ROVER_PARTS,
   emptyAmounts,
   emptyComponents,
   type ComponentAmounts,
@@ -48,6 +53,7 @@ import {
 } from '../state/ColonyState';
 import {
   defaultRoverRules,
+  freshRoverParts,
   type RoverTask,
   type RoverPhase,
   type RoverGoal,
@@ -77,6 +83,7 @@ export function snapshotColony(state: ColonyState): SaveState {
     storage: { ...state.storage },
     components: { ...state.components },
     fluids: { ...state.pools.amounts },
+    water: { active: state.water.active, links: state.water.links.map((l) => ({ ...l })), tanks: { ...state.water.tanks } },
     storedKWh: state.storedKWh,
     gameOver: state.gameOver,
     colonist: {
@@ -116,6 +123,7 @@ export function snapshotColony(state: ColonyState): SaveState {
     })),
     exploration: { nextDropSol: state.nextDropSol },
     rovers: state.rovers.map((r) => ({
+      ...copyEngineering(r),
       id: r.id,
       kind: r.kind,
       x: r.x,
@@ -127,6 +135,7 @@ export function snapshotColony(state: ColonyState): SaveState {
       command: { ...r.command },
       pending: r.pending.map((task) => ({ ...task })),
       condition: r.condition,
+      parts: { ...r.parts },
       rules: { ...r.rules },
       autoTask: r.autoTask,
       recharge: r.recharge,
@@ -136,6 +145,7 @@ export function snapshotColony(state: ColonyState): SaveState {
       lightsOn: r.lightsOn,
     })),
     buildings: state.buildings.map((b) => ({
+      ...copyEngineering(b),
       id: b.id,
       kind: b.kind,
       x: b.x,
@@ -154,6 +164,7 @@ export function snapshotColony(state: ColonyState): SaveState {
       assembly: b.assembly ? { ...b.assembly } : null,
       recipe: b.recipe,
       craft: { ...b.craft },
+      maintenance: b.maintenance ? { ...b.maintenance } : null,
     })),
     weather: state.weather.snapshot() as SaveState['weather'],
     alerts: state.alerts.snapshot() as SaveState['alerts'],
@@ -248,6 +259,7 @@ export function restoreColony(state: ColonyState, data: SaveState): void {
       heading: r.heading,
       battery: r.battery,
       cargo: { ...emptyAmounts(), ...(r.cargo ?? {}) },
+      ...restoreEngineering(r, roverUpgrades(r.kind)),
       phase: 'idle' as RoverPhase,
       command,
       pending,
@@ -260,6 +272,14 @@ export function restoreColony(state: ColonyState, data: SaveState): void {
       chargeSat: 0,
       autoTask: !!r.autoTask,
       condition: typeof r.condition === 'number' ? r.condition : 100,
+      parts: (() => {
+        const parts = freshRoverParts();
+        for (const c of ROVER_PARTS) {
+          const n = r.parts?.[c];
+          parts[c] = typeof n === 'number' && Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 100;
+        }
+        return parts;
+      })(),
       rules: { ...defaultRoverRules(), ...(r.rules ?? {}) },
       routePaused: false,
       blockNotified: !!r.blockNotified,
@@ -272,6 +292,7 @@ export function restoreColony(state: ColonyState, data: SaveState): void {
   });
 
   state.buildings = (data.buildings ?? []).map((b) => ({
+    ...restoreEngineering(b, buildingUpgrades(b.kind)),
     id: b.id,
     kind: b.kind,
     x: b.x,
@@ -297,6 +318,14 @@ export function restoreColony(state: ColonyState, data: SaveState): void {
         ? { kind: (b.assembly as { kind: RoverKind }).kind, progress: (b.assembly as { progress: number }).progress ?? 0 }
         : null,
     level: 1,
+    // v11 jobs are unpaid; invalid jobs can be discarded without a refund.
+    maintenance: (() => {
+      const job = b.maintenance;
+      if (b.kind !== 'repairBay' || !job || !ROVER_PARTS.includes(job.component) ||
+          !state.rovers.some((r) => r.id === job.roverId) ||
+          !Number.isFinite(job.progress)) return null;
+      return { roverId: job.roverId, component: job.component, progress: Math.max(0, Math.min(1, job.progress)) };
+    })(),
     // A v9 save has neither field: recipe 0 is "the first line" (and is ignored
     // by a kind with no recipe list), and an empty bench is what a colony that
     // has never crafted anything actually has.
@@ -313,12 +342,22 @@ export function restoreColony(state: ColonyState, data: SaveState): void {
     })(),
   }));
 
+  const reservedGarages = new Set<number>();
+  for (const r of state.rovers) {
+    const id = r.upgradeJob?.facilityId;
+    if (r.upgradeJob && (id == null || reservedGarages.has(id) || !state.buildings.some(b => b.id === id && b.kind === 'garage'))) r.upgradeJob = null;
+    else if (id != null) reservedGarages.add(id);
+  }
+  for (const b of state.buildings) if (b.upgradeJob && (b.state !== 'online' || b.upgradeJob.facilityId !== null)) b.upgradeJob = null;
+
   // Phase 11: execution state (goal/phase) is rebuilt from the task + world.
   RoverSystem.rehydrate(state);
 
+  state.water = emptyWaterState();
   recomputeCapacitiesState(state);
   // Phase 7: fluid clamp + colonist rebuild delegated to LifeSupportSystem
   LifeSupportSystem.restore(state, data.fluids, data.colonist);
+  restoreWater(state, data.water);
 
   // Phase 6: grid rebuild delegated to PowerSystem
   PowerSystem.restore(state, data.storedKWh);

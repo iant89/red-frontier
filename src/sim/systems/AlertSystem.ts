@@ -260,6 +260,14 @@ export class AlertSystem {
           }
           break;
         }
+        case 'RoverPartWear': {
+          const key = `rover-parts-${e.roverId}`;
+          if (e.active) A.raise(key, 'warn', `${e.label} needs replacement parts`,
+            `Motor ${Math.round(e.motor)}% · circuit board ${Math.round(e.circuitBoard)}%. Park beside a Repair Bay; each replacement uses 1 matching spare.`,
+            t, stamp, e.roverId);
+          else A.clear(key, t, stamp, `${e.label}'s components are back in shape.`);
+          break;
+        }
         case 'StorageFull': {
           if (e.active) {
             A.raise(

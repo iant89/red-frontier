@@ -82,9 +82,9 @@ function workshopColony(seed = 909, solarArrays = 4) {
 group('Components — counted on a rack, not weighed in a silo');
 
 test('components are their own ledger, and only a workshop has room for them', () => {
-  assert.deepEqual(ALL_COMPONENTS, ['motor', 'circuitBoard']);
-  assert.deepEqual(emptyComponents(), { motor: 0, circuitBoard: 0 });
-  assert.deepEqual(emptyCraft(), { motor: 0, circuitBoard: 0 });
+  assert.deepEqual(ALL_COMPONENTS, ['motor', 'circuitBoard', 'pipe', 'batteryPack', 'cargoFrame', 'drillTeeth']);
+  assert.deepEqual(emptyComponents(), { motor: 0, circuitBoard: 0, pipe: 0, batteryPack: 0, cargoFrame: 0, drillTeeth: 0 });
+  assert.deepEqual(emptyCraft(), { motor: 0, circuitBoard: 0, pipe: 0, batteryPack: 0, cargoFrame: 0, drillTeeth: 0 });
   for (const c of ALL_COMPONENTS) {
     const info = COMPONENTS[c];
     assert.ok(info.label.length > 0 && info.short.length > 0, `${c} is named`);
@@ -594,7 +594,7 @@ test('a snapshot carries the rack, the line and the bench, and restores them', (
 
   const snap = JSON.parse(JSON.stringify(sim.snapshot()));
   assert.equal(snap.version, SAVE_VERSION, 'the snapshot is on the current schema');
-  assert.equal(SAVE_VERSION, 10, 'P5 slice 2 opened v10 for the component rack');
+  assert.ok(SAVE_VERSION >= 10, 'the component rack requires v10 or later');
   assert.deepEqual(snap.components, racked, 'the rack is in the save');
   const saved = snap.buildings.find((x: { id: number }) => x.id === workshop.id);
   assert.equal(saved.recipe, 1, 'so is the line the player chose');

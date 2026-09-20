@@ -2,6 +2,168 @@
 
 Persistent notes for future coding sessions.
 
+## Engineering & customization (2026-09-20)
+
+- **Interaction:** right-click any built rover/building entity on desktop, or
+  long-press on touch, to open Engineering. Empty-ground context orders remain.
+  The dialog pauses the colony and restores exactly the previous speed on close
+  (including zero). Model rotation uses UI time; reduced-motion disables spin.
+  Desktop: model left/options right; narrow screens stack and scroll. Keyboard
+  isolation, focus trap, Escape/backdrop close, preview resource disposal included.
+- **Owners:** `EngineeringController` owns modal/pause lifetime; EngineeringPanel
+  owns DOM/intent controls; EntityPreview owns a separate Three turntable cloned
+  from the renderer's actual entity model. EntityAppearance isolates materials
+  and factory paint; ItemIcons provides labelled SVG pictograms in engineering,
+  resource chips, blueprint costs, assembly and recipes. No generated icon assets.
+- **Authoritative engineering:** `sim/engineering/upgrades.ts` is the typed
+  catalogue + effective-stat readers, `UpgradeSystem` owns paid jobs. Optional
+  entity `upgrades`, `upgradeJob`, `paint` are independent of installed wear and
+  unsaved developer `level`. All 15 buildable types have appropriate upgrades.
+  Rover drivetrain/battery/cargo and miner-only teeth: three tiers, gains per tier
+  +20% speed (+8% drive power), +35% battery, +40% cargo, +30% mining respectively.
+  Building production/generation/service/radar +25%, storage +40%, pump +30%,
+  efficiency reduces base grid draw by 12% per tier. Values scale base stats.
+- **Installation decision explicitly approved by user:** timed service; pause
+  while browsing. Park and stop beside a Garage (radius+5 m). One refit/customer
+  or assembly per bay. Materials/components are spent **once at queue time**.
+  Leaving/new orders/power loss/damage pause paid jobs. Idle automation respects
+  the reservation, battery safety still wins. Explicit cancel refunds once up to
+  current silo/rack capacity; overflow discarded. Demolishing a Garage cancels
+  customer jobs and refunds; demolishing a building loses its own unfinished refit.
+- Building refits use the existing construct task and on-site builder ownership
+  in ConstructionSystem, with progress in `upgradeJob`, not construction progress.
+  Online refitting structures retain existing production/capacity until complete;
+  disabled/damaged/unpowered targets pause installation. Fleet prioritises them
+  like construction. New battery/tank/cargo capacity never manufactures contents.
+- Workshop now has **six lines**: motors/boards/pipes plus battery packs (2 Al +
+  1 silica + .5 steel kg/h → .5 packs/h), cargo frames (3 Al + 2 steel → .5/h),
+  drill teeth (1 iron + 3 steel → .5/h). Installed rover parts remain motor/board
+  only. Palette paint (eight colours + factory reset) is free and saved for both
+  rovers/buildings; preview changes require Apply to reach the authoritative model.
+- **Save v13**, migration v12→13. Owned nested projection/snapshot copies,
+  sanitation of supported tiers/jobs/palette, unique valid Garage reservations,
+  invariant checks and hash fields. Effective stats cover movement/mining/hauls,
+  charging/rescue/fleet estimates, production/power/radar/storage, UI/dev readouts.
+- **Final gates PASS:** typecheck; full **87 suites / 983 checks**; manifest linkage;
+  canonical replay hashes; 4,800-tick stress invariants; production build. Browser
+  smoke passes on **both local and worker** after final changes: desktop and mobile
+  gestures, rotation while paused, speed restoration, paid job/save/load, paint,
+  six recipes and no horizontal overflow. Screenshots under `.probe/engineering-*`.
+  Preview remains available on port 5199. Build: main 1,224.77 kB (357.79 gzip),
+  worker 270.06 kB, CSS 68.92 kB; existing 1,200 kB bundle threshold warns, not fails.
+  Additional cleanup covers partial WebGL construction failure, independently
+  owned line/mesh resources and borrowed textures. Desktop component rack is 3×2;
+  blueprint costs now wrap within their own buttons instead of overlapping.
+- Validation at final implementation: sim/engineering 15, hud/engineering 6,
+  render/entity-preview 3 new checks. `scripts/engineering-smoke.mjs` exercises
+  actual right-click and trusted CDP touch long-press, paused rotation, icon costs,
+  paint, paid installation across save/load, six recipe choices and mobile layout.
+  Run software-GL browsers separately from the full suite. Resumed job uses
+  explicit host fixed-step advances to avoid coupling validation to software-GL
+  frame rate. A desktop→mobile resize needs collapsed panels; this exposed/fixed
+  Game.syncUI reopening collapsed building inspectors on every refresh.
+- Replay pins (new component/engineering fields): foundation
+  `rf1-14ed7eb836dc03-1164ec0689266e`, logistics
+  `rf1-17bc9bdd9b5057-0117bb605da5e9`, storm
+  `rf1-17d5135575ee97-0ffdd05072a1d3`, stress
+  `rf1-17f926380467a3-0b6ffd671d40ac`. Earlier records below are historical.
+- Scope limits: no module swapping/downgrades, automatic retrofit travel, part
+  attachment meshes, RGB picker, or upgrades to the fixed landing-stage prop.
+  Use the new role-specific tiers/palette; future catalogue entries belong in
+  the engineering owner. Large main-bundle warning is tracked under Phase 27.
+  Existing pause-save/stable-alert/water/maintenance work remains intact; no commit.
+
+## Pause-save presentation and stable alerts (2026-09-20)
+
+- `HUD.onSaveProgress(open, saved)` reports the actual progress-card lifetime,
+  including its success fade. `MenuController` hides (does not close) the pause
+  menu during it, preserving the original speed and blocking resume. Success
+  disables Save and Ctrl+S for that pause session; resume/reopen resets it.
+  Failures leave Save enabled. The fade timer is cancelled on a new save or
+  forced dismissal so an old timer cannot hide a newer progress card.
+- HUD alerts are keyed DOM nodes, updated in place. Do not replace the alert
+  container's `innerHTML` on live detail changes: it restarts `alert-in` on every
+  power/weather update. The content signature includes title and focus target;
+  retained listeners read the current dataset. New alerts still animate in.
+- Validation: 79 suites / 918 checks, typecheck, build, test linkage, and pause
+  browser smokes on both local and worker transports pass.
+
+## P5 slice 4 — water utility networks (2026-09-20)
+
+- **Shipped:** paid pipe connections, local tanks, powered pumping, stable water
+  inspector controls and dedicated overlay. Fifteen blueprints: Pump Station
+  (6 kW/tier 1, 20 kg, 6 kg/h), Water Tank (250 kg); oxygenator has 10 kg buffer.
+  Workshop third recipe: 1 kg steel/h → 2 pipes/h. A section spans 20 m, maximum
+  run 200 m. Disconnect salvages floor(half), rack-clamped; demolish no refund.
+- **Safe commissioning:** new/old colonies stay on shared plumbing until explicit
+  Commission network. All online water ports including pod, enabled extractor
+  and powered pump must connect, be undamaged and have a nonempty reserve.
+  Mass is preserved across proportional tank fill. Post-commission buildings
+  start empty; production and indoor drinking/recycling use their own tanks.
+  EVA water still debits pod, oxygen/food remain pooled. Damage loses local water.
+- Owners: `state/WaterState`, `utilities/WaterNetwork`, `systems/WaterSystem`,
+  `persistence/WaterPersistence`, `ui/WaterPanel`, `render/WaterNetworkOverlay`.
+  Deterministic components/BFS, fair proportional pump budgets, signed flow.
+  Tick after power/production, before life support. Tanks are authoritative;
+  pooled water is derived. Current flow is transient, not saved/hashed.
+- Save **v12**, migration v11→12; old saves receive no free pipes and do not
+  auto-commission. `RoverPartId` / `ROVER_PARTS` distinguish installed wear from
+  the wider `ComponentId` inventory (pipe must never become a rover part).
+- Commands: water/connect, water/disconnect (a/b IDs, pod = 0), water/commission.
+  Immutable host copies, malformed-save sanitation, hashing/invariants included.
+- Gate: **84 suites / 959 checks** green (280.4 s), typecheck, build (120 modules),
+  test linkage, canonical replay, one-sol stress and both browser transports.
+  `sim/water` 15, `hud/water` 4, `render/water-overlay` 1. Full suite and browser
+  smokes must run separately. `scripts/water-smoke.mjs` uses a fresh browser per
+  transport; local save-load can take >30 s in software GL, so waits allow 60 s
+  and explicitly reselect the pump after fixture load. First local attempt
+  timed out; sequential rerun passed. No app fault was observed.
+- Current pins: foundation `rf1-150b8afdaf2d47-021a099501d17f`, logistics
+  `rf1-1ee38a25171a21-04bbb238dea72b`, storm
+  `rf1-1e4b4910ff8f60-004d5acbd00d1e`, stress
+  `rf1-09b6f5c6ffd13e-020b2da0f43c5b`. Earlier pins below are historical.
+- Deliberately OUT: pressure/leaks/valves, trench routing, oxygen/heat/data
+  networks, portable EVA water. Aggregate histories/alerts are not local supply
+  guarantees; use inspector/overlay. Follow-ups recorded at roadmap Phases
+  7/8/9/15/27. P5 backlog still includes glass, broader parts, building component
+  wear, Laboratory/Nuclear Reactor. No commit requested or made.
+
+## P5 slice 3 — rover component maintenance (2026-09-20)
+
+- `MaintenanceSystem` owns installed **health**, not inventory: `Rover.parts`
+  holds motor/board percentages (`RoverPartHealth`), distinct from routine
+  `condition`. Motion/work/exposed storms wear parts. `roverWorkMul` takes the
+  weakest health, keeping the original half-rate floor. Garage service restores
+  condition only; no manufacturing prerequisite for structural building repairs.
+- `repairBay`: radius 7 + service reach 5, 8/1 kW active/idle, tier 2, 38 s build,
+  20 kg steel + raw stock. At ≤70% part health, 12 powered seconds replaces one
+  part. `Building.maintenance` owns `{roverId, component, progress}`. Debit **one**
+  matching spare via ComponentSystem at completion, never on each repair tick.
+  Cancelling has no refund because nothing was prepaid. No-power/missing-stock
+  pauses; new orders, departure or charging cancel; bays never share a customer.
+- Tick additions: bay after GarageSystem; part wear after movement/colonist work.
+  ProductionSystem delegates demand; fleet/construction skip funded bay customers.
+  Players park using move/stop/wait; automatic travel to a bay is not implemented.
+  Missing stock does not reserve a rover forever (use Wait while restocking).
+- Save **v11**, `migrations/v10.ts`: old saves receive healthy parts/empty bays.
+  Health and jobs are saved/hashed, nested view and snapshot bags are copied.
+  Named v7/v8/v9 migrations now bump **one version**, not straight to CURRENT.
+- Validation: **81 suites / 939 checks** green; typecheck, production build,
+  canonical replay, stress invariants and both browser transports pass. Run
+  browser smokes separately from the CPU-heavy full suite in this sandbox.
+- Tests: `sim/maintenance` 17, `hud/maintenance` 4; browser
+  `node scripts/maintenance-smoke.mjs` covers both transports + mid-job save/load.
+  Defaults to fresh child/browser per transport: software GL in this sandbox can
+  stall a second navigation in one browser. Use SMOKE_QUERY for one transport.
+- Current canonical hashes (new health/job state): foundation
+  `rf1-0c8ea29bf65ec4-1ddbca6058e53d`; logistics
+  `rf1-1ca9dfaacf9b91-1ff3cb9bc00375`; severe storm
+  `rf1-02bb9bacda012b-0b3e3c47d3a04c`; stress
+  `rf1-01b6d9c75f237e-1779e17dc23916`. Slice 2's values below are historical.
+- P5 still open: utility networks and their parts, glass, building-level component
+  wear. Repair Bay is IN; Laboratory and Nuclear Reactor still OUT. Architecture
+  follow-ups are recorded against Phases 12/15/27 in the roadmap's slice 3 block.
+
 ## P5 slice 2 — manufacturing (components, recipes, save v10)
 
 - **Two ledgers, one shape.** `ComponentId` = `'motor' | 'circuitBoard'`;
@@ -96,7 +258,8 @@ Persistent notes for future coding sessions.
   catalogue (pipes / valves — wants networks first), a second refined material
   (glass; the recipe machinery can carry it as another line), and maintenance depth
   (part-level wear — components now exist to wear out, and nothing consumes them
-  except the garage line).
+  except the garage line). **Update: slice 3 above adds rover part replacement;
+  building-specific components still remain.**
 
 ## P5 slice 1 — refining (steel, the Refinery, save v9)
 
@@ -287,15 +450,15 @@ Persistent notes for future coding sessions.
 
 ## Design docs (realigned)
 
-- `docs/design/GDD.md` and `docs/design/TDD.md` carry a living **§0 Implementation status** that maps every major system to **IN / PARTIAL / OUT** against the current tree (Prototype 4 + the first P6 exploration slice + both shipped P5 slices: refining and manufacturing). Prefer those tables over the original PDF wording when deciding what exists.
+- `docs/design/GDD.md` and `docs/design/TDD.md` carry a living **§0 Implementation status** that maps every major system to **IN / PARTIAL / OUT** against the current tree (Prototype 4 + the first P6 exploration slice + four shipped P5 slices: refining, manufacturing, rover maintenance and water networks). Prefer those tables over the original PDF wording when deciding what exists.
 - **Re-swept 2026-09-20** on `arena/01a0bc5e-red-frontier` (this branch): GDD §§0/02/04/05/06/07/11/12/13/14/15/16/17, TDD §§0–3/4/9/10/11/15/16/17/18/19/20/21/22/23/25/26/27 + both appendices, README (intro, garage kW, module tree, save chain, testing, milestones), `ROVER-STATE.md` §3, and `ISSUES.md` #18.
 - **Updated for P5 slice 1 (refining)** on this branch: GDD §§0/02/03/04/16, TDD header + §§0/6/7/15/21/25/26 + Appendices A/B, README (survival + growth chains, a new *Refining (P5)* section, module tree, save chain, testing counts, milestone 2, the ordering note), and a new "Recorded (P5 slice 1 — refining)" section in the roadmap.
 - **Updated again for P5 slice 2 (manufacturing)**: GDD §§0/02/03/04/05/16 (the industrial-components paragraph, the Workshop row, the rover assembly prices, the P5 slice row and a new "slice 2 shipped" bullet list), TDD header + §§3/6/15/16/25/26 + Appendix B (a `Manufacturing` network row, the v10 migration step, `building/recipe` in the command list, the acceptance table), README (a machine chain diagram, a new *Manufacturing (P5)* section, module tree, save chain, suite list and prose, milestone 2, the ordering note), and this file. `SaveCodec`'s header comment was also stale ("outside 3..8", "migrations v3..v7 → v8") and now describes the rule instead of a version.
-- Package is `0.3.0`; README correctly says Prototype 4. **`SAVE_VERSION = 10`** (v9 = refined material: `storage` gains `steel`; v10 = manufacturing: `components` plus per-building `recipe`/`craft`; the chain is v3→v10 and the codec refuses <3 and >10). Worker is the default transport (`WORKER_DEFAULT = true`).
+- Package is `0.3.0`; README correctly says Prototype 4. **`SAVE_VERSION = 11`** (v9 = steel; v10 = manufacturing; v11 = installed rover part health and Repair Bay jobs; supported chain v3→v11). Worker is the default transport (`WORKER_DEFAULT = true`).
 - **Numbers to quote:** `npm test` = **79 suites / 913 checks**, ~3½ min in parallel (39 unit, 23 integration, 15 hud, 1 determinism, 1 load, + `full.test.ts` as the linked serial entry). CI (`pages.yml`) runs `npm run build` (which runs `tsc`) + mobile smoke + worker smoke ×2 transports; **`npm test` is not in CI** — that is deliberate and now written down in TDD §23.
 - **Things the docs used to get wrong** (fixed, but check them again if you touch these areas): audio was listed OUT while `src/audio/AudioSystem.ts` shipped; lightning was absent from every doc while 21 source files carried it; the garage charge rate was quoted as 40 kW when `GARAGE_CHARGE_RATE_KW = 32` (2× the pod's 16); perf budgets were called "unenforced" while `sim/performance-regression` asserts them; the minimap/world map was open in `ISSUES.md` while `ui/WorldMap.ts` + `hud/worldmap` shipped it; world sizes were described as "~640 m default" without the four presets (420/640/960/1280 half-extent).
 - **Doc-drift trap:** suite/check counts, the save version and the module tree are quoted in *four* places (README, GDD §0, TDD §0/§3, this file). When you add a suite or bump `SAVE_VERSION`, grep for the old number rather than updating the file you happen to be in.
-- **Next-pillar fork was answered in the build:** Exploration (P6) went first, then Engineering twice — P5 slice 1 (refining) and slice 2 (manufacturing) are both IN, and GDD §03's replication chain is complete end to end. TDD §25 still has no tier for the industrial layer, so P5 progress is tracked in GDD §0/§16 and TDD Appendix B, not in a T-row. The one-process-per-building model that blocked slice 2 is **gone** (`RECIPES` + `Building.recipe` + `activeProcess`), so a second refined material or a wider parts catalogue is now content, not architecture. The open fork is the remaining P5 depth (utility networks, part-level wear) vs the T6 remainder. (The 30-phase *architectural* roadmap is complete, so this is a content/product decision, not a structural one.)
+- **Next-pillar fork was answered in the build:** Exploration (P6) went first, then Engineering in three slices — refining, manufacturing and rover maintenance are IN, and GDD §03's replication chain is complete end to end. TDD §25 still has no tier for the industrial layer, so P5 progress is tracked in GDD §0/§16 and TDD Appendix B, not in a T-row. The one-process-per-building model that blocked slice 2 is **gone** (`RECIPES` + `Building.recipe` + `activeProcess`), so a second refined material or a wider parts catalogue is now content, not architecture. The open fork is the remaining P5 depth (utility networks, building component wear) vs the T6 remainder. (The 30-phase *architectural* roadmap is complete, so this is a content/product decision, not a structural one.)
 - Deliberate locks encoded in sim + docs: bulk solids on rovers, fluids never; per-resource storage; **one bulk ledger** — refined material is a `ResourceId` with `origin: 'refined'`, never a parallel inventory; **a deposit is always mined material** (typed, not just conventional); **a process earns its output** — production is bounded by the input that actually arrived; dev *modifiers* never save, *fabrications* do; no field-fluid recovery in supply drops; **audio + particles are presentation** (read the sim, never write it, animate on sim time); **lightning has its own seeded RNG stream** so strikes never perturb weather rolls.
 - Unconfirmed, worth watching: one full `npm test` run in three showed a single transient suite failure that the two re-runs did not reproduce (the failing log line was lost to a `| tail`). Timing-threshold suites (`sim/performance-regression`, `sim/worker-performance`) are the obvious suspects under parallel load. If it recurs, capture the whole log before concluding anything.
 

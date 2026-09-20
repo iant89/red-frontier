@@ -156,6 +156,16 @@ export const ROVER_CONDITION_ALERT = 35; // below this, the HUD nags
 export const ROVER_WEAR_WORK_S = 0.02; // condition lost per second of tool work
 export const ROVER_WEAR_MOVE_S = 0.006; // condition lost per second of driving
 export const ROVER_WEAR_STORM_S = 0.12; // condition lost per second, full storm
+/** Replace installed parts below this threshold; preventive work avoids slowdowns. */
+export const PART_REPLACE_THRESHOLD = 70;
+export const PART_REPLACE_SECONDS = 12;
+/** Installed-part health lost per game second; distinct from routine drivetrain service. */
+export const PART_MOTOR_WEAR_MOVE = 0.006;
+export const PART_MOTOR_WEAR_WORK = 0.008;
+export const PART_BOARD_WEAR_MOVE = 0.0015;
+export const PART_BOARD_WEAR_WORK = 0.006;
+export const PART_MOTOR_WEAR_STORM = 0.02;
+export const PART_BOARD_WEAR_STORM = 0.03;
 export const GARAGE_SERVICE_RATE = 1.5; // condition restored per second parked
 
 /** Jump-start transfer rate while a rescuer is hooked up (kWh per second). */
@@ -463,7 +473,11 @@ export const AUTOSAVE_INTERVAL_S = 45;
  * v10 (P5.2): the component ledger, a per-building `recipe` selection and the
  * bench's work in progress. Additive — see `persistence/migrations/v9.ts`.
  */
-export const SAVE_VERSION = 10;
+export const SAVE_VERSION = 13;
+
+export const WATER_PIPE_LENGTH = 20;
+export const WATER_PIPE_MAX_RUN = 200;
+export const WATER_PUMP_KG_HOUR = 6;
 
 // -------------------------------------------------------------- history ----
 

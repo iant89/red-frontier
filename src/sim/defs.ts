@@ -188,14 +188,17 @@ export const FLUIDS: Record<FluidId, FluidInfo> = {
  * into holding counts. They are crafted by a workshop recipe, racked in
  * workshop slots, and spent when the garage assembles a rover.
  */
-export type ComponentId = 'motor' | 'circuitBoard';
+export type ComponentId = 'motor' | 'circuitBoard' | 'pipe' | 'batteryPack' | 'cargoFrame' | 'drillTeeth';
+/** Only installed rover parts have wear; pipes are construction inventory. */
+export const ROVER_PARTS = ['motor', 'circuitBoard'] as const;
+export type RoverPartId = typeof ROVER_PARTS[number];
 
-export const ALL_COMPONENTS: ComponentId[] = ['motor', 'circuitBoard'];
+export const ALL_COMPONENTS: ComponentId[] = ['motor', 'circuitBoard', 'pipe', 'batteryPack', 'cargoFrame', 'drillTeeth'];
 
 export type ComponentAmounts = Record<ComponentId, number>;
 
 export function emptyComponents(): ComponentAmounts {
-  return { motor: 0, circuitBoard: 0 };
+  return { motor: 0, circuitBoard: 0, pipe: 0, batteryPack: 0, cargoFrame: 0, drillTeeth: 0 };
 }
 
 /** Component costs, as whole units — the counted counterpart of {@link costs}. */
@@ -214,13 +217,20 @@ export interface ComponentInfo {
 }
 
 export const COMPONENTS: Record<ComponentId, ComponentInfo> = {
+  batteryPack: { id:'batteryPack', label:'Battery Pack', short:'Pack', color:0xd7ad49, description:'Rechargeable cells and control electronics for larger energy reserves and efficient machinery.' },
+  cargoFrame: { id:'cargoFrame', label:'Cargo Frame', short:'Frame', color:0x83a9b9, description:'Reinforced structural modules for expanded rover beds, tanks and storage racks.' },
+  drillTeeth: { id:'drillTeeth', label:'Drill Teeth', short:'Teeth', color:0xd0c8b4, description:'Hardened steel cutting teeth for permanent mining-tool upgrades.' },
+  pipe: {
+    id: 'pipe', label: 'Water Pipe', short: 'Pipe', color: 0x529bd6,
+    description: 'A sealed 20 m pipe section. Lay permanent water links between building ports; longer runs consume more sections.',
+  },
   motor: {
     id: 'motor',
     label: 'Drive Motor',
     short: 'Mtr',
     color: 0xc9a227,
     description:
-      'A sealed drive unit machined out of steel. Every rover that leaves the garage rolls on four of them or more.',
+      'A sealed drive unit machined out of steel. Used for rover assembly and to replace worn motors at a Repair Bay.',
   },
   circuitBoard: {
     id: 'circuitBoard',
@@ -370,7 +380,10 @@ export type BuildingKind =
   | 'garage'
   | 'rtg'
   | 'weatherStation'
-  | 'refinery';
+  | 'refinery'
+  | 'repairBay'
+  | 'pumpStation'
+  | 'waterTank';
 
 /**
  * A continuous conversion run by an online, powered building.
@@ -643,7 +656,7 @@ export const BUILDINGS: Record<BuildingKind, BuildingDef> = {
     powerProduceKw: 0,
     batteryKWh: 0,
     storagePerResourceKg: 0,
-    fluidCapacity: { oxygen: 25 },
+    fluidCapacity: { oxygen: 25, water: 10 },
     tier: 1,
     process: {
       fluidIn: { water: 0.14 },
@@ -689,7 +702,7 @@ export const BUILDINGS: Record<BuildingKind, BuildingDef> = {
     kind: 'workshop',
     label: 'Workshop',
     description:
-      'Machine shop and repair bench. Runs one of its two lines — drive motors or circuit boards — out of refined stock, racks the finished components, and lends tooling to every build site nearby.',
+      'Machine shop and repair bench. Runs one of six lines — motors, boards, pipes, battery packs, cargo frames or drill teeth — out of refined stock, racks the finished components, and lends tooling to every build site nearby.',
     radius: 6,
     cost: costs([
       ['regolith', 30],
@@ -731,6 +744,46 @@ export const BUILDINGS: Record<BuildingKind, BuildingDef> = {
     exposure: 0.45,
     buildableBy: ['utility', 'mining'],
     order: 8,
+  },
+  pumpStation: {
+    kind: 'pumpStation', label: 'Pump Station',
+    description: 'Moves up to 6 kg of water per Mars hour through its connected pipe network. Build and connect every water port before commissioning; temporary shared plumbing stays active until then.',
+    radius: 4.5, cost: costs([['regolith', 20], ['iron', 15], ['silicon', 6], ['steel', 10]]),
+    buildTime: 26, powerDrawKw: 6, idlePowerKw: 0.5, powerProduceKw: 0,
+    batteryKWh: 0, storagePerResourceKg: 0, fluidCapacity: { water: 20 },
+    tier: 1, exposure: 0.4, buildableBy: ['utility', 'mining'], order: 13,
+  },
+  waterTank: {
+    kind: 'waterTank', label: 'Water Tank',
+    description: 'Stores 250 kg of water. Connect it with pipes and a powered pump to buffer production and supply nearby consumers. Once commissioned, disconnected tanks cannot share their water.',
+    radius: 5, cost: costs([['regolith', 25], ['iron', 20], ['aluminum', 10]]),
+    buildTime: 24, powerDrawKw: 0, idlePowerKw: 0, powerProduceKw: 0,
+    batteryKWh: 0, storagePerResourceKg: 0, fluidCapacity: { water: 250 },
+    tier: 1, exposure: 0.3, buildableBy: ['utility', 'mining'], order: 14,
+  },
+  repairBay: {
+    kind: 'repairBay',
+    label: 'Repair Bay',
+    description:
+      'Advanced rover maintenance. Park a rover beside the bay to replace motors and circuit boards at 70% health or below. Each replacement takes 12 powered seconds and one matching part from the Workshop rack. Routine garage servicing cannot replace worn parts.',
+    radius: 7,
+    cost: costs([
+      ['regolith', 30],
+      ['iron', 18],
+      ['aluminum', 12],
+      ['silicon', 10],
+      ['steel', 20],
+    ]),
+    buildTime: 38,
+    powerDrawKw: 8,
+    idlePowerKw: 1,
+    powerProduceKw: 0,
+    batteryKWh: 0,
+    storagePerResourceKg: 0,
+    tier: 2,
+    exposure: 0.4,
+    buildableBy: ['utility', 'mining'],
+    order: 12,
   },
   refinery: {
     kind: 'refinery',
@@ -812,6 +865,13 @@ export const RECIPES: Partial<Record<BuildingKind, RecipeDef[]>> = {
         summary: '1.2 kg silica + 0.4 kg aluminum + 0.2 kg steel → 1 board per ~3 hours',
       },
     },
+    {
+      id: 'pipes', label: 'Water Pipes',
+      process: { solidIn: { steel: 1 }, componentOut: { pipe: 2 }, summary: '1 kg steel → 2 water pipes per hour (20 m each)' },
+    },
+    { id:'battery-packs',label:'Battery Packs',process:{solidIn:{aluminum:2,silicon:1,steel:.5},componentOut:{batteryPack:.5},summary:'2 kg aluminum + 1 kg silica + 0.5 kg steel → 0.5 battery packs/h'} },
+    { id:'cargo-frames',label:'Cargo Frames',process:{solidIn:{aluminum:3,steel:2},componentOut:{cargoFrame:.5},summary:'3 kg aluminum + 2 kg steel → 0.5 cargo frames/h'} },
+    { id:'drill-teeth',label:'Drill Teeth',process:{solidIn:{iron:1,steel:3},componentOut:{drillTeeth:.5},summary:'1 kg iron + 3 kg steel → 0.5 sets of drill teeth/h'} },
   ],
 };
 

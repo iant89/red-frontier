@@ -373,7 +373,7 @@ test('a snapshot carries steel and the current version, and restores it', () => 
 
   const snap = JSON.parse(JSON.stringify(sim.snapshot()));
   assert.equal(snap.version, SAVE_VERSION, 'the snapshot is on the current schema');
-  assert.equal(SAVE_VERSION, 10, 'P5 opened v9 for steel and v10 for the component rack');
+  assert.ok(SAVE_VERSION >= 9, 'steel requires v9 or later');
   assert.equal(snap.storage.steel, made, 'the steel silo is in the save');
 
   const next = new Simulation({ seed: 777, nearDeposits: 0.2 });

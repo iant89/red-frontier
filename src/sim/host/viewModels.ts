@@ -7,6 +7,7 @@
  * semantically equivalent across transports.
  */
 
+import type { EngineeringState, UpgradeLevels, UpgradeJob } from '../engineering/upgrades';
 import type {
   BuildingKind,
   ComponentAmounts,
@@ -14,12 +15,14 @@ import type {
   ResourceAmounts,
   RoverKind,
 } from '../defs';
+import type { PartReplacement } from '../state/BuildingState';
 import type { Alert, LogEvent, Severity } from '../alerts';
 import type { FluidFlow, HistorySample } from '../Simulation';
 import type {
   RoverGoal,
   RoverPhase,
   RoverRules,
+  RoverPartHealth,
   RoverTask,
 } from '../state/RoverState';
 import type { ColonistActivity, ColonistOrder } from '../lifesupport';
@@ -27,6 +30,9 @@ import type { StormCell, StormKind, StormKindReal, WeatherRadar } from '../weath
 
 /** One rover as the HUD / renderer may see it — nested bags are owned copies. */
 export interface RoverView {
+  readonly upgrades?: Readonly<UpgradeLevels>;
+  readonly upgradeJob?: Readonly<UpgradeJob> | null;
+  readonly paint?: string | null;
   readonly id: number;
   readonly kind: RoverKind;
   readonly label: string;
@@ -48,6 +54,7 @@ export interface RoverView {
   readonly chargeSat: number;
   readonly autoTask: boolean;
   readonly condition: number;
+  readonly parts: Readonly<RoverPartHealth>;
   readonly rules: Readonly<RoverRules>;
   readonly routePaused: boolean;
   readonly blockNotified: boolean;
@@ -60,6 +67,9 @@ export interface RoverView {
 
 /** One building as presentation reads it. */
 export interface BuildingView {
+  readonly upgrades?: Readonly<UpgradeLevels>;
+  readonly upgradeJob?: Readonly<UpgradeJob> | null;
+  readonly paint?: string | null;
   readonly id: number;
   readonly kind: BuildingKind;
   readonly x: number;
@@ -82,6 +92,7 @@ export interface BuildingView {
   readonly damaged: boolean;
   readonly assembly: Readonly<{ kind: RoverKind; progress: number }> | null;
   readonly level: number;
+  readonly maintenance: Readonly<PartReplacement> | null;
   /**
    * Which line this building is running (P5) — an index into `RECIPES[kind]`,
    * ignored by kinds whose blueprint has a fixed process.

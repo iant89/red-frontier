@@ -14,10 +14,15 @@ the as-built one — app controllers, `sim/debug/`, the network adapter and all.
 **Since then both shipped P5 slices landed** (§6, §7, §15, Appendix B): refining
 (`SAVE_VERSION = 9`, a twelfth blueprint, the first `solidOut` process) and
 manufacturing (`SAVE_VERSION = 10`, the Workshop's two selectable lines, the
-counted component rack, rovers priced in parts). The suite stands at **79 suites /
+counted component rack, rovers priced in parts). Those slices brought **79 suites /
 913 checks**, and both canonical hash sets moved twice: the bulk ledger grew a key
 and a conversion began conserving mass, then the rack, the selected line and the
 bench joined the hashed building state.
+
+**P5 slice 3 — rover maintenance** now adds the thirteenth blueprint, the Repair
+Bay, installed motor/board wear, and timed replacements using Workshop spares.
+Current schema: **v11**. New owner: `MaintenanceSystem`. The suite is **81 suites /
+939 checks**; canonical hashes now include installed health and maintenance jobs.
 
 This document is both the **architecture target** and the **as-built notes**.
 Where the build deliberately diverged from the original PDF, the divergence is
@@ -29,6 +34,19 @@ Status tags match the GDD: **IN** / **PARTIAL** / **OUT**.
 
 ## 0 — Implementation status (living)
 
+**Engineering update (2026-09-20):** right-click/long-press Engineering screen,
+paused rotating model, icon costs, three-tier rover and role-specific building
+upgrades, timed Garage/on-site installations, three new Workshop components and
+saved free palette finishes are **IN**. Authoritative player refits use `upgrades`
+and `upgradeJob`, never the developer-only `level`. Save v13 defaults old colonies
+to stock hardware. See README’s Engineering section and the corresponding
+architectural roadmap record for costs, lifecycle, limits and ownership.
+
+
+**P5 slice 4 update (2026-09-20):** commissioned water networks, pipe manufacture,
+pump/tank blueprints and local fluid access are IN. Current save v12; **84 suites /
+959 checks** green. See §6 and the water acceptance section for limits and gates.
+
 | TDD tier (§25) | Theme | Status |
 |---|---|---|
 | **T1** | Worker + fixed tick + camera + terrain | **IN** (worker default; frame-pumped, not a worker-side timer) |
@@ -38,7 +56,7 @@ Status tags match the GDD: **IN** / **PARTIAL** / **OUT**.
 | **T5** | Weather + dust + damage | **IN** (spatial field, lightning, radar; storm cells travel) |
 | **T6** | Procedural world + POIs + supply drops | **PARTIAL** |
 | **T7** | Research + agriculture depth + colonists | **OUT** |
-| **T8** | Optimization + save migrations + release UI | **PARTIAL** (migrations v3→v10 IN; fleet benchmarks + perf-regression + stress suites IN; sim LOD and on-device frame gates OUT) |
+| **T8** | Optimization + save migrations + release UI | **PARTIAL** (migrations v3→v13 IN; fleet benchmarks + perf-regression + stress suites IN; sim LOD and on-device frame gates OUT) |
 
 **Stack as built**
 
@@ -48,7 +66,7 @@ Status tags match the GDD: **IN** / **PARTIAL** / **OUT**.
 | Renderer | WebGPU primary, WebGL2 fallback | **three.js WebGL2** (WebGPU OUT) |
 | Sim isolation | Dedicated Worker | **Module Worker default** + `LocalSimHost` fallback (`?worker=0`) |
 | Remote transport | future network play | **Adapter IN, no server** — `host/NetworkPort.ts` encodes the same `HostRequest`/`HostReply` over any string duplex (Phase 30); nothing ships it |
-| Saves | IndexedDB | **localStorage** named slots (`SaveStore`), schema v10 |
+| Saves | IndexedDB | **localStorage** named slots (`SaveStore`), schema v12 |
 | Backend | future Java authority | **OUT** (static Vite app) |
 | Audio | Web Audio | **IN** — procedural Web Audio, synthesised in-browser, zero fetched assets (`src/audio/`) |
 | Content data | data-driven blueprints | **IN** (`defs.ts` / `config.ts`) |
@@ -182,6 +200,7 @@ src/
                            whole-unit store/take, affordability and the shortfall
                            sentence — counted, not weighed, so deliberately not
                            folded into LogisticsSystem
+      MaintenanceSystem.ts  installed rover part wear + Repair Bay replacement jobs
       ExplorationSystem.ts discovery, supply drops, burial, site-side salvage
                            rewards — what the player has found (Phase 14);
                            World still owns scatter
@@ -193,7 +212,7 @@ src/
                            (keys, severity, dedupe, expiration, history);
                            HUD ack stays presentation-side (Phase 16)
       HistorySystem.ts     vitals time-series sampling + the flow-window roll (Phase 17)
-    persistence/     versioned saves: schema (v10), codec, validator, migration steps v1…v9
+    persistence/     versioned saves: schema (v12), codec, validator, migration steps v1…v11
     debug/           dev-only diagnostics; imported by tests, tree-shaken from the bundle
       SimulationAssertions.ts  invariant checks (Phase 1)
       StateHash.ts             deterministic state hash (Phase 27)
@@ -355,14 +374,51 @@ counted rather than weighed.
 | Network | Status | Notes |
 |---|---|---|
 | **Power** | **IN** | `power.ts` pure resolver: generation → batteries → consumers by priority tiers 0–3; within a tier, uniform degradation (brownout reads as "Industry at 62%"). |
-| **Water** | **PARTIAL** | Extractor process writes fluid `water` into shared tank capacity; habitat reclaim; no pipe graph. |
+| **Water** | **IN** (first network slice) | Explicit commissioning transitions shared bootstrap plumbing to local tanks and a paid pipe graph. Powered pumps balance fill ratios within connected components; pressure/leaks/oxygen networks OUT. |
 | **Atmosphere** | **PARTIAL** | `pressurized` flag + O₂ fluid; no volume/breach model. |
 | **Heat** | **OUT** | |
 | **Logistics** | **PARTIAL** | Haulers + deposit reservations + site material delivery without a parked rover (Materials Reserved). No general supply/demand graph. One ledger for *all* bulk solids — mined and refined alike. |
 | **Refining** | **IN** (one link) | `ProcessDef.solidOut` (P5 slice 1): the Refinery takes `iron` from the ledger and stores `steel` into it, gated by ore supply, silo headroom and tier-2 power. Refined resources are `ResourceId`s with `origin: 'refined'` — no seam, no scatter, no mining, no dev-surveyed deposit. |
-| **Manufacturing** | **IN** (one link, two lines) | `ProcessDef.componentOut` (P5 slice 2): the Workshop racks `motor` / `circuitBoard` units on an integer ledger with rack-slot capacity, gated by input stock, rack room and tier-2 power. Which line runs is `Building.recipe` resolved by `defs.activeProcess` — one reader for sim, renderer and HUD. Pipes / valves / the wider parts catalogue still **OUT** with the utility networks. |
+| **Maintenance** | **IN** (rover parts) | `MaintenanceSystem.tickBays` follows the powered garage tick; `tickWear` follows rover movement/colonist work. Existing tick order is otherwise unchanged. Installed health and unpaid bay jobs are saved/hashed; ComponentSystem owns the one-unit debit. |
+| **Manufacturing** | **IN** (one link, three lines) | `ProcessDef.componentOut` (P5 slice 2): the Workshop racks `motor` / `circuitBoard` / `pipe` units on an integer ledger with rack-slot capacity, gated by input stock, rack room and tier-2 power. Which line runs is `Building.recipe` resolved by `defs.activeProcess` — one reader for sim, renderer and HUD. Pipes are spent by water links; valves and the wider utility parts catalogue remain **OUT**. |
 
 Priority tiers in use: 0 life support → 1 oxygen & water → 2 industry → 3 logistics (rover charge).
+
+### Water network implementation — P5 slice 4
+
+- **State:** `state/WaterState.ts` owns `active`, canonical paid `{a,b,pipes}` links
+  and per-port tanks. Pod ID is 0. `pools.amounts.water` is a derived aggregate
+  after commissioning, never an alternative source of fluid. Flow readings are
+  transient (not saved/hashed). `reconcileWater` clamps local damage/capacity loss
+  and removes demolished links on capacity changes, before another tick can run.
+- **Topology/transport:** `utilities/WaterNetwork.ts` provides sorted components
+  and adjacency; `WaterSystem` owns validated connect/disconnect/commission
+  commands, local access and proportional-deficit redistribution. Each powered
+  pump grants 6 kg/h × satisfaction across its component. Transfers conserve mass;
+  deterministic BFS paths accumulate signed per-edge kg/h. No pressure or per-edge
+  throughput model. Disabled/damaged pumps contribute nothing; damaged ports do
+  not conduct. Disabled consumers can still serve as passive junctions/storage.
+- **Tick:** WaterSystem runs after PowerSystem (which resolves power and runs
+  processes) and before LifeSupportSystem. Production reads/writes local buffers
+  for water only; water delivered this tick feeds production on the next tick.
+  Life support's narrow water adapter uses shelter-local drinking/reclamation,
+  or the pod for EVA provisions. Oxygen and food retain their shared pools.
+- **Boundary:** `water/connect`, `water/disconnect`, `water/commission` are intent
+  commands with validated nonnegative IDs and refusal acknowledgements. Owned
+  `waterNetwork` views carry nodes, links, flow and commissioning refusal text.
+  WaterPanel keeps controls stable; WaterNetworkOverlay caches terrain-following
+  geometry and reads actual flow, without sim writes.
+- **Persistence:** v11→v12 starts old colonies uncommissioned. WaterPersistence
+  sanitizes links, duplicate/reversed endpoints, lengths/costs and tank contents;
+  snapshots own nested arrays/bags. Hashing includes topology/tanks/activation,
+  excludes display flow. Invariants validate references, capacities and totals.
+  Installed rover health uses `RoverPartId`, not the wider component catalogue.
+- **Intentional limits:** instant straight-line paid pipe installation, no
+  trench obstacles, no pressure/leaks/valves, no oxygen graph. Aggregate reserve
+  histories/alerts are colony totals, not guarantees of supply at each port;
+  local failures are exposed in the water inspector and overlay. EVA provisioning
+  remains pod-debited rather than a portable water inventory. Track these against
+  roadmap Phases 7/9/15/27, not as hidden Simulation/Game responsibilities.
 
 ## 7. Buildings & Construction
 
@@ -380,10 +436,10 @@ PDF stage names (Planned → … → Commissioning) are not separate enums; beha
 Placement validation: slope, overlap/clearance, reachability, deposit exclusion — **IN**.
 Special constraints (underground, greenhouse orientation) — **OUT**.
 
-**Buildable set today (12):** habitat, solar, battery, rtg, weatherStation,
-warehouse, extractor, oxygenator, greenhouse, workshop, garage, refinery (by
+**Buildable set today (13):** habitat, solar, battery, rtg, weatherStation,
+warehouse, extractor, oxygenator, greenhouse, workshop, garage, refinery, repairBay (by
 `BUILDING_ORDER`; hotkeys 1–9 cover the first nine, the rest are palette-only).
-Missing vs GDD: laboratory, repair bay, nuclear reactor.
+Missing vs GDD: laboratory, nuclear reactor.
 
 Construction costs are `ResourceAmounts`, so they may name refined material: the
 Rover Garage costs 30 kg `steel` and the Weather Radar Station 25 kg, both smelted
@@ -545,7 +601,7 @@ data next to `defs.ts`, not as conditionals in tick code.
   (`"unsupported save version X"` outside **3…10**), runs the migration chain, and
   returns a typed `SaveState`. Gameplay code depends on `SaveState`, never on raw
   JSON; `SaveValidator` uses `unknown` at the edge, never `any`.
-- Current `SAVE_VERSION = 10`. Migration chain **v3 → v10** (additive):
+- Current `SAVE_VERSION = 13`. Migration chain **v3 → v13** (additive):
   - v4 task queues, drivetrain condition, automation rules
   - v5 position lights
   - v6 difficulty + world options
@@ -566,6 +622,16 @@ data next to `defs.ts`, not as conditionals in tick code.
     and restore *sanitises* rather than trusts: components floor to whole
     non-negative units, bench fractions clamp to 0…1, a non-integer or negative
     recipe index resets to 0
+  - v11 maintenance: rover `parts` stores installed motor/board health, building
+    `maintenance` stores `{ roverId, component, progress }` or null. Missing parts
+    default to 100%; valid numeric health clamps to 0…100. Jobs with an invalid
+    rover/component, non-finite progress, or a non-bay owner are dropped; valid
+    progress clamps to 0…1. Jobs have not prepaid a spare, so no refunds are owed.
+  - v12 water utilities: explicit local commissioning, paid pipe topology and
+    per-port tanks; older colonies retain the shared water pool until commissioned.
+  - v13 engineering: supported permanent tiers, funded timed job and palette paint
+    per rover/building; three new component keys and bench fractions default to zero.
+    Restore sanitises allowed tiers, next-tier jobs and unique Garage reservations.
 - Refuse unknown future versions rather than guess; refuse anything older than v3
   (no migration path kept). — **IN**
 - Storage: **localStorage** named slots via `SaveStore` (not IndexedDB yet), one slot
@@ -580,7 +646,8 @@ data next to `defs.ts`, not as conditionals in tick code.
   consecutive lines is what used to reject an in-flight worker snapshot as "the
   colony has shut down".
 - Save **sim state only**, never renderer/dev overlays. Building upgrade `level`
-  is omitted on purpose; restore defaults it to 1. Rover `goal`/`phase` execution
+  is developer-only and omitted on purpose; restore defaults it to 1. Player
+  `upgrades`, `upgradeJob` and `paint` are independent, persistent v13 fields. Rover `goal`/`phase` execution
   state is likewise not saved — `RoverSystem.rehydrate` rebuilds it (see
   `ROVER-STATE.md`).
 - Snapshot header writes `CURRENT_SAVE_VERSION` rather than a literal, so a version
@@ -825,7 +892,7 @@ Matches the PDF categories and is **IN**: **79 suites / 913 checks**, green in
 | Render (GPU-free) | `render/particles`, `render/descent-stage`, `render/weather-station`, `render/glb-assets`, `render/selection`, `render/solar` |
 | Audio | `audio/system` — the pure mix + the exhaustive command→cue contract |
 | App / UI | `app/game-controllers`, `app/pause-save`, `app/update-check`, `ui/gestures`, `ui/build-status` |
-| Browser smokes (Playwright, headless Chromium) | `worker-smoke` (both transports, CI), `mobile-smoke` (CI), `update-check-smoke`, `pause-smoke`, `screenshots` |
+| Browser smokes (Playwright, headless Chromium) | `worker-smoke` (both transports, CI), `mobile-smoke` (CI), `update-check-smoke`, `pause-smoke`, `maintenance-smoke` (both transports), `screenshots` |
 
 Runner: `scripts/run-tests.mjs` — esbuild-bundled suites in parallel workers,
 `--affected` via `@covers`, `--group`, `--case`, watch mode, slowest-first
@@ -960,7 +1027,7 @@ inspection, a state-hash readout, and teleport/reveal commands.
 | T5 weather + dust + damage | storm cascades and recovers | **IN** (spatial field, lightning, radar) |
 | T6 procedural world + POIs + drops | explore & recover remote objectives | **PARTIAL** (see open list) |
 | T7 research + agriculture + colonists | progression creates meaningful automation | **OUT** |
-| T8 optimization + migrations + release UI | devices meet budgets; saves survive upgrades | **PARTIAL** — migrations v3→v10 IN, sim budgets measured and enforced IN, on-device frame budgets and sim LOD OUT |
+| T8 optimization + migrations + release UI | devices meet budgets; saves survive upgrades | **PARTIAL** — migrations v3→v13 IN, sim budgets measured and enforced IN, on-device frame budgets and sim LOD OUT |
 
 **The architecture work is finished.** All 30 phases of
 `ARCHITECTURAL-REFACTOR-ROADMAP.md` are recorded complete (Phase 30, the optional
@@ -969,24 +1036,25 @@ structure — which is why the open list below is about pillars, not refactors.
 
 **Open work, ordered the way the code comments and README currently argue:**
 
-1. ~~**Pick the next pillar**~~ — **decided: Engineering (P5)**, and both of its
-   shippable slices are IN: refining (steel) and manufacturing (components,
-   recipes, part-priced rovers). What is left of the pillar is the depth work in
+1. ~~**Pick the next pillar**~~ — **decided: Engineering (P5)**. Four slices
+   are IN: refining (steel), manufacturing (components, recipes, part-priced
+   rovers), rover maintenance (installed part wear + Repair Bay), and water networks. What is left of the pillar is the depth work in
    item 3.
 2. **Live with the worker default, then delete the in-process fallback** outside
    tests. Gates are already dual-transport. Optional later: true 20 Hz worker
    timer + render interpolation *if* frame-pumped advance measures as a bottleneck
    (it does not today — §20); transferables / OffscreenCanvas behind their own guards.
-3. **GDD P5 / industrial layer** — *both shippable slices shipped*: slice 1 gave
+3. **GDD P5 / industrial layer** — *four slices shipped*: slice 1 gave
    the colony `steel` (a refined `ResourceId` on the one bulk ledger,
    `ProcessDef.solidOut`, heavy blueprints priced in steel, save v9); slice 2 gave
    it machines (`ComponentId` on a counted ledger with rack slots,
    `ProcessDef.componentOut`, `RECIPES` + `Building.recipe` replacing the
    one-process-per-building model, rover assembly priced in motors and boards, save
-   v10). *Still open*: a second refined material (glass), a wider parts catalogue
-   (pipes, valves — which wants the utility network to exist first), possibly a
-   second utility network, and maintenance depth (part-level wear: components now
-   exist to wear out, but nothing consumes them except the garage line).
+   v10). Slice 3 adds installed-part wear and timed Repair Bay replacements (v11).
+   Slice 4 adds water pipes, pumps, tanks and safe commissioning (v12).
+   *Still open*: a second refined material (glass), a wider parts catalogue
+   (valves and further utility parts), further utility networks, and
+   building-specific component wear.
 4. **Finish T6** — survey confidence, expedition planning, narrative logs,
    repairable wrecks into the garage line (which now has a price list to charge
    against: a recovered rover is motors and boards as well as metal),
@@ -1063,7 +1131,7 @@ of refined material is not a thing that can exist.
 
 ## Appendix B — What "done" means for the open slices
 
-**P5 / industrial (Engineering pillar)** is done when:
+**P5 / industrial foundation** acceptance (not the entire GDD P5 milestone):
 
 - **DONE** — At least one refined material (e.g. steel) is produced from ore through
   a building process and is required by a downstream blueprint. *As built:* the
@@ -1087,9 +1155,34 @@ of refined material is not a thing that can exist.
   claiming a steel seam loses that row. Slice 2 followed the same shape one version
   later: `migrations/v9.ts` adds the rack, the line and the bench, and nothing else.
 
+**P5 / rover maintenance slice** acceptance:
+
+- **DONE** — motor and board health are authoritative, independent of routine
+  drivetrain condition, worn by activity/exposure and reflected in work rate.
+- **DONE** — Repair Bays do timed, powered replacements, spending exactly one
+  matching Workshop spare per completion. No power or inventory means no repair.
+- **DONE** — player orders/charging override service; cancelled work is unpaid;
+  two bays cannot double-spend or repair the same rover concurrently.
+- **DONE** — v11 jobs/health survive save/load, old colonies get healthy parts,
+  and owned nested copies cross the local/worker view boundary.
+- **DONE** — HUD health/progress/costs and alerts are visible; bootstrap recovery
+  remains possible at half work rate, and building structural repair stays free.
+- **OUT of this slice** — building-specific replaceable components, repair-bay
+  dispatch/appointments, salvage of worn parts, and the wider utility catalogue.
+
 **T6 remainder (Exploration pillar)** is done when:
 
 - Site contents are ranges until surveyed; survey is a task or scout action.
 - At least one wreck can be recovered into a working rover via the garage line.
 - A drop or POI expedition is plan-able (range/battery estimate before dispatch).
 - One narrative content hook (log entry / radio) fires on a discovery milestone.
+
+### P5 water network acceptance
+
+- **DONE:** manufacturing pipes, paid validated links, connected/powered explicit
+  commissioning without reserve loss, isolated consumers, power-scaled mass
+  conservation, local production/drinking/recycling and safe v12 saves.
+- **DONE:** immutable host projection, command decoding, deterministic continuation,
+  tank/link invariants, stable controls and a dedicated water overlay.
+- Gates: `sim/water` (15), `hud/water` (4), `render/water-overlay` (1),
+  `scripts/water-smoke.mjs` on both transports, plus the full regression suite.

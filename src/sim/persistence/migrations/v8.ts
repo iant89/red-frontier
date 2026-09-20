@@ -19,8 +19,7 @@
  * honest and complete — every bump has a named step and a test, even when the
  * defaults do the work (TDD §15).
  */
-import { CURRENT_SAVE_VERSION } from '../SaveSchema';
 
 export function migrateV8Save(data: Record<string, unknown>): Record<string, unknown> {
-  return { ...data, version: CURRENT_SAVE_VERSION };
+  return { ...data, version: 9 };
 }

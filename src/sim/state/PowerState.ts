@@ -7,6 +7,7 @@
  * pure resolver it delegates to lives in `sim/power.ts`.
  */
 
+import { effectiveBuildingDef } from '../engineering/upgrades';
 import { idlePower } from '../power';
 import { POD_BATTERY_KWH, devLevelMul } from '../config';
 import { BUILDINGS } from '../defs';
@@ -27,7 +28,7 @@ export function batteryCapacityKWh(state: ColonyState): number {
   let cap = POD_BATTERY_KWH;
   for (const b of state.buildings) {
     if (b.state === 'online' && !b.damaged && b.enabled) {
-      cap += BUILDINGS[b.kind].batteryKWh * devLevelMul(b.level);
+      cap += effectiveBuildingDef(b).batteryKWh * devLevelMul(b.level);
     }
   }
   return cap;

@@ -276,6 +276,7 @@ export class ColonyMirror implements SimView {
   get storage(): ResourceAmounts {
     return this.payload.storage;
   }
+  get waterNetwork() { return this.payload.waterNetwork; }
   get components(): ComponentAmounts {
     return this.payload.components;
   }

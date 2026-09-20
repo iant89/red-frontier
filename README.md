@@ -50,7 +50,7 @@ npm run test:sim        # every tests/sim suite
 npm run test:hud        # every tests/hud suite
 npm run test:unit       # the fast formula-level suites
 npm test -- power       # any suite whose name/desc matches "power"
-npm run test:list       # all 79 suites and what each covers
+npm run test:list       # all 87 suites and what each covers
 ```
 
 One URL flag is worth knowing while developing:
@@ -130,7 +130,8 @@ Watch the *empty in…* estimates on the left panel; they are the real clock.
 | Zoom | wheel | pinch |
 | Pan | Shift+drag / middle-drag | two-finger drag |
 | Select | left click | tap |
-| Context order (move / EVA) | right click | long press |
+| Engineering (on a building/rover) | right click | long press |
+| Context move / EVA (empty ground) | right click | long press |
 | Build | pick from palette, click terrain | tap palette, tap terrain |
 | Place several | Shift+click | — |
 | Queue rover orders | Shift + move/mine/repair/clean | — |
@@ -305,9 +306,10 @@ Run the furnace when the sun is up.
 
 ### Manufacturing (P5)
 Steel is not the end of the chain either. The **Workshop** — 5 kW, tier 2, and the
-colony's only machine shop — runs **one of two lines you choose**: drive motors
+colony's only machine shop — runs **one of six lines you choose**: drive motors
 (2.5 kg steel + 1 kg aluminum → one motor per two Mars hours) or circuit boards
-(1.2 kg silica + 0.4 kg aluminum + 0.2 kg steel → one board per three). The
+(1.2 kg silica + 0.4 kg aluminum + 0.2 kg steel → one board per three), or water
+pipes (1 kg steel → two sections per Mars hour), plus battery packs, cargo frames and drill teeth for refits. The
 selection is per building, saved with the colony, and switching lines keeps
 whatever is half-made on the bench — a changeover never throws a motor away.
 
@@ -321,9 +323,122 @@ Rovers are what spends them: a **Utility** costs 2 motors and 1 board, a **Minin
 4 and 1, a **Cargo** 6 and 2 — on top of the metal. The garage asks both ledgers
 before it spends either, and a refusal names the part you are short of.
 
-What is *not* in yet: a wider parts catalogue (pipes, valves), a second refined
-material (glass), utility networks to run them through, and part-level wear — the
-components exist to be worn out now, but nothing wears them.
+What is *not* in yet: a wider parts catalogue (valves), a second refined
+material (glass), oxygen/heat/data networks, and building-level component
+wear. Rover part replacement is now covered by the Repair Bay below.
+
+### Engineering & customization
+
+**Right-click a rover or building on desktop, or long-press it on mobile.**
+Engineering opens with a slowly rotating 3D model and **Overview / Upgrades /
+Appearance / Actions** controls. The colony pauses while you browse; closing the
+screen restores the previous speed, including an already-paused game. On phones,
+the model and controls stack and scroll. Normal selection and empty-ground move
+orders still work.
+
+**Rover upgrades** have three permanent tiers:
+
+| System | Improvement per tier | Installation |
+|---|---|---|
+| Drivetrain | +20% base speed, +8% base drive power use | Powered Garage |
+| Batteries | +35% base energy capacity; added capacity starts empty | Powered Garage |
+| Cargo frame | +40% base cargo capacity | Powered Garage |
+| Miner teeth | +30% base mining rate, mining rovers only | Powered Garage |
+
+**All 15 buildable structure types** have appropriate upgrades: production,
+generation, storage, service equipment, pump throughput, radar range and/or power
+efficiency. Building upgrades require an on-site construction rover, and a
+powered/enabled target where applicable. Permanent tiers never replace wear,
+repairs, or the developer's unsaved level controls.
+
+1. Manufacture the components at the **Workshop**. Its six lines now include
+   **Battery Packs**, **Cargo Frames**, and **Drill Teeth**, alongside motors,
+   circuit boards and pipes.
+2. Park and stop a rover beside a Garage (within its radius + 5 m), or choose a
+   completed, repaired building. Each Garage has one assembly/refit reservation.
+3. Compare the current → upgraded stats and illustrated material/component costs.
+   Shortages are marked and unfunded installations cannot be queued.
+4. **Queue installation**, then close Engineering. Payment happens once, when
+   queued; timed progress begins/resumes with the colony. Leaving the bay, damage
+   or power loss pauses a rover job. On-site builders handle building work.
+
+Cancel a refit to recover its materials up to available storage capacity (excess
+is discarded). Garage demolition cancels its customer jobs; demolishing the
+upgraded building itself loses its unfinished refit. Paid progress survives saves.
+
+**Appearance** offers eight free finishes plus the factory finish. Try a colour
+on the preview, then **Apply finish** to paint the real rover/building and save it.
+Mechanical details and glass retain their own finishes. This slice changes stats
+and paint, not attachment geometry or interchangeable module loadouts.
+
+Saves are now **v13**, migrating older colonies to stock hardware without charging
+or granting upgrades. `scripts/engineering-smoke.mjs` covers both transports,
+actual desktop/touch gestures, paused rotation, icons, paint and paid installation
+across save/load. Reduced-motion preferences disable automatic model spin.
+
+### Water utility networks (P5)
+The fourth engineering slice adds **Water Pipes**, a **Pump Station** and a
+**250 kg Water Tank**. Existing and new colonies retain temporary shared plumbing
+until you explicitly commission the network; no old save loses its supply just
+because the game was upgraded.
+
+1. Manufacture **Water Pipes** on the Workshop's third line (1 kg steel → 2 sections
+   per Mars hour). Each section covers **20 m**; a direct link can span up to 200 m.
+2. Build a **Pump Station** (6 kW, tier 1; 20 kg buffer), then select any online
+   water building. In its **Water network** panel, choose a destination and **Lay
+   pipe**. The Landing Pod is a destination too. Junctions can be any water port.
+3. Connect **every online water port**, including the pod, an enabled extractor
+   and a powered pump. Repair damaged structures and keep some water in reserve.
+   The panel explains any unmet commissioning condition.
+4. Click **Commission network**. This is permanent: the existing reserve is
+   distributed across local tanks without losing water. New structures start
+   empty and need their own pipes.
+
+A powered pump moves up to **6 kg per Mars hour**, scaled by supplied power,
+within its connected component. Pumps balance tank fill fractions, sharing flow
+among consumers rather than letting the first port monopolise it. Local reserves
+remain usable during blackouts or disconnection; disconnected tanks cannot share
+water. Indoor drinking/recycling uses the shelter tank; EVA provisions still
+debit the pod in this first slice. Oxygen and food remain pooled.
+
+Use the **Water overlay** (tap its button or cycle with **V**) to see pipe routes,
+directional flow beads, and amber diamond markers at ports needing attention.
+The inspector distinguishes **Not connected**, **No pump power**, **No water**
+and waiting for pumped supply, alongside the actual local buffer and kg/h flow.
+Disconnecting salvages half the sections, rounded down and limited by rack space.
+Demolition removes incident pipes without salvage; damage/demolition loses that
+tank's water, not the rest of the colony's reserve.
+
+Pressure, leaks, valves, oxygen networks and trench-routing are deliberately not
+in this slice. Save **v12** preserves commissioned tanks and paid topology;
+v3–v11 saves migrate safely into shared-plumbing mode.
+
+### Component maintenance & Repair Bay (P5)
+Rovers now have **installed motor and circuit-board health**, separate from the
+routine condition a Garage restores. Driving, tool work and exposed storms wear
+the parts at different rates. Below **45%**, the weakest part reduces work rate;
+even at zero, the rover retains half rate, so a colony can always rebuild its
+supply chain. Below 35%, an alert points you toward a Repair Bay.
+
+Build a **Repair Bay** (20 kg steel plus raw materials, 38 s construction), then
+move a rover beside it, within **12 m of the building centre**. The bay replaces
+parts at **70% or below**, one job at a time. Each replacement takes **12 game
+seconds at full power**, draws **8 kW** at industry priority, and consumes **one
+matching spare** from the Workshop rack on completion. Idle draw is 1 kW.
+
+- Missing stock or a brownout pauses the job; the inspector explains why.
+- A funded repair keeps idle automation from taking the rover away. New player
+  orders and emergency charging still win. If stock is missing, use **Wait 1m**
+  to hold a customer while the Workshop catches up.
+- Leaving cancels unfinished work without spending a part. Save/load preserves
+  completed wear and in-progress jobs; old colonies load with healthy parts.
+- Garages still restore routine condition and charge batteries, but **cannot
+  replace installed parts**. Building structural repairs and solar cleaning stay
+  unchanged, preserving recovery before the industrial chain is established.
+
+Regression coverage: `tests/sim/maintenance.test.ts`,
+`tests/hud/maintenance.test.ts`, and `node scripts/maintenance-smoke.mjs` against a
+served build (both transports; run `node scripts/setup-playwright.mjs` first).
 
 ### Exploration (`sim/pois.ts`)
 The map begins mostly unknown (GDD §06). The world scatters **sites** from the
@@ -408,12 +523,13 @@ src/
       FleetAutomationSystem.ts the job model + autonomous dispatch
       LogisticsSystem.ts  the bulk (kg) ledger, cargo, reservations — one owner
       ComponentSystem.ts  the manufactured-unit ledger: rack space, whole units
+      MaintenanceSystem.ts  installed rover part wear + Repair Bay replacement jobs
       ExplorationSystem.ts discovery, drops, burial, salvage rewards
       GarageSystem.ts     fast charge, drivetrain service, the assembly line
       FailureSystem.ts    failure outcomes as domain events
       AlertSystem.ts      domain events → state.alerts (keys, dedupe, expiry)
       HistorySystem.ts    vitals time series + the flow-window roll
-    persistence/    versioned saves: schema (v10), codec, validator, migration steps v1…v9
+    persistence/    versioned saves: schema (v13), codec, validator, migration steps v1…v12
     debug/          invariant checks, state hash, profiler, transcripts, benchmarks,
                     the large-colony stress scenario (dev-only; tree-shaken out)
     host/           the seam: SimCommand protocol, SimView read model, the host
@@ -493,16 +609,18 @@ public/             terrain PBR atlas, menu art, and the GLB drop folder (empty 
   rover-load of regolith deadlock every other supply chain, which reads as a bug
   rather than a bottleneck.
 - **Saves are versioned** and refuse to load a schema they don't understand
-  rather than silently corrupting a colony. The chain runs v3 → v10, each step
+  rather than silently corrupting a colony. The chain runs v3 → v13, each step
   additive: task queues, drivetrain condition and automation rules (v4),
   position lights (v5), difficulty and world options (v6), exploration (v7), the
   weather lightning state — the seeded strike RNG plus the difficulty
   multiplier (v8), refined material (v9: `storage` gains `steel`), and
   manufacturing (v10: the colony gains a component rack, every building gains
-  the line it is running and the fraction still on its bench) — a v6 colony
+  the line it is running and the fraction still on its bench), and installed-part
+  maintenance (v11: rover part health and Repair Bay jobs) — a v6 colony
   loads with its sites unscattered-but-unfound and a fresh drop schedule, a v7
   colony simply gains a sky that can throw a bolt, a v8 colony simply has not
-  smelted anything yet, and a v9 colony has never crafted anything, because a
+  smelted anything yet, a v9 colony has never crafted anything, and a v10 colony
+  arrives with healthy installed parts and no maintenance jobs, because a
   planet that had nothing on it is not a corrupted save. Restore *sanitises*
   what it is given: components floor to whole non-negative units, bench
   fractions clamp to 0…1, and a recipe index that names no line resolves to the
@@ -525,7 +643,7 @@ historically slowest suites first across the available CPU workers.
 ```
 tests/
   harness.ts          test()/group()/finish(), the per-suite report, the roll-up
-  full.test.ts        optional serial run: imports all 79 suites, prints the total
+  full.test.ts        optional serial run: imports all 87 suites, prints the total
   fixtures/sim.ts     shared sim setup (place a building, run N sols, find a seam)
   fixtures/hud.ts     jsdom bootstrap, a recording 2D canvas stub, one mounted
                       HUD + sim per suite
@@ -611,7 +729,7 @@ What is covered, by TDD §21's categories:
   rather than bursting, two furnaces that cannot invent mass, steel and silica
   machined into motors and boards on a line the player picks, a rack that stops
   the line when it fills, work in progress that survives a changeover, a garage
-  that refuses a rover and names the missing part, and the v3→v10 save
+  that refuses a rover and names the missing part, and the v3→v13 save
   migrations against hostile payloads.
 - **Determinism & replay** (`sim/determinism`, `sim/transcript`, `sim/state-hash`,
   `sim/weather`, `sim/pois`, `sim/persistence`) — identical seeds and identical
@@ -650,11 +768,12 @@ that CI runs the build and the browser smokes, **not** `npm test`.
 in — terrain and camera, the mission wizard, staged construction, the power
 grid, the sol and the water → oxygen → food chain, weather and storms, and the
 rover fleet with queued tasks, automation rules and a garage — plus the first
-slice of **P6/T6** (points of interest, the salvage task, supply drops) and both
-shippable slices of **P5** (the Refinery and `steel`; the Workshop's two lines,
-the component rack, and rovers priced in motors and boards). The MVP building set
+slice of **P6/T6** (points of interest, the salvage task, supply drops) and four
+shipped slices of **P5** (the Refinery and `steel`; the Workshop's six lines,
+the component rack, and rovers priced in motors and boards; rover component wear
+and the Repair Bay; commissioned water pipes, pumps and local tanks). The MVP building set
 from GDD §16 is complete, and so is GDD §03's replication chain: ore → steel →
-components → machine. `npm test` is green at 79 suites / 913 checks. The **30-phase architectural refactor roadmap is also complete**: systems
+components → machine. `npm test` is green at 87 suites / 983 checks. The **30-phase architectural refactor roadmap is also complete**: systems
 extracted, `ColonyState` formalised, persistence and app controllers split out,
 the host seam strengthened, and the debug/perf harness in place.
 
@@ -697,24 +816,18 @@ the host seam strengthened, and the debug/perf harness in place.
      is throttled and the colony would race ahead unseen).
    - transferables for the terrain and `OffscreenCanvas` for the renderer
      (TDD §16 P2/P3), each needing its own guard. Neither is in the tree yet.
-2. **GDD §16 P5 — refining, manufacturing, utility networks, maintenance.** Both
-   shippable slices are in (see *Refining* and *Manufacturing* above): `defs.ts`
-   defines twelve blueprints — the **Refinery** joined habitat, solar, battery,
-   rtg, warehouse, extractor, oxygenator, greenhouse, workshop, garage and the
-   weather radar station — and GDD §03's replication chain is complete: iron ore
-   is smelted into steel, steel and silica are machined into motors and boards on
-   a line the player chooses, and a rover leaving the garage has spent both.
+2. **GDD §16 P5 — refining, manufacturing, utility networks, maintenance.**
+   Four slices are in: steel refining, Workshop manufacturing, rover
+   component wear with the Repair Bay, and water utility networks (15 blueprints). Ore → steel →
+   components → rover assembly **and replacement parts** is a functioning loop.
    What the pillar still owes:
-   - **a wider parts catalogue** — pipes, valves, pumps — which wants the utility
-     networks below to exist before there is anything to connect them with;
-   - **a second refined material** (glass from silica), which the recipe machinery
-     can now carry as a third Workshop line or a Refinery one;
-   - **utility networks** — there is still no `sim/utilities/` module, because
-     power is the only network;
-   - **maintenance depth** — part-level wear rather than one health number. The
-     rack gives it something to consume: components exist now, and nothing wears
-     them out yet;
-   - GDD §04's **Laboratory**, **Repair Bay** and **Nuclear Reactor**.
+   - **a wider parts catalogue** — valves and further utility parts;
+   - **a second refined material** — glass from silica; selectable recipes already
+     provide the required machinery;
+   - **further utility networks** — oxygen, heat and data;
+   - **building component wear**, beyond structural health/cleanliness. This slice
+     deliberately covers rover motors and boards, not every machine in the colony;
+   - GDD §04's **Laboratory** and **Nuclear Reactor**.
 3. **GDD §16 P6 / TDD §25 T6 — procedural exploration, POIs, supply drops.**
    The first slice is in: `sim/pois.ts` carries the content tables, `World`
    scatters sites from the seed, the map only shows what a rover has found,
@@ -751,9 +864,9 @@ the host seam strengthened, and the debug/perf harness in place.
 what follows the rover slice: GDD puts **refining/manufacturing at P5** and
 exploration at P6, while TDD puts **POIs and supply drops at T6** and never
 gives refining its own tier. The build answered it by taking a slice of each —
-**Exploration** first (item 3), then **Engineering** twice over (item 2) — and TDD
+**Exploration** first (item 3), then **Engineering** in four slices (item 2) — and TDD
 §25 still has no tier for the industrial layer, so P5 progress is tracked in GDD
-§0/§16 and TDD Appendix B rather than in a T-row of its own. With both P5 slices
+§0/§16 and TDD Appendix B rather than in a T-row of its own. With four P5 slices
 shipped, the open question is no longer which pillar comes next but whether the
-remaining engineering depth (utility networks, part-level wear) is worth more than
+remaining engineering depth (utility networks, building component wear) is worth more than
 finishing exploration.

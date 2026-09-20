@@ -10,6 +10,11 @@
  * field-by-field through cached element references.
  */
 
+import { itemIcon } from './ItemIcons';
+import { effectiveBuildingDef, UPGRADES } from '../sim/engineering/upgrades';
+import { effectiveRoverDef } from '../sim/engineering/upgrades';
+import { updateWaterPanel } from './WaterPanel';
+
 import type { BuildingKind, ComponentId, ResourceId, FluidId } from '../sim/defs';
 import {
   BUILDINGS,
@@ -21,6 +26,7 @@ import {
   COMPONENTS,
   FLUIDS,
   ROVERS,
+  ROVER_PARTS,
   activeSummary,
   hasProcess,
   hasRecipes,
@@ -37,6 +43,9 @@ import {
   SOL_SECONDS,
   SPEEDS,
   BUILDING_MAX_HEALTH,
+  PART_REPLACE_THRESHOLD,
+  PART_REPLACE_SECONDS,
+  ROVER_CONDITION_SLOW,
   devLevelMul,
 } from '../sim/config';
 import type { PowerTier } from '../sim/config';
@@ -46,7 +55,7 @@ import type { Poi } from '../sim/pois';
 import { MapRenderer, WorldMapOverlay, fitTransform, stormOverlayKey, type MapTransform } from './WorldMap';
 import { SETTINGS_KEYS } from './Settings';
 
-export type OverlayMode = 'none' | 'power' | 'life' | 'weather';
+export type OverlayMode = 'none' | 'power' | 'life' | 'weather' | 'water';
 
 /**
  * Why a save failed. `read` = the snapshot could not be produced (the colony
@@ -69,6 +78,8 @@ export interface HUDCallbacks {
   onMapSelect?: (type: 'rover' | 'building' | 'colonist' | 'poi', id: number) => void;
   /** World map empty click — optional camera focus. */
   onMapFocus?: (x: number, z: number) => void;
+  /** Save progress visibility, including its exit fade; saved is true only on success. */
+  onSaveProgress?: (open: boolean, saved: boolean) => void;
   /** "Retry" on the save-failed dialog — re-run the failed save. */
   onSaveRetry?: () => void;
   /** "Save as new file" on the save-failed dialog. */
@@ -195,6 +206,7 @@ export class HUD {
   /** Signature of the last inspector render, so we only rebuild on real change. */
   private inspectorKey = '';
   private alertKey = '';
+  private alertNodes = new Map<string, HTMLElement>();
 
   /** Alert keys the player has snoozed (cleared when the condition resolves). */
   private dismissed = new Set<string>();
@@ -1150,7 +1162,7 @@ export class HUD {
       chip.className = 'res-chip';
       chip.title = `${info.label} — ${info.description}`;
       chip.innerHTML = `
-        <span class="swatch" style="background:#${info.color.toString(16).padStart(6, '0')}"></span>
+        ${itemIcon(info.id)}
         <span class="rc-body">
           <span class="n">0</span>
           <span class="mini-bar"><i style="width:0%"></i></span>
@@ -1180,7 +1192,7 @@ export class HUD {
       chip.className = 'res-chip comp';
       chip.title = `${info.label} — ${info.description}`;
       chip.innerHTML = `
-        <span class="swatch" style="background:#${info.color.toString(16).padStart(6, '0')}"></span>
+        ${itemIcon(info.id)}
         <span class="rc-body">
           <span class="n">0</span>
           <span class="mini-bar"><i style="width:0%"></i></span>
@@ -1294,6 +1306,7 @@ export class HUD {
       ['none', '◻', 'No overlay (V)'],
       ['power', '⚡', 'Power overlay — generation, load and reach (V)'],
       ['life', '💧', 'Life-support overlay — fluid producers and consumers (V)'],
+      ['water', '🚰', 'Water network — pipes, pumped flow and disconnected ports (V)'],
       ['weather', '🌪', 'Weather overlay — array cleanliness and storm damage (V)'],
     ];
     for (const [mode, icon, tip] of modes) {
@@ -1319,7 +1332,7 @@ export class HUD {
   }
 
   cycleOverlay(): OverlayMode {
-    const order: OverlayMode[] = ['none', 'power', 'life', 'weather'];
+    const order: OverlayMode[] = ['none', 'power', 'life', 'weather', 'water'];
     const next = order[(order.indexOf(this.overlay) + 1) % order.length];
     this.setOverlay(next);
     return next;
@@ -1362,7 +1375,7 @@ export class HUD {
       btn.innerHTML = `
         <span class="ic">${iconFor(k)}</span>
         <span class="bl">${def.label}</span>
-        <span class="cost">${costTxt}</span>
+        <span class="cost">${ALL_RESOURCES.filter(r => def.cost[r] > 0).map(r => `<span class="price-item">${itemIcon(r)}${Math.round(def.cost[r])} ${RESOURCES[r].short}</span>`).join('')}</span>
         ${power ? `<span class="pw">${power}</span>` : ''}
         ${i < 9 ? `<span class="key">${i + 1}</span>` : ''}`;
       btn.addEventListener('pointerdown', (e) => {
@@ -1414,7 +1427,7 @@ export class HUD {
     const costTxt = ALL_RESOURCES.filter((r) => def.cost[r] > 0)
       .map((r) => `${Math.round(def.cost[r])} ${RESOURCES[r].short}`)
       .join(' · ');
-    this.el('bi-cost').innerHTML = `<span class="k">Cost</span> ${costTxt}`;
+    this.el('bi-cost').innerHTML = `<span class="k">Cost</span> ${ALL_RESOURCES.filter(r => def.cost[r] > 0).map(r => `${itemIcon(r)} ${Math.round(def.cost[r])} kg ${RESOURCES[r].short}`).join(' · ')}`;
     const power =
       def.powerProduceKw > 0
         ? `+${def.powerProduceKw} kW generation`
@@ -1827,58 +1840,77 @@ export class HUD {
     }
     const visible = alerts.filter((a) => !this.dismissed.has(a.key));
     const key =
-      visible.map((a) => `${a.key}:${a.severity}:${a.detail}`).join('|') +
+      JSON.stringify(visible.map((a) => [a.key, a.severity, a.title, a.detail, a.entityId])) +
       `#snoozed:${[...this.dismissed].sort().join(',')}`;
     if (key === this.alertKey) return;
     this.alertKey = key;
 
     const wrap = this.el('alerts');
-    if (visible.length === 0 && this.dismissed.size === 0) {
-      wrap.style.display = 'none';
-      wrap.innerHTML = '';
-      return;
+    const shown = visible.slice(0, 6);
+    const liveKeys = new Set(shown.map((a) => a.key));
+    for (const [key, node] of this.alertNodes) {
+      if (!liveKeys.has(key)) {
+        node.remove();
+        this.alertNodes.delete(key);
+      }
     }
-    wrap.style.display = 'flex';
-    wrap.innerHTML =
-      visible
-        .slice(0, 6)
-        .map(
-          (a) => `
-        <div class="alert ${a.severity}" data-key="${a.key}" ${
-          a.entityId
-            ? `data-focus="${a.entityId}" title="Tap to focus & dismiss"`
-            : 'title="Tap to dismiss"'
-        }>
-          <span class="a-ic">${severityIcon(a.severity)}</span>
-          <span class="a-body"><b>${a.title}</b><span>${a.detail}</span></span>
-          <button class="a-x" title="Dismiss">×</button>
-        </div>`,
-        )
-        .join('') +
-      (this.dismissed.size > 0
-        ? `<div class="alerts-restore" title="Show snoozed alerts">⚠ ${this.dismissed.size} snoozed — tap to show</div>`
-        : '');
-    wrap.querySelectorAll('.alert').forEach((n) => {
-      const node = n as HTMLElement;
-      node.addEventListener('pointerdown', (e) => {
-        e.stopPropagation();
-        // Tapping the body jumps to the trouble (when there is somewhere to
-        // jump to) and then gets out of the way.
-        if (node.dataset.focus) this.cb.onAction('focus', Number(node.dataset.focus));
-        this.dismissAlert(node.dataset.key!);
-      });
-      node.querySelector('.a-x')?.addEventListener('pointerdown', (e) => {
-        e.stopPropagation();
-        // The × alone dismisses without moving the camera.
-        this.dismissAlert(node.dataset.key!);
-      });
+    wrap.style.display = shown.length || this.dismissed.size ? 'flex' : 'none';
+    // Keep each card mounted across live text updates so its entrance
+    // animation (and the player's focus/hover) does not restart every tick.
+    shown.forEach((a, index) => {
+      let node = this.alertNodes.get(a.key);
+      if (!node) {
+        node = document.createElement('div');
+        node.dataset.key = a.key;
+        node.innerHTML = `<span class="a-ic"></span>
+          <span class="a-body"><b></b><span></span></span>
+          <button class="a-x" title="Dismiss">×</button>`;
+        const card = node;
+        card.addEventListener('pointerdown', (e) => {
+          e.stopPropagation();
+          if (card.dataset.focus) this.cb.onAction('focus', Number(card.dataset.focus));
+          this.dismissAlert(card.dataset.key!);
+        });
+        card.querySelector('.a-x')!.addEventListener('pointerdown', (e) => {
+          e.stopPropagation();
+          this.dismissAlert(card.dataset.key!);
+        });
+        this.alertNodes.set(a.key, card);
+      }
+      const cls = `alert ${a.severity}`;
+      if (node.className !== cls) node.className = cls;
+      if (a.entityId != null) node.dataset.focus = String(a.entityId);
+      else delete node.dataset.focus;
+      node.title = a.entityId != null ? 'Tap to focus & dismiss' : 'Tap to dismiss';
+      for (const [selector, text] of [
+        ['.a-ic', severityIcon(a.severity)],
+        ['.a-body b', a.title],
+        ['.a-body span', a.detail],
+      ]) {
+        const part = node.querySelector(selector)!;
+        if (part.textContent !== text) part.textContent = text;
+      }
+      // Do not even reinsert unchanged siblings: that can restart animations.
+      if (wrap.children[index] !== node) wrap.insertBefore(node, wrap.children[index] ?? null);
     });
-    wrap.querySelector('.alerts-restore')?.addEventListener('pointerdown', (e) => {
-      e.stopPropagation();
-      this.dismissed.clear();
-      this.alertKey = '';
-      this.updateAlerts(this.lastAlerts);
-    });
+    let restore = wrap.querySelector<HTMLElement>('.alerts-restore');
+    if (this.dismissed.size > 0) {
+      if (!restore) {
+        restore = document.createElement('div');
+        restore.className = 'alerts-restore';
+        restore.title = 'Show snoozed alerts';
+        restore.addEventListener('pointerdown', (e) => {
+          e.stopPropagation();
+          this.dismissed.clear();
+          this.alertKey = '';
+          this.updateAlerts(this.lastAlerts);
+        });
+        wrap.appendChild(restore);
+      }
+      restore.textContent = `⚠ ${this.dismissed.size} snoozed — tap to show`;
+    } else {
+      restore?.remove();
+    }
   }
 
   /**
@@ -2125,7 +2157,7 @@ export class HUD {
    * collapsed panel must not be reopened by a routine value refresh.
    */
   showRover(r: RoverView, sim: SimView, preserveCollapse = false): void {
-    const def = ROVERS[r.kind];
+    const def = effectiveRoverDef(r);
     if (!preserveCollapse) this.setInspectorCollapsed(false);
     const mass = ALL_RESOURCES.reduce((s, k) => s + r.cargo[k], 0);
     const key = `rover:${r.id}`;
@@ -2143,6 +2175,10 @@ export class HUD {
         <div class="bar-wrap"><div class="bar-fill cyan" id="i-batbar"></div></div>
         <div class="stat"><span class="k">Condition</span><span class="v" id="i-cond">—</span></div>
         <div class="bar-wrap"><div class="bar-fill green" id="i-condbar"></div></div>
+        <div class="sub sm">Installed parts</div>
+        ${ROVER_PARTS.map((c) => `<div class="stat"><span class="k">${COMPONENTS[c].label}</span><span class="v" id="i-part-${c}">—</span></div>
+          <div class="bar-wrap"><div class="bar-fill green" id="i-partbar-${c}"></div></div>`).join('')}
+        <div class="note dim" id="i-parts-note"></div>
         <div class="stat"><span class="k">Cargo</span><span class="v" id="i-cargo">—</span></div>
         <div class="bar-wrap"><div class="bar-fill green" id="i-cargobar"></div></div>
         <div class="chips" id="i-chips"></div>
@@ -2192,7 +2228,7 @@ export class HUD {
     }
 
     const q = (id: string) => insp.querySelector(`#${id}`) as HTMLElement;
-    q('i-status').textContent = roverStatusText(r) + (r.autoTask ? ' (auto)' : '');
+    q('i-status').textContent = r.upgradeJob ? `Refit: ${UPGRADES[r.upgradeJob.upgrade].label} · ${Math.floor(r.upgradeJob.progress * 100)}% · Garage #${r.upgradeJob.facilityId}` : roverStatusText(r) + (r.autoTask ? ' (auto)' : '');
     q('i-bat').textContent = `${r.battery.toFixed(1)} / ${def.maxBatteryKWh} kWh`;
     const bpct = (r.battery / def.maxBatteryKWh) * 100;
     const bb = q('i-batbar');
@@ -2202,6 +2238,17 @@ export class HUD {
     const cbar = q('i-condbar');
     cbar.style.width = `${Math.max(0, Math.min(100, r.condition))}%`;
     cbar.className = `bar-fill ${r.condition < 35 ? 'red' : r.condition < 70 ? 'amber' : 'green'}`;
+    for (const c of ROVER_PARTS) {
+      const pct = r.parts[c];
+      q(`i-part-${c}`).textContent = `${Math.floor(pct)}%`;
+      const bar = q(`i-partbar-${c}`);
+      bar.style.width = `${pct}%`;
+      bar.className = `bar-fill ${pct < 35 ? 'red' : pct <= PART_REPLACE_THRESHOLD ? 'amber' : 'green'}`;
+    }
+    const replacing = sim.buildings.find((b) => b.maintenance?.roverId === r.id);
+    q('i-parts-note').textContent = replacing?.maintenance
+      ? `${replacing.idleReason || 'Replacement paused'} · Repair Bay #${replacing.id}`
+      : `Park beside a Repair Bay to replace parts at ${PART_REPLACE_THRESHOLD}% or below: 1 matching spare each. Below ${ROVER_CONDITION_SLOW}%, worn parts reduce performance (never strand a rover).`;
     q('i-cargo').textContent = `${Math.round(mass)} / ${def.capacityKg} kg`;
     q('i-cargobar').style.width = `${Math.min(100, (mass / def.capacityKg) * 100)}%`;
     q('i-chips').innerHTML =
@@ -2265,7 +2312,7 @@ export class HUD {
     // Lights: dead rovers flash their reserve-powered yellow strobe; live
     // ones either burn the battery for light or wait for dark.
     const lv = q('i-lights');
-    const draw = ROVERS[r.kind].lightsPowerKw.toFixed(1);
+    const draw = effectiveRoverDef(r).lightsPowerKw.toFixed(1);
     lv.textContent =
       r.phase === 'disabled'
         ? 'Emergency strobe — flashing yellow'
@@ -2279,7 +2326,7 @@ export class HUD {
 
   /** Render a building selection; see showRover for the refresh distinction. */
   showBuilding(b: BuildingView, sim: SimView, preserveCollapse = false): void {
-    const def = BUILDINGS[b.kind];
+    const def = effectiveBuildingDef(b);
     if (!preserveCollapse) this.setInspectorCollapsed(false);
     const key = `bld:${b.id}`;
     const insp = this.el('inspector');
@@ -2289,7 +2336,7 @@ export class HUD {
       insp.innerHTML = `
         <div class="i-bar"><span class="i-bar-kind">Structure</span><span class="i-spacer"></span><button class="mini-btn" id="i-collapse" title="Collapse panel">▾</button><button class="mini-btn" id="i-close" data-act="deselect" title="Deselect (Esc)">×</button></div>
         <div class="i-body">
-        <div class="i-head"><h3>${def.label}</h3><span class="i-id">#${b.id}</span></div>
+        <div class="i-head"><h3>${def.label}</h3><span class="i-id">#${b.id}</span></div><div class="note dim">Right-click / long-press the structure for engineering, upgrades and paint.</div>
         <div class="sub">${def.description}</div>
         <div class="stat"><span class="k">Status</span><span class="v" id="b-state">—</span></div>
         <div id="b-progress-wrap" style="display:none">
@@ -2297,6 +2344,7 @@ export class HUD {
         </div>
         <div id="b-body"></div>
         ${recipeBlock(b.kind)}
+        <div id="b-water"></div>
         <div id="b-garage" style="display:none">
           <div class="sub sm">Assembly line</div>
           <div class="stat"><span class="k">Building</span><span class="v" id="b-asm-label">—</span></div>
@@ -2307,6 +2355,15 @@ export class HUD {
             <button class="btn" data-act="assemble" data-arg="cargo" id="asm-cargo" title="Cargo Rover — 3 t, 120 kWh, built for the long haul.">Cargo</button>
           </div>
           <div class="note dim" id="b-asm-note"></div>
+        </div>
+        <div id="b-maintenance" style="display:none">
+          <div class="sub sm">Component replacement</div>
+          <div class="stat"><span class="k">On the lift</span><span class="v" id="b-maint-rover">—</span></div>
+          <div class="stat"><span class="k">Part</span><span class="v" id="b-maint-part">—</span></div>
+          <div class="bar-wrap"><div class="bar-fill cyan" id="b-maint-bar"></div></div>
+          <div class="note" id="b-maint-status"></div>
+          <div class="note dim" id="b-maint-stock"></div>
+          <div class="note dim">Park beside the bay (within 12 m of its centre). One part per job, ${PART_REPLACE_SECONDS} s at full power; work pauses without power or stock. Leaving cancels unfinished work without spending a spare. Garages only restore routine condition.</div>
         </div>
         <div class="action-grid" id="b-actions">
           <button class="btn" data-act="service" id="b-service">✨ <span class="btn-t">Clean panels</span></button>
@@ -2337,7 +2394,8 @@ export class HUD {
           : b.needsMaterials
             ? 'Awaiting materials'
             : 'Ready to assemble';
-    q('b-state').textContent = state;
+    updateWaterPanel(q('b-water'), b.id, sim, (action, arg) => this.cb.onAction(action, arg));
+    q('b-state').textContent = b.upgradeJob ? `Refit: ${UPGRADES[b.upgradeJob.upgrade].label} · ${Math.floor(b.upgradeJob.progress * 100)}%` : state;
     q('b-state').className = `v ${b.state === 'online' && b.enabled ? 'good' : b.needsMaterials ? 'warn' : ''}`;
 
     const pw = q('b-progress-wrap');
@@ -2472,19 +2530,31 @@ export class HUD {
           btn.classList.toggle('unaffordable', !afford);
           const cost = [
             ...ALL_RESOURCES.filter((res) => rdef.cost[res] > 0).map(
-              (res) => `${Math.round(rdef.cost[res])} ${RESOURCES[res].short}`,
+              (res) => `${itemIcon(res)} ${Math.round(rdef.cost[res])} ${RESOURCES[res].short}`,
             ),
             ...ALL_COMPONENTS.filter((c) => rdef.componentCost[c] > 0).map(
-              (c) => `${rdef.componentCost[c]} ${COMPONENTS[c].short}`,
+              (c) => `${itemIcon(c)} ${rdef.componentCost[c]} ${COMPONENTS[c].short}`,
             ),
           ].join(' · ');
           btn.innerHTML = `${rdef.label.split(' ')[0]}<span class="cost">${cost}</span>`;
         }
         q('b-asm-note').innerHTML =
-          'Also: 32 kW fast charge bay · services parked rovers back to 100% condition.';
+          'Also: 32 kW fast charge · routine condition restored to 100%. Worn motors and boards need a Repair Bay.';
       }
     } else {
       garage.style.display = 'none';
+    }
+
+    const maintenance = q('b-maintenance');
+    maintenance.style.display = b.kind === 'repairBay' && b.state === 'online' ? '' : 'none';
+    if (b.kind === 'repairBay') {
+      const job = b.maintenance;
+      const rover = job ? sim.rovers.find((r) => r.id === job.roverId) : null;
+      q('b-maint-rover').textContent = rover ? `${rover.label} #${rover.id}` : 'Bay clear';
+      q('b-maint-part').textContent = job ? `${COMPONENTS[job.component].label} · ${Math.floor(job.progress * 100)}%` : '—';
+      q('b-maint-bar').style.width = `${(job?.progress ?? 0) * 100}%`;
+      q('b-maint-status').textContent = b.damaged ? 'Damaged — dispatch structural repair' : !b.enabled ? 'Switched off — replacement paused' : b.idleReason || 'Waiting for a parked rover';
+      q('b-maint-stock').textContent = `Cost: 1 matching spare per replacement · Rack: ${sim.components.motor} motors / ${sim.components.circuitBoard} boards`;
     }
 
     // ---- production line (P5): which recipe is running, and why not --------
@@ -2777,6 +2847,7 @@ export class HUD {
    * colony-sized write is, instead of a blank flash.
    */
   saveProgressStart(title: string): void {
+    window.clearTimeout(this.saveProgressTimer);
     const ov = this.el('save-progress');
     this.el('sp-title').textContent = title;
     for (let i = 0; i < 3; i++) this.setSaveProgressStep(i, 'pending');
@@ -2785,6 +2856,7 @@ export class HUD {
     ov.classList.remove('leaving');
     ov.style.display = 'flex';
     this.saveProgressOpen = true;
+    this.cb.onSaveProgress?.(true, false);
   }
 
   /** Mark steps before `stage` done, `stage` active (0..2). */
@@ -2799,17 +2871,16 @@ export class HUD {
   /** Finish: on success every step checks off and the frost lifts on its own. */
   saveProgressEnd(ok: boolean): void {
     if (!this.saveProgressOpen) return;
-    if (ok) {
-      for (let i = 0; i < 3; i++) this.setSaveProgressStep(i, 'done');
-      this.setSaveProgressFill(100);
+    if (!ok) {
+      this.hideSaveProgress();
+      return;
     }
+    for (let i = 0; i < 3; i++) this.setSaveProgressStep(i, 'done');
+    this.setSaveProgressFill(100);
     const ov = this.el('save-progress');
     ov.classList.add('leaving');
-    window.setTimeout(() => {
-      ov.style.display = 'none';
-      ov.classList.remove('leaving');
-    }, ok ? 420 : 120);
-    this.saveProgressOpen = false;
+    window.clearTimeout(this.saveProgressTimer);
+    this.saveProgressTimer = window.setTimeout(() => this.hideSaveProgress(true), 420);
   }
 
   isSaveProgressOpen(): boolean {
@@ -2817,11 +2888,14 @@ export class HUD {
   }
 
   /** Force the frost down (a save was abandoned or the world went away). */
-  hideSaveProgress(): void {
+  hideSaveProgress(saved = false): void {
+    window.clearTimeout(this.saveProgressTimer);
+    const wasOpen = this.saveProgressOpen;
     const ov = this.el('save-progress');
     if (ov.style.display !== 'none') ov.style.display = 'none';
     ov.classList.remove('leaving');
     this.saveProgressOpen = false;
+    if (wasOpen) this.cb.onSaveProgress?.(false, saved);
   }
 
   private setSaveProgressStep(i: number, state: 'pending' | 'active' | 'done'): void {
@@ -2836,6 +2910,7 @@ export class HUD {
   }
 
   private saveProgressOpen = false;
+  private saveProgressTimer = 0;
 
   // -------------------------------------------------------- save error ----
   /**
@@ -2956,6 +3031,12 @@ function iconFor(k: BuildingKind): string {
       return '📡';
     case 'refinery':
       return '🏭';
+    case 'repairBay':
+      return '🛠';
+    case 'pumpStation':
+      return '🚰';
+    case 'waterTank':
+      return '💧';
   }
 }
 

@@ -226,6 +226,8 @@ async function main() {
     await page.click('.rf-pause [data-act="save"]');
     await page.waitForSelector('#save-progress', { state: 'visible', timeout: 5000 });
     check('a manual save raises the progress dialog', true);
+    check('the pause menu hides while save progress is visible',
+      await page.locator('.rf-pause').isHidden());
     // The "Saved" flash is transient (~1.8 s), so catch it the moment it
     // appears instead of reading it after the progress lifts — and poll on
     // timers, since a stalled headless frame can swallow an rAF poll.
@@ -244,6 +246,9 @@ async function main() {
       { timeout: 15000, polling: 50 },
     );
     check('the progress dialog lifts once the write settles', true);
+    check('the pause menu returns with save disabled',
+      await page.locator('.rf-pause').isVisible() &&
+      await page.locator('.rf-pause [data-act="save"]').isDisabled());
     const flashAfterSave = await flashShown;
     check(
       'the save lands as a "Saved" flash, not an error',

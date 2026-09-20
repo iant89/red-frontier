@@ -165,6 +165,7 @@ export function applyColonistNeeds(
   pools: FluidPools,
   sols: number,
   recycles: boolean,
+  water?: { take(kg: number): number; add(kg: number): number },
 ): NeedsOutcome {
   const met: Record<FluidId, number> = { oxygen: 1, water: 1, food: 1 };
   let reclaimed = 0;
@@ -189,10 +190,10 @@ export function applyColonistNeeds(
 
   // ---- water --------------------------------------------------------------
   const waterWant = COLONIST_WATER_PER_SOL * sols;
-  const waterGot = takeFluid(pools, 'water', waterWant);
+  const waterGot = water ? water.take(waterWant) : takeFluid(pools, 'water', waterWant);
   met.water = waterWant > 0 ? waterGot / waterWant : 1;
   if (recycles && waterGot > 0) {
-    reclaimed = addFluid(pools, 'water', waterGot * WATER_RECLAIM_FRACTION);
+    reclaimed = water ? water.add(waterGot * WATER_RECLAIM_FRACTION) : addFluid(pools, 'water', waterGot * WATER_RECLAIM_FRACTION);
   }
 
   // ---- food ---------------------------------------------------------------

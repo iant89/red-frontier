@@ -49,6 +49,10 @@
  * persistence schema.
  */
 
+import { UpgradeSystem } from './UpgradeSystem';
+import { effectiveBuildingDef } from '../engineering/upgrades';
+import { effectiveRoverDef } from '../engineering/upgrades';
+import { MaintenanceSystem } from './MaintenanceSystem';
 import type { ColonyState } from '../state/ColonyState';
 import { recomputeCapacitiesState } from '../state/ColonyState';
 import type { Building } from '../state/BuildingState';
@@ -194,6 +198,7 @@ export class ConstructionSystem {
       cleanliness: 1,
       damaged: false,
       assembly: null,
+      maintenance: null,
       level: 1,
       recipe: 0,
       craft: emptyCraft(),
@@ -220,7 +225,7 @@ export class ConstructionSystem {
         ConstructionSystem.log(
           state,
           'info',
-          `Materials delivered to the ${BUILDINGS[b.kind].label} site.`,
+          `Materials delivered to the ${effectiveBuildingDef(b).label} site.`,
         );
       }
       const left = remainingCostTotal(b);
@@ -229,7 +234,7 @@ export class ConstructionSystem {
         state.alerts.raise(
           `mats-${b.id}`,
           'warn',
-          `${BUILDINGS[b.kind].label} awaiting materials`,
+          `${effectiveBuildingDef(b).label} awaiting materials`,
           `Still needs ${ConstructionSystem.missingList(b.remainingCost)}.`,
           state.simTime,
           state.clock.format(),
@@ -240,7 +245,7 @@ export class ConstructionSystem {
         ConstructionSystem.log(
           state,
           'ok',
-          `${BUILDINGS[b.kind].label} site fully stocked — ready to assemble.`,
+          `${effectiveBuildingDef(b).label} site fully stocked — ready to assemble.`,
         );
       }
     }
@@ -278,7 +283,7 @@ export class ConstructionSystem {
    * never a player order.
    */
   static assignBuilders(state: ColonyState, hooks: ConstructionHostHooks): void {
-    const sites = state.buildings.filter((b) => b.state !== 'online');
+    const sites = state.buildings.filter((b) => b.state !== 'online' || !!b.upgradeJob);
     for (const b of sites) {
       if (b.workerId !== null) {
         // Release a worker that wandered off (recharging, reassigned, etc).
@@ -303,6 +308,7 @@ export class ConstructionSystem {
             !r.recharge &&
             // Construction outranks an automatic supply run, never a player order.
             (r.command.type === 'idle' || r.autoTask) &&
+            !MaintenanceSystem.holdsRover(state, r) && !UpgradeSystem.holdsRover(state, r) &&
             /**
              * Don't pull a rover off a delivery it can still complete — but a
              * rover sitting on cargo the silos have no room for is *stuck*, not
@@ -310,7 +316,7 @@ export class ConstructionSystem {
              * quietly disqualifies the whole fleet and construction deadlocks.
              */
             (cargoMass(r) <= 0.01 || !hooks.canDeliverCargo(r)) &&
-            BUILDINGS[b.kind].buildableBy.includes(r.kind),
+            effectiveBuildingDef(b).buildableBy.includes(r.kind),
         )
         .sort(
           (a, c) =>
@@ -334,7 +340,7 @@ export class ConstructionSystem {
    */
   static build(state: ColonyState, r: Rover, b: Building, hooks: ConstructionHostHooks): void {
     const dist = Math.hypot(b.x - r.x, b.z - r.z);
-    const siteReach = BUILDINGS[b.kind].radius + SITE_REACH_SLACK;
+    const siteReach = effectiveBuildingDef(b).radius + SITE_REACH_SLACK;
     const hours = SIM_TICK * HOURS_PER_SEC;
     if (dist > siteReach) {
       r.gid = b.id;
@@ -346,7 +352,7 @@ export class ConstructionSystem {
     r.gid = b.id;
     enterWork(r, 'build');
 
-    const def = BUILDINGS[b.kind];
+    const def = effectiveBuildingDef(b);
 
     // Materials are delivered by tickSiteMaterials; a builder only assembles.
     if (remainingCostTotal(b) > 0) {
@@ -370,13 +376,20 @@ export class ConstructionSystem {
     }
 
     const work =
-      ROVERS[r.kind].buildPower *
+      effectiveRoverDef(r).buildPower *
       mul *
       state.weather.workMultiplierAt(r.x, r.z) *
       hooks.roverWorkMul(r);
+    if (b.state === 'online' && b.upgradeJob) {
+      UpgradeSystem.workBuilding(state, b, work);
+      r.battery = Math.max(0, r.battery - effectiveRoverDef(r).workPowerKw * hours * 0.6);
+      if (r.battery <= 0) hooks.disableRover(r);
+      else if (!b.upgradeJob) hooks.finishTask(r);
+      return;
+    }
     const before = b.progress;
     b.progress = Math.min(1, b.progress + (work * SIM_TICK) / b.buildTime);
-    r.battery = Math.max(0, r.battery - ROVERS[r.kind].workPowerKw * hours * 0.6);
+    r.battery = Math.max(0, r.battery - effectiveRoverDef(r).workPowerKw * hours * 0.6);
     r.condition = Math.max(0, r.condition - ROVER_WEAR_WORK_S * 0.7 * SIM_TICK);
     if (r.battery <= 0) hooks.disableRover(r);
     if (before < 1 && b.progress >= 1) {
@@ -400,7 +413,7 @@ export class ConstructionSystem {
       buildingId: b.id,
       kind: b.kind,
     });
-    const def = BUILDINGS[b.kind];
+    const def = effectiveBuildingDef(b);
     const extras: string[] = [];
     if (def.storagePerResourceKg) extras.push(`+${def.storagePerResourceKg} kg per silo`);
     if (def.batteryKWh) extras.push(`grid +${def.batteryKWh} kWh`);
@@ -444,9 +457,10 @@ export class ConstructionSystem {
     const idx = state.buildings.findIndex((b) => b.id === buildingId);
     if (idx < 0) return;
     const b = state.buildings[idx];
+    for (const r of state.rovers) if (r.upgradeJob?.facilityId === b.id) UpgradeSystem.cancel(state, { entity: 'rover', id: r.id });
     // Return whatever was already delivered to the site back to storage.
     if (b.state !== 'online') {
-      const def = BUILDINGS[b.kind];
+      const def = effectiveBuildingDef(b);
       let refunded = 0;
       for (const res of ALL_RESOURCES) {
         const committed = def.cost[res] - b.remainingCost[res];
@@ -473,7 +487,7 @@ export class ConstructionSystem {
       );
       state.alerts.clear(`mats-${b.id}`, state.simTime, state.clock.format());
     } else {
-      ConstructionSystem.log(state, 'warn', `${BUILDINGS[b.kind].label} dismantled.`);
+      ConstructionSystem.log(state, 'warn', `${effectiveBuildingDef(b).label} dismantled.`);
     }
     /**
      * Every rover task pointing at this building goes with it — queued ones
