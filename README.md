@@ -88,6 +88,10 @@ Ready-to-use, standalone game launcher and setup scripts are located in the [`la
 
 ### Manual Commands
 
+The project requires Node.js 18 or newer. The wiki commands run a small
+preflight check so an older Node installation reports the required upgrade
+instead of an opaque ESM parser error.
+
 ```bash
 npm install
 npm run dev             # local dev server (Vite), http://localhost:5173
