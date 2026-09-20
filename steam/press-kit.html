@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Red Frontier — Press Kit</title>
+<style>
+  :root{
+    --bg:#120d0a; --panel:#1c1410; --panel2:#241a13; --line:#3a2a1e;
+    --cream:#f5ead1; --sand:#c9b795; --orange:#e8681c; --red:#c23312;
+    --muted:#8d7a63;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    background:var(--bg) url("assets/page-background.jpg") center/cover fixed no-repeat;
+    color:var(--sand); font-family:"Segoe UI","Helvetica Neue",Arial,sans-serif;
+    font-size:15px; line-height:1.55;
+  }
+  .wrap{max-width:1000px; margin:0 auto; padding:0 20px 90px;}
+  header.hero{
+    text-align:center; padding:56px 0 30px;
+    background:linear-gradient(180deg, rgba(18,13,10,.2), var(--bg));
+  }
+  header.hero img.badge{max-width:200px; width:46%; image-rendering:auto;}
+  header.hero h1{
+    color:var(--cream); font-size:44px; letter-spacing:.18em; font-weight:800;
+    margin:14px 0 4px; text-transform:uppercase;
+  }
+  .kicker{color:var(--orange); letter-spacing:.34em; font-size:12px; text-transform:uppercase; margin-bottom:6px;}
+  .strap{color:var(--muted); font-size:13px; margin-top:10px; letter-spacing:.12em; text-transform:uppercase;}
+  .tagline{color:var(--cream); font-style:italic; font-size:17px; max-width:620px; margin:18px auto 0;}
+
+  nav.toc{
+    display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin:26px 0 0;
+  }
+  nav.toc a{
+    color:var(--sand); text-decoration:none; border:1px solid var(--line);
+    padding:6px 14px; border-radius:20px; font-size:12px; letter-spacing:.08em;
+    text-transform:uppercase; background:var(--panel);
+  }
+  nav.toc a:hover{border-color:var(--orange); color:var(--orange);}
+
+  h2{
+    color:var(--cream); font-size:20px; letter-spacing:.2em; text-transform:uppercase;
+    margin:64px 0 18px; padding-bottom:10px; border-bottom:1px solid var(--line);
+  }
+  h2::before{content:"// "; color:var(--orange);}
+
+  table.facts{width:100%; border-collapse:collapse; background:var(--panel); border-radius:6px; overflow:hidden;}
+  table.facts th, table.facts td{padding:10px 14px; border-bottom:1px solid var(--line); text-align:left; font-size:14px;}
+  table.facts th{color:var(--cream); width:220px; letter-spacing:.1em; text-transform:uppercase; font-size:12px; font-weight:600;}
+  table.facts tr:last-child th, table.facts tr:last-child td{border-bottom:none;}
+  table.facts td{color:var(--sand);}
+
+  .copybox{
+    display:block; width:100%; box-sizing:border-box; background:var(--panel2); border:1px solid var(--line);
+    border-radius:6px; padding:16px 18px; color:var(--cream); font-size:14.5px;
+    white-space:pre-wrap; font-family:Georgia,"Times New Roman",serif;
+  }
+  .copylabel{color:var(--orange); font-size:11px; letter-spacing:.14em; text-transform:uppercase; margin:16px 0 6px; display:block;}
+
+  ul.feats{list-style:none; margin-top:6px;}
+  ul.feats li{
+    padding:10px 14px; margin:8px 0; background:var(--panel); border-left:3px solid var(--orange);
+    border-radius:0 6px 6px 0; color:var(--cream); font-size:14.5px;
+  }
+
+  .grid{display:grid; gap:14px;}
+  .grid.two{grid-template-columns:1fr 1fr;}
+  .grid.three{grid-template-columns:repeat(3,1fr);}
+  figure{margin:0; background:var(--panel); border:1px solid var(--line); border-radius:6px; overflow:hidden;}
+  figure img{width:100%; display:block;}
+  figcaption{
+    padding:8px 12px; font-size:12px; color:var(--muted); display:flex; justify-content:space-between;
+    align-items:center; gap:8px; border-top:1px solid var(--line);
+  }
+  figcaption a{color:var(--orange); text-decoration:none; white-space:nowrap; font-size:12px;}
+  figcaption a:hover{text-decoration:underline;}
+  .dl{
+    display:inline-block; margin:4px 8px 4px 0; padding:7px 14px; border-radius:4px;
+    background:var(--panel2); border:1px solid var(--line); color:var(--sand);
+    text-decoration:none; font-size:13px;
+  }
+  .dl:hover{border-color:var(--orange); color:var(--orange);}
+
+  blockquote{
+    border-left:3px solid var(--red); padding:6px 18px; margin:14px 0; color:var(--cream);
+    font-style:italic; font-size:17px;
+  }
+  p{margin:10px 0;}
+  em{color:var(--cream);}
+  .note{color:var(--muted); font-size:12.5px;}
+  footer{margin-top:80px; text-align:center; color:var(--muted); font-size:12px; border-top:1px solid var(--line); padding-top:20px;}
+  a{color:var(--orange);}
+  @media(max-width:720px){ .grid.two,.grid.three{grid-template-columns:1fr;} header.hero h1{font-size:30px;} table.facts th{width:130px;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="kicker">Ares Expeditionary Command presents</div>
+  <img class="badge" src="steamworks-export/library-logo-1280x720.png" alt="Red Frontier logo">
+  <h1>Red Frontier</h1>
+  <div class="strap">Mars · 2066 &nbsp;—&nbsp; Real-Time Strategy · Survival · Automation · Exploration</div>
+  <p class="tagline">“One human. A handful of machines. An entire planet that does not want you there.”</p>
+</header>
+
+<nav class="toc">
+  <a href="#facts">Fact Sheet</a>
+  <a href="#pitch">Pitches</a>
+  <a href="#about">Description</a>
+  <a href="#features">Features</a>
+  <a href="#pricing">Pricing</a>
+  <a href="#media">Media</a>
+  <a href="#contact">Contact</a>
+</nav>
+
+<h2 id="facts">Fact Sheet</h2>
+<table class="facts">
+  <tr><th>Title</th><td>Red Frontier</td></tr>
+  <tr><th>Developer</th><td>[Your studio name]</td></tr>
+  <tr><th>Publisher</th><td>[Your studio name]</td></tr>
+  <tr><th>Platform</th><td>PC (Steam)</td></tr>
+  <tr><th>Release date</th><td>To be announced</td></tr>
+  <tr><th>Price</th><td>US $19.99 (10% launch-week discount)</td></tr>
+  <tr><th>Genres</th><td>Real-Time Strategy · Survival · Simulation</td></tr>
+  <tr><th>Players</th><td>Single-player</td></tr>
+  <tr><th>Languages</th><td>English (more to follow)</td></tr>
+  <tr><th>Store</th><td><a href="#">Steam page — link goes here once live</a></td></tr>
+  <tr><th>Age rating</th><td>No mature content</td></tr>
+</table>
+
+<h2 id="pitch">Pitches — copy &amp; paste</h2>
+<span class="copylabel">One-liner (17 words)</span>
+<p class="copybox">Red Frontier is a Mars survival strategy game about keeping one human alive with machines, industry and nerve.</p>
+
+<span class="copylabel">Short pitch (≈50 words)</span>
+<p class="copybox">Mars, 2066. One human, a handful of machines, and an entire planet that does not want you there. Command an autonomous rover fleet, build an industrial colony out of ice and rust, and forecast the dust storms before they strike — a hard-sci-fi survival strategy game where oxygen is the real clock.</p>
+
+<span class="copylabel">Boilerplate (≈100 words)</span>
+<p class="copybox">Red Frontier is a single-player real-time strategy and survival game set on Mars in the year 2066. You are the sole crew of a planetary survey claim: four sols of air, water and rations, and everything after touchdown is something you build. Command a fleet of autonomous rovers over queues, haul routes and automation rules; refine ore into steel and steel into machines; and read a living sky where storms travel as real systems and the dust carries lightning. Explore a planet that hides its wrecks, its supplies and its secrets until your machines find them. Oxygen kills in hours, water in days, food in weeks. Build in that order — and the Red Planet still has a vote.</p>
+
+<h2 id="about">Description</h2>
+<p><em>One human. A handful of machines. An entire planet that does not want you there.</em></p>
+<p>Red Frontier is a Mars survival RTS about the arithmetic of staying alive. You land with a descent stage, two rovers and roughly four sols of reserves. From there the colony is a chain you forge link by link: ice becomes water, water becomes oxygen and food, ore becomes steel, and steel becomes the machines that keep the whole circle turning.</p>
+<p>Rovers are the game’s hands. Orders queue, haul routes repeat, automation rules keep idle machines working, and the Rover Garage fast-charges, services and assembles rolling stock — including heavy cargo rovers built for the long seams. Care for them: parts wear out in the dust, batteries die in the cold, and a stranded rover goes dark until you bring it home.</p>
+<p>Weather is a field, not a mood. Storm fronts sweep the claim with local intensity — a rover twenty meters from the pad can sit in clear air while the pad takes the full wall — and thick dust carries lightning that singes arrays, dumps batteries and buries anything left uncovered. Build the Weather Radar Station and the sky stops being a surprise: storm cells plot on the world map, forecasts extend, and you choose what gets bolted down.</p>
+<p>And the planet rewards the curious. Seeded points of interest surface only when a rover finds them; wrecks can be cut apart and hauled home; Earth’s supply drops land under your transponder and start burying themselves the moment they touch. Distance is a resource. Dust is a clock.</p>
+<blockquote>“The Red Planet is patient. It can wait for your batteries to die.”</blockquote>
+
+<h2 id="features">Key Features</h2>
+<ul class="feats">
+  <li>Keep one human alive on a world that kills with air, water and time — ice → water → oxygen → food, every tank on a timer</li>
+  <li>Command a fleet of autonomous rovers: queueable orders, repeating haul routes, per-rover automation rules</li>
+  <li>Build an industry from ore: mining, a Refinery that makes steel, a Workshop that makes motors, circuit boards and pipe</li>
+  <li>A full service economy behind the machines — the Rover Garage fast-charges, services drivetrains and assembles new rovers from counted parts</li>
+  <li>Travelling storm systems with lightning, dust that buries panels and rovers, and a Weather Radar Station that turns the sky into a forecast</li>
+  <li>Explore points of interest the map never shows: salvage wrecks, race the dust to Earth supply drops, chart your claim on the world map</li>
+  <li>A complete sol cycle with day and night, plus an ambient procedural soundscape — wind, radio, machinery, thunder</li>
+  <li>Pause-friendly real-time play, autosaves, multiple slots — a hard planet with a forgiving journal</li>
+</ul>
+
+<h2 id="pricing">Pricing &amp; Positioning</h2>
+<p><strong>US $19.99</strong> with a <strong>10% launch-week discount</strong> ($17.99 at release).
+The price point follows the premium indie strategy anchor set by titles such as
+<em>Dyson Sphere Program</em> ($19.99) and <em>Mars First Logistics</em> ($19.99),
+beneath publisher-backed colony builders (<em>Surviving Mars</em>, <em>Aven Colony</em>, $29.99 class).</p>
+<p class="note">Quote, embed and review permissions are granted for editorial coverage. All imagery
+below is official key art or in-game capture.</p>
+
+<h2 id="media">Media</h2>
+
+<p><strong>Key art — Steam capsule compositions (logo included):</strong></p>
+<div class="grid two">
+  <figure>
+    <img src="assets/capsule-main.jpg" alt="Red Frontier main key art">
+    <figcaption>Main key art <span><a href="steamworks-export/capsule-main-616x353.jpg" download>616×353</a> · <a href="steamworks-export/capsule-main-1232x706.jpg" download>1232×706</a> · <a href="assets/capsule-main.jpg" download>master</a></span></figcaption>
+  </figure>
+  <figure>
+    <img src="assets/capsule-header.jpg" alt="Red Frontier header key art">
+    <figcaption>Header key art <span><a href="steamworks-export/capsule-header-460x215.jpg" download>460×215</a> · <a href="steamworks-export/capsule-header-920x430.jpg" download>920×430</a> · <a href="assets/capsule-header.jpg" download>master</a></span></figcaption>
+  </figure>
+  <figure>
+    <img src="assets/capsule-vertical.jpg" alt="Red Frontier vertical key art">
+    <figcaption>Vertical art <span><a href="steamworks-export/capsule-vertical-374x448.jpg" download>374×448</a> · <a href="steamworks-export/library-capsule-600x900.jpg" download>600×900</a> · <a href="assets/capsule-vertical.jpg" download>master</a></span></figcaption>
+  </figure>
+  <figure>
+    <img src="assets/library-hero.jpg" alt="Rover convoy panorama">
+    <figcaption>Panorama (no text) <span><a href="steamworks-export/library-hero-1920x620.jpg" download>1920×620</a> · <a href="steamworks-export/library-hero-3840x1240.jpg" download>3840×1240</a> · <a href="assets/library-hero.jpg" download>master</a></span></figcaption>
+  </figure>
+</div>
+
+<p style="margin-top:26px"><strong>Logo &amp; icon:</strong></p>
+<div class="grid two">
+  <figure>
+    <img src="assets/red-frontier-logo.png" alt="Red Frontier logo lockup">
+    <figcaption>Logo lockup <span><a href="assets/red-frontier-logo.png" download>PNG master</a> · <a href="steamworks-export/library-logo-1280x720.png" download>transparent</a></span></figcaption>
+  </figure>
+  <figure>
+    <img src="steamworks-export/community-icon-184x184.png" alt="Red Frontier Mars roundel icon" style="image-rendering:auto; background:#0c0805;">
+    <figcaption>Roundel icon <span><a href="steamworks-export/community-icon-184x184.png" download>184 PNG</a> · <a href="steamworks-export/client-icon-64x64.png" download>64 PNG</a> · <a href="steamworks-export/red-frontier-client.ico" download>ICO</a></span></figcaption>
+  </figure>
+</div>
+
+<p style="margin-top:26px"><strong>Screenshots (in development capture):</strong></p>
+<div class="grid three">
+  <figure><img src="../screenshots/08-colony.png" alt="Colony at Sol 1, cratered basin" loading="lazy"><figcaption>Colony, Sol 1 <a href="../screenshots/08-colony.png" download>PNG</a></figcaption></figure>
+  <figure><img src="../screenshots/07-worldgen.png" alt="World generation — landing survey" loading="lazy"><figcaption>Landing survey <a href="../screenshots/07-worldgen.png" download>PNG</a></figcaption></figure>
+  <figure><img src="../screenshots/23-descent-stage.png" alt="Descent stage on the pad" loading="lazy"><figcaption>Descent stage <a href="../screenshots/23-descent-stage.png" download>PNG</a></figcaption></figure>
+  <figure><img src="../screenshots/12-dust-trails-rover.png" alt="Rover dust trails" loading="lazy"><figcaption>Rover hauling <a href="../screenshots/12-dust-trails-rover.png" download>PNG</a></figcaption></figure>
+  <figure><img src="../screenshots/13-dust-devil.png" alt="Dust devil" loading="lazy"><figcaption>Dust devil <a href="../screenshots/13-dust-devil.png" download>PNG</a></figcaption></figure>
+  <figure><img src="../screenshots/15-regional-storm.png" alt="Regional storm front" loading="lazy"><figcaption>Regional storm <a href="../screenshots/15-regional-storm.png" download>PNG</a></figcaption></figure>
+  <figure><img src="../screenshots/16-severe-storm.png" alt="Severe storm over the claim" loading="lazy"><figcaption>Severe storm <a href="../screenshots/16-severe-storm.png" download>PNG</a></figcaption></figure>
+  <figure><img src="../screenshots/26-descent-stage-dusk.png" alt="Descent stage at dusk" loading="lazy"><figcaption>The pad at dusk <a href="../screenshots/26-descent-stage-dusk.png" download>PNG</a></figcaption></figure>
+  <figure><img src="../screenshots/27-descent-stage-night.png" alt="Descent stage at night" loading="lazy"><figcaption>The pad at night <a href="../screenshots/27-descent-stage-night.png" download>PNG</a></figcaption></figure>
+</div>
+
+<h2 id="contact">Contact</h2>
+<table class="facts">
+  <tr><th>Press / business</th><td>[press@yourstudio.example]</td></tr>
+  <tr><th>Review keys</th><td>Available through the Steam curator program, or by email</td></tr>
+  <tr><th>Website / socials</th><td>[Your links here]</td></tr>
+</table>
+
+<footer>
+  Red Frontier · Press Kit · Ares Expeditionary Command © 2026 — all artwork and screenshots may be used for editorial coverage.<br>
+  Companion documents: <a href="steam-launch-kit.md">steam-launch-kit.md</a> · <a href="store-page-preview.html">store-page-preview.html</a> · <a href="steamworks-export/README.md">export notes</a>
+</footer>
+
+</div>
+</body>
+</html>
