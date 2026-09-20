@@ -24,7 +24,10 @@
     "test:bench": "node scripts/benchmark.mjs",
     "test:stress": "node scripts/large-colony-stress.mjs",
     "test:smoke": "node scripts/mobile-smoke.mjs",
-    "setup:playwright": "node scripts/setup-playwright.mjs"
+    "setup:playwright": "node scripts/setup-playwright.mjs",
+    "wiki:publish": "node scripts/publish-wiki.mjs",
+    "wiki:check": "node scripts/publish-wiki.mjs --check",
+    "wiki:preview": "node scripts/preview-wiki.mjs"
   },
   "devDependencies": {
     "@types/jsdom": "^21.1.7",

@@ -2,6 +2,43 @@
 
 Persistent notes for future coding sessions.
 
+## Project wiki (2026-09-20)
+
+- **The wiki is generated, not hand-maintained.** Pages live in `wiki/` as ordinary
+  Markdown (one file per page, file name = page name, hyphenated) and
+  `node scripts/publish-wiki.mjs` publishes the directory to the GitHub page wiki as
+  a single commit. Also available as `npm run wiki:check` / `npm run wiki:publish`.
+- **Why in-repo:** documentation should review like code and stay diffable against
+  the source it describes. Consequence: publishing *replaces* the wiki with `wiki/`,
+  so an edit made in the GitHub web UI is overwritten by the next publish — port it
+  into `wiki/` instead.
+- **27 pages** (Home, `_Sidebar`, `_Footer`, plus 24 content pages: playing,
+  per-system references, architecture/protocol/persistence, testing, performance,
+  roadmap, contributing, glossary). `wiki/README.md` states the page rules and the
+  "you changed X → also update Y" table.
+- **Numbers are quoted from code, never remembered:** balance and status claims come
+  from `src/sim/config.ts`, `src/sim/defs.ts`, `difficulty.ts`,
+  `engineering/upgrades.ts`, the docs, and a live `npm test` (currently
+  *87 suites / 983 checks*). If you change a constant that a page quotes, change the
+  page in the same PR — `Grep: wiki/ <old-value>` finds them.
+- **`npm run wiki:preview` serves `wiki/` like the GitHub wiki does**
+  (`scripts/preview-wiki.mjs`, `marked` resolved at runtime via
+  `npm i --no-save marked` — intentionally not a project dependency). It rewrites the
+  same relative links to local routes, so clicking around the preview is a real link
+  test of the whole wiki before anything is published.
+- **Publisher checks (`--check`) run before every publish** and fail the run on:
+  a relative link that is not a `Page.md` sibling, a missing anchor in our own pages,
+  a missing `assets/` file, a page without a `# Title` or the Home breadcrumb, an
+  illegal page name, a stray `[[Gollum]]` link, and pages orphaned from Home/Sidebar.
+- **Links:** sibling pages are written `[Text](Page-Name.md)` so the file reads
+  correctly *in the repo*, and the publisher rewrites them to `Page-Name` for the
+  wiki (147 rewrites today). Links to **code** stay absolute
+  `https://github.com/iant89/red-frontier/blob/main/...`, because the wiki is a
+  different repository from the source.
+- **Images:** `wiki/assets/*.jpg` (~1100 px, derived from `screenshots/`) are
+  committed and copied into the wiki repo, so `![alt](assets/x.jpg)` resolves in
+  both places.
+
 ## Engineering & customization (2026-09-20)
 
 - **Interaction:** right-click any built rover/building entity on desktop, or
@@ -547,6 +584,16 @@ Persistent notes for future coding sessions.
 - `src/audio/AudioSystem.ts` is presentation-only procedural Web Audio: it never writes sim state, starts on the first real input gesture to satisfy autoplay policy,
   and is deliberately updated at simulation speed 0 so paused colonies retain environmental ambience and brownout/storm reminders. Keep new `SimCommand` values
   represented in its exhaustive `COMMAND_CUES` map; `tests/audio/system.test.ts` pins that contract.
+
+- **GitHub has no REST API for wiki pages, and `contents: write` is not enough to publish one.** A GitHub page wiki is a *separate* repository (`<owner>/<repo>.wiki.git`)
+  that GitHub only materialises once the wiki has a page, and which needs the repository permission **“Wikis: Write”**. Both cases answer
+  `remote: Repository not found.` over HTTPS — indistinguishable from a missing repo, so `scripts/publish-wiki.mjs` treats "cannot reach it" as "try to create it"
+  and prints the two causes with a preserved commit to push by hand. Verify with `git ls-remote https://github.com/<owner>/<repo>.wiki.git` before assuming a bug in
+  the tooling. A wiki's default branch is **not** always `main` — wikis created before
+  GitHub's rename live on `master`, and pushing `main` beside one produces a branch
+  nobody renders. `publish-wiki.mjs` therefore resolves the target from
+  `git ls-remote --symref <wiki-url> HEAD` (falling back to the source repo's default,
+  then `main`) unless `--branch` is given explicitly.
 
 ## Descent stage (the pod, given a body)
 
