@@ -3365,6 +3365,42 @@ Do not make arbitrary performance requirements before profiling.
 
 The baseline should be generated from actual measurements.
 
+## Recorded (Phase 28 complete — 2026-09-19)
+
+Implemented on `arena/01a0bab6-red-frontier`.
+
+**Performance benchmarking harness (`src/sim/debug/Benchmark.ts`):**
+- Standardized scaling benchmarks across fleet sizes (10, 25, 50, 100, 250 rovers).
+- Measured metrics per fleet size:
+  - Simulation tick duration (average & peak)
+  - Navgrid pathfinding query throughput
+  - View model projection time (`projectView`)
+  - Worker transport overhead (`structuredClone` + `mirror.apply`)
+  - Serialized payload size
+- Added CLI benchmark tool: `npm run test:bench` (`scripts/benchmark.mjs`).
+
+**Measured Scaling Baseline:**
+
+| Fleet Size | Avg Tick | Peak Tick | Pathfind | View Gen | Clone+Apply | Payload Size |
+|---|---|---|---|---|---|---|
+| 10 rovers | 0.50 ms | 6.81 ms | 0.15 ms | 0.94 ms | 0.50 ms | 18.9 KB |
+| 25 rovers | 0.58 ms | 5.10 ms | 0.23 ms | 0.18 ms | 0.33 ms | 29.2 KB |
+| 50 rovers | 1.10 ms | 7.49 ms | 0.02 ms | 0.44 ms | 0.63 ms | 46.4 KB |
+| 100 rovers | 1.40 ms | 3.96 ms | 0.02 ms | 0.20 ms | 0.86 ms | 81.1 KB |
+| 250 rovers | 4.73 ms | 11.53 ms | 0.02 ms | 0.31 ms | 1.92 ms | 184.8 KB |
+
+Even with 250 rovers, avg tick (4.7ms) consumes <10% of the 50ms `SIM_TICK` budget, and 100-rover worker transport + view gen consumes <1.1ms (well within a 16.6ms 60fps frame).
+
+**Automated Regression Suite (`tests/sim/performance-regression.test.ts`):**
+- 6 checks enforcing conservative performance thresholds (preventing quadratic regressions or serialization blowups) and verifying bit-for-bit determinism under benchmark load.
+
+**Gate results**
+- `npm run typecheck`: green (0 errors)
+- `npm test`: 74 suites / 854 checks green (`tests/sim/performance-regression.test.ts` +6 checks)
+- `npm run test:bench`: green
+- `npm run test:replay`: all 3 canonical scenarios pass
+- `behavior-baseline`: byte-identical (2,400 ticks, two seeds)
+
 
 # 33. Phase 29 — Large-Colony Stress Tests
 

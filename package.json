@@ -21,6 +21,7 @@
     "test:list": "node scripts/run-tests.mjs --list",
     "test:check": "node scripts/run-tests.mjs --check",
     "test:replay": "node scripts/replay-transcript.mjs --canonical",
+    "test:bench": "node scripts/benchmark.mjs",
     "test:smoke": "node scripts/mobile-smoke.mjs",
     "setup:playwright": "node scripts/setup-playwright.mjs"
   },

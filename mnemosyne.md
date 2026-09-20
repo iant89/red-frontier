@@ -769,6 +769,13 @@ Persistent notes for future coding sessions.
   roadmap's Phase 12 block.
 
 
+## Refactor Phase 28 (Performance Regression Tests) — fleet scaling & benchmark thresholds
+
+- **Scaling benchmark harness**: `src/sim/debug/Benchmark.ts` and `scripts/benchmark.mjs` (`npm run test:bench`) measure tick time, pathfinding, view generation, worker transport, and payload size across 10, 25, 50, 100, and 250 rovers.
+- **Measured baseline**: 100 rovers execute ticks in ~1.4ms (budget: 50ms `SIM_TICK`), worker transport + view gen takes <1.1ms (frame budget: 16.6ms), payload 81 KB. 250 rovers execute ticks in ~4.7ms.
+- **Regression suite**: `tests/sim/performance-regression.test.ts` (+6 checks) enforces scaling thresholds to catch quadratic loops and serialization regressions.
+- Gate on completion (2026-09-19): 74 suites / 854 checks green, typecheck green, baseline byte-identical.
+
 ## Refactor Phase 27 (Simulation State Hashing) — domain section hashing & divergence diffing
 
 - **Domain-isolated section hashing**: `hashSimulationSection(sim, section)` and `hashSimulationSections(sim)` across 7 authoritative simulation domains (`core`, `weather`, `resources`, `rovers`, `buildings`, `colonist`, `world`).
