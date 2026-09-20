@@ -40,10 +40,11 @@ export interface WorkerInit {
   /** Exactly one of these: a fresh colony, or one being resumed. */
   boot?: SimBootParams;
   restore?: SimSnapshot;
+  transport?: SimTransport;
 }
 
 export class WorkerSimHost implements SimHost {
-  readonly transport: SimTransport = 'worker';
+  readonly transport: SimTransport;
 
   private readonly port: HostPort;
   private readonly mirror: ColonyMirror;
@@ -65,10 +66,11 @@ export class WorkerSimHost implements SimHost {
    */
   private readonly waiting = new Map<number, { fulfill: (reply: HostReply) => void; reject: (e: Error) => void }>();
 
-  private constructor(port: HostPort, mirror: ColonyMirror, first: ViewPayload) {
+  private constructor(port: HostPort, mirror: ColonyMirror, first: ViewPayload, transport: SimTransport = 'worker') {
     this.port = port;
     this.mirror = mirror;
     this.nextId = first.nextId;
+    this.transport = transport;
     port.onmessage = (event) => this.receive(event.data);
   }
 
@@ -95,7 +97,7 @@ export class WorkerSimHost implements SimHost {
         if (reply.kind !== 'ready' || reply.id !== id) return;
         port.onmessage = null; // the constructor installs the real handler
         try {
-          resolve(new WorkerSimHost(port, new ColonyMirror(reply.terrain, reply.view), reply.view));
+          resolve(new WorkerSimHost(port, new ColonyMirror(reply.terrain, reply.view), reply.view, init.transport ?? 'worker'));
         } catch (err) {
           reject(err instanceof Error ? err : new Error(String(err)));
         }

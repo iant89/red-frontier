@@ -3503,6 +3503,29 @@ Do not pollute the simulation with:
 
 The simulation should remain completely unaware of its transport.
 
+## Recorded (Phase 30 complete — 2026-09-20)
+
+Implemented on `arena/01a0bab6-red-frontier`.
+
+**Simulation Purity & Isolation:**
+- Verified that `src/sim/` core (excluding host browser spawners) contains 0 references to DOM (`window`, `document`), `WebSocket`, or HTTP (`fetch`, `XMLHttpRequest`).
+- Expanded `SimTransport` union to `'in-process' | 'worker' | 'network'`.
+
+**Network Wire Adapter (`src/sim/host/NetworkPort.ts`):**
+- Implemented `createNetworkHostPort(channel)` and `bindServerNetworkChannel(channel, runtime)` translating between typed `HostRequest` / `HostReply` streams and raw JSON string packets over arbitrary duplex streams (`NetworkDuplexChannel`).
+- Added `createSimulatedNetworkChannel` supporting configurable simulated network latency and packet queueing.
+
+**Network Boundary Test Suite (`tests/sim/network-boundary.test.ts`):**
+- 6 checks verifying simulation source purity, wire protocol JSON round-trip fidelity, full `NetworkSimHost` lifecycle (boot, advance, view sync, commands, domain events, snapshots) over raw string streams, and network flight latency resilience.
+
+**Gate results**
+- `npm run typecheck`: green (0 errors)
+- `npm test`: 76 suites / 866 checks green (`tests/sim/network-boundary.test.ts` +6 checks)
+- `npm run test:stress`: green
+- `npm run test:bench`: green
+- `npm run test:replay`: all canonical scenarios pass
+- `behavior-baseline`: byte-identical (2,400 ticks, two seeds)
+
 
 # 35. Things NOT to Modify
 

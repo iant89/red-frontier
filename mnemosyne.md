@@ -769,6 +769,14 @@ Persistent notes for future coding sessions.
   roadmap's Phase 12 block.
 
 
+## Refactor Phase 30 (Optional Future Network Boundary) — pure transport seam & string wire adapter
+
+- **Simulation isolation guarantee**: Verified that the simulation core contains 0 references to DOM, `window`, `document`, `WebSocket`, or `fetch`.
+- **Network wire adapter**: `src/sim/host/NetworkPort.ts` implements `createNetworkHostPort` and `bindServerNetworkChannel` adapting typed `HostRequest`/`HostReply` streams to/from serialized JSON string packets over duplex network channels (`NetworkDuplexChannel`).
+- **Transport expansion**: `SimTransport` union expanded to `'in-process' | 'worker' | 'network'`.
+- **Network boundary test suite**: `tests/sim/network-boundary.test.ts` (+6 checks) validates simulation purity, wire protocol serialization, full network host lifecycle, and latency resilience.
+- Gate on completion (2026-09-20): 76 suites / 866 checks green, typecheck green, baseline byte-identical.
+
 ## Refactor Phase 29 (Large-Colony Stress Tests) — 100 rovers, 250+ buildings, sustained storm & logistics
 
 - **Stress scenario generator**: `src/sim/debug/LargeColonyScenario.ts` creates a deterministic high-load colony (100 rovers, 255 buildings, active severe storm, multi-site construction, mining/hauling repeat-routes, and exploration).

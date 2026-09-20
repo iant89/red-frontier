@@ -74,5 +74,11 @@ export { ColonyMirror, type TerrainParams } from './mirror';
 export { projectView, type ViewPayload, type WeatherPayload, type PowerPayload } from './projection';
 export { evaluateSite, maintenanceNeed, type SitingInput, type SitingGround } from '../rules';
 export type { HostRequest, HostReply, HostPort } from './messages';
+export {
+  createNetworkHostPort,
+  bindServerNetworkChannel,
+  createSimulatedNetworkChannel,
+  type NetworkDuplexChannel,
+} from './NetworkPort';
 
 export type { DomainEvent, DomainEventType } from '../domainEvents';
