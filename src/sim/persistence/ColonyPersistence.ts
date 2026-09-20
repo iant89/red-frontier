@@ -23,7 +23,12 @@ import {
 import {
   ROVERS,
   BUILDINGS,
+  MINEABLE_RESOURCES,
+  ALL_COMPONENTS,
   emptyAmounts,
+  emptyComponents,
+  type ComponentAmounts,
+  type MineableResourceId,
   type RoverKind,
   type BuildingKind,
 } from '../defs';
@@ -35,6 +40,7 @@ import {
 import { POI_KINDS, type PoiKind } from '../pois';
 import { coerceTask } from './SaveValidator';
 import type { SaveState } from './SaveSchema';
+import { CURRENT_SAVE_VERSION } from './SaveSchema';
 import type { ColonyState } from '../state/ColonyState';
 import {
   resetExplorationState,
@@ -46,6 +52,7 @@ import {
   type RoverPhase,
   type RoverGoal,
 } from '../state/RoverState';
+import { emptyCraft } from '../state/BuildingState';
 import { ClockSystem } from '../systems/ClockSystem';
 import { WeatherSystem } from '../systems/WeatherSystem';
 import { PowerSystem } from '../systems/PowerSystem';
@@ -56,7 +63,9 @@ import { HistorySystem } from '../systems/HistorySystem';
 /** Build a SaveState from live ColonyState — former Simulation.snapshot body. */
 export function snapshotColony(state: ColonyState): SaveState {
   return {
-    version: SAVE_VERSION as 8,
+    // No literal cast: the snapshot's version *is* the schema's current one,
+    // so bumping SAVE_VERSION cannot silently write a stale header.
+    version: CURRENT_SAVE_VERSION,
     seed: state.seed,
     difficulty: state.difficulty,
     worldHalf: state.world.half,
@@ -66,6 +75,7 @@ export function snapshotColony(state: ColonyState): SaveState {
     ticksRun: state.ticksRun,
     clock: state.clock.snapshot() as { sol: number; frac: number },
     storage: { ...state.storage },
+    components: { ...state.components },
     fluids: { ...state.pools.amounts },
     storedKWh: state.storedKWh,
     gameOver: state.gameOver,
@@ -142,6 +152,8 @@ export function snapshotColony(state: ColonyState): SaveState {
       cleanliness: b.cleanliness,
       damaged: b.damaged,
       assembly: b.assembly ? { ...b.assembly } : null,
+      recipe: b.recipe,
+      craft: { ...b.craft },
     })),
     weather: state.weather.snapshot() as SaveState['weather'],
     alerts: state.alerts.snapshot() as SaveState['alerts'],
@@ -168,6 +180,14 @@ export function restoreColony(state: ColonyState, data: SaveState): void {
   // Phase 5: weather rebuild + derived flags delegated to WeatherSystem
   WeatherSystem.restore(state, data.weather);
   state.storage = { ...emptyAmounts(), ...(data.storage ?? {}) };
+  // Components are whole units: a save that claims a fraction of a motor (or a
+  // negative one, or a NaN) is not trusted with it.
+  state.components = emptyComponents();
+  const savedComponents = (data as { components?: Partial<ComponentAmounts> }).components ?? {};
+  for (const c of ALL_COMPONENTS) {
+    const n = savedComponents[c];
+    state.components[c] = Number.isFinite(n) ? Math.max(0, Math.floor(n as number)) : 0;
+  }
   state.gameOver = data.gameOver ?? null;
 
   state.world = new World({
@@ -176,16 +196,23 @@ export function restoreColony(state: ColonyState, data: SaveState): void {
     worldHalf: Number.isFinite(data.worldHalf) ? data.worldHalf : 640,
     region: typeof data.region === 'string' ? data.region : null,
   });
-  state.world.deposits = (data.deposits ?? []).map((d) => ({
-    id: d.id,
-    resource: d.resource,
-    x: d.x,
-    z: d.z,
-    amount: d.amount,
-    maxAmount: d.maxAmount,
-    radius: d.radius,
-    reservedBy: Number.isFinite(d.reservedBy as unknown as number) ? (d.reservedBy as number) : null,
-  }));
+  // A seam is always of a *mined* material: refined resources (steel, P5) have
+  // no deposits, so a save that claims one is hand-edited and the row is dropped
+  // rather than trusted.
+  state.world.deposits = (data.deposits ?? [])
+    .filter((d) => d && (MINEABLE_RESOURCES as string[]).includes(d.resource))
+    .map((d) => ({
+      id: d.id,
+      resource: d.resource as MineableResourceId,
+      x: d.x,
+      z: d.z,
+      amount: d.amount,
+      maxAmount: d.maxAmount,
+      radius: d.radius,
+      reservedBy: Number.isFinite(d.reservedBy as unknown as number)
+        ? (d.reservedBy as number)
+        : null,
+    }));
   if (Array.isArray(data.pois)) {
     state.world.setPois(
       (data.pois as unknown as Array<Record<string, unknown>>)
@@ -270,6 +297,20 @@ export function restoreColony(state: ColonyState, data: SaveState): void {
         ? { kind: (b.assembly as { kind: RoverKind }).kind, progress: (b.assembly as { progress: number }).progress ?? 0 }
         : null,
     level: 1,
+    // A v9 save has neither field: recipe 0 is "the first line" (and is ignored
+    // by a kind with no recipe list), and an empty bench is what a colony that
+    // has never crafted anything actually has.
+    recipe: Number.isInteger(b.recipe) && (b.recipe as number) >= 0 ? (b.recipe as number) : 0,
+    craft: (() => {
+      const craft = emptyCraft();
+      const saved = (b.craft ?? {}) as Partial<ComponentAmounts>;
+      for (const c of ALL_COMPONENTS) {
+        const n = saved[c];
+        // Work in progress is a fraction in [0, 1): clamp rather than trust.
+        craft[c] = Number.isFinite(n) ? Math.min(1, Math.max(0, n as number)) : 0;
+      }
+      return craft;
+    })(),
   }));
 
   // Phase 11: execution state (goal/phase) is rebuilt from the task + world.

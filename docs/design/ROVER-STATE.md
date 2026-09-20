@@ -96,6 +96,25 @@ parks for a repeat route, sends the rover out again, or finishes the task.
 `unload` was a `RoverGoal` member that no code path ever assigned — a state that
 cannot be entered. Phase 11 deleted it.
 
+### Speed is derived, not stored
+
+Nothing in the rover's state records how fast it is going. `moveRover` computes it
+per tick as `def.cruiseSpeed × proximitySpeedMul(state, r)`, where the multiplier is
+the proximity crawl from issue #11: 1 when the hull-clearance bubble
+(`ROVER_PROXIMITY_CLEARANCE_M = 1.5`, or `…COLONY_CLEARANCE_M = 3.0` inside the pad
+yard) is empty, otherwise an immediate drop to 28 % / 15 % — never 0, so a
+nose-to-nose pair keeps inching. Three consequences for this state model:
+
+1. There is **no new field** to persist, rehydrate, or hash — a restored rover
+   re-derives its crawl from wherever it happens to be standing.
+2. It changes **speed only**, never `goal` or `phase`: a crawling rover is still
+   `moving` on the same task. No re-path, no alert, no interruption.
+3. The current goal's **destination is exempt** once inside arrival reach, which is
+   load-bearing: without it a builder crawling up to its own site (or a rescuer
+   closing on a stranded rover) never reaches arrival and the job hangs. Move power
+   scales with the multiplier so a crawl is a brake, not a battery tax; drivetrain
+   wear does not (the wheels are still turning).
+
 ### Conditions that outrank the task
 
 `updateRover` consults these **before** the command switch, which is why a rover

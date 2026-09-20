@@ -13,7 +13,8 @@
  *     host command      →  Simulation.assembleRover  →  GarageSystem.assemble
  *
  * Cross-domain seams (not owned here):
- *   - Material affordability / spend → ConstructionSystem (ledger)
+ *   - Material affordability / spend → ConstructionSystem (bulk kg ledger)
+ *   - Component affordability / spend → ComponentSystem (counted-unit ledger, P5)
  *   - Rover spawn                    → RoverSystem.spawn
  *   - Power saturation               → PowerSystem (writes `b.powerSat`)
  *
@@ -27,6 +28,7 @@
 import type { ColonyState } from '../state/ColonyState';
 import type { Building } from '../state/BuildingState';
 import { ConstructionSystem } from './ConstructionSystem';
+import { ComponentSystem } from './ComponentSystem';
 import { RoverSystem } from './RoverSystem';
 import { BUILDINGS, ROVERS, type RoverKind } from '../defs';
 import { SIM_TICK, GARAGE_SERVICE_RATE, devLevelMul } from '../config';
@@ -41,9 +43,11 @@ function event(state: ColonyState, severity: 'info' | 'warn' | 'ok', text: strin
 
 export class GarageSystem {
   /**
-   * Start assembling a rover on a garage's line. Materials leave storage up
-   * front; the build itself runs on garage power and pauses in a brownout.
-   * Same refusals and log lines Simulation.assembleRover used.
+   * Start assembling a rover on a garage's line. Materials leave storage and
+   * components leave the rack up front; the build itself runs on garage power
+   * and pauses in a brownout. Same refusals and log lines
+   * Simulation.assembleRover used — including the component shortfall (P5),
+   * which names what the line is missing rather than just saying no.
    */
   static assemble(state: ColonyState, buildingId: number, kind: RoverKind): boolean {
     const b = state.buildings.find((x) => x.id === buildingId);
@@ -67,7 +71,20 @@ export class GarageSystem {
       );
       return false;
     }
+    // P5: a rover is a machine as well as a mass of metal. Motors and boards
+    // come off the component rack — counted, not weighed — so this is a second
+    // ledger answering the same "can we afford it" question, and both answers
+    // have to be yes before *anything* is spent.
+    if (!ComponentSystem.has(state, def.componentCost)) {
+      event(
+        state,
+        'warn',
+        `Not enough components for a ${def.label} — needs ${ComponentSystem.missingList(def.componentCost)}.`,
+      );
+      return false;
+    }
     ConstructionSystem.consumeMaterials(state, def.cost);
+    ComponentSystem.consume(state, def.componentCost);
     b.assembly = { kind, progress: 0 };
     event(
       state,

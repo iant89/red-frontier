@@ -121,6 +121,13 @@ export interface SimQuery {
   needsMaintenance(buildingId: number): 'repair' | 'clean' | null;
   canPlace(kind: BuildingKind, x: number, z: number): string | null;
   storageCapacity(): number;
+  /**
+   * Rack space per component type (P5) — a method, not a field, for the same
+   * reason `storageCapacity()` is: it is derived from which workshops are
+   * standing, so the view answers it rather than carrying a copy that could go
+   * stale against the buildings list it also carries.
+   */
+  componentCapacity(): number;
   reserveSols(f: FluidId): number;
   netRatePerSol(f: FluidId): number;
 }

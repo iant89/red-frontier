@@ -29,8 +29,10 @@ work). They will drift — treat them as a starting point, not a promise.
 | 15 | Generate changelog UI data from a JSON file before merges | `build/` + `ui/` | P3 | Open |
 | 16 | Add a skybox | `render/` | P2 | Open |
 | 17 | Player can drive beyond the generated terrain on the largest map | `sim/` + `render/` | P1 | Done |
-| 18 | Add a minimap and zoomable, pannable world map | `ui/` + `render/` | P2 | Open |
+| 18 | Add a minimap and zoomable, pannable world map | `ui/` + `render/` | P2 | Done |
 | 19 | Give POIs dedicated overhead and pulsing ground markers | `render/` + `ui/` | P2 | Open |
+| 20 | Demolishing a structure left rovers queued to work on it | `sim/systems/ConstructionSystem` | P2 | Done |
+| 21 | A process could produce output its inputs never paid for | `sim/systems/ProductionSystem` | P2 | Done |
 
 ---
 
@@ -888,7 +890,7 @@ camera moves, zooms, and orbits around the generated terrain.
 
 ## 18. Add a minimap and an interactive world map
 
-**P2 · Open · `ui/` + `render/`**
+**P2 · Done · `ui/` + `render/`**
 
 > Add a minimap. Clicking it should open a zoomable, pannable map of the game
 > world.
@@ -898,29 +900,48 @@ camera moves, zooms, and orbits around the generated terrain.
 Provide a small always-available overview for navigation and a larger map view
 that can be explored without moving the simulation camera.
 
+### Resolution
+
+`src/ui/WorldMap.ts` — one 2D-canvas renderer driving two surfaces: `MapRenderer`
+(the minimap, fitted to the whole claim) and `WorldMapOverlay` (the zoomable
+overlay), with `fitTransform` / `stormOverlayKey` as the shared maths. `HUD.ts`
+mounts the `#minimap` panel (draggable, collapsible, click-to-open) and paints it
+from `SimView` only — no three.js, no sim writes. Markers are world (x, z)
+throughout, so every map size stays correct; storm cells plot at true scale
+(`STORM_KM_TO_M = 1000`) with predicted tracks when a radar is powered. Covered by
+`tests/hud/worldmap.test.ts` — which also pins the jsdom canvas stub, because a
+`getContext` returning null used to silently delete every paint path in `ui/` — and
+by `tests/render/weather-station.test.ts`.
+
 ### Acceptance criteria
 
-- [ ] A minimap is visible in the HUD and updates as the colony, rovers, POIs,
+- [x] A minimap is visible in the HUD and updates as the colony, rovers, POIs,
       and relevant world state change.
-- [ ] Clicking or tapping the minimap opens a full world-map view.
-- [ ] The world map supports zooming and panning with mouse and touch, with
+- [x] Clicking or tapping the minimap opens a full world-map view (`M` also
+      toggles it, `Esc` closes).
+- [x] The world map supports zooming and panning with mouse and touch, with
       fit-to-world and reset controls.
-- [ ] Map markers use the same world coordinates as the simulation and remain
+- [x] Map markers use the same world coordinates as the simulation and remain
       correct at every supported map size.
-- [ ] The map can be closed without changing the simulation camera or pausing
-      state unless that is an explicit design choice.
-- [ ] Keyboard focus, pointer capture, and mobile gestures do not leak into
-      normal camera controls.
-- [ ] Rendering the map does not materially reduce simulation or HUD
-      performance.
+- [x] The map can be closed without changing the simulation camera or pausing
+      state — its transform is independent of `CameraRig`, and opening it never
+      touches the clock.
+- [x] Keyboard focus, pointer capture, and mobile gestures do not leak into
+      normal camera controls (`stopPropagation` + `preventDefault` on every map
+      gesture, `setPointerCapture` while dragging, `contextmenu` suppressed).
+- [x] Rendering the map does not materially reduce simulation or HUD
+      performance (a paint key skips redraws when nothing moved; the overlay
+      paints only while visible).
 
-### Open questions
+### Open questions (answered by what shipped)
 
-- Which layers belong on the minimap by default: terrain, colony, rovers,
-  POIs, weather, destination routes, or all of them?
-- Should the expanded map be an overlay, a panel, or a separate mode on small
-  screens?
-- Should clicking a marker select/focus its entity, or only show details?
+- ~~Which layers belong on the minimap by default?~~ All of them — rovers,
+  buildings, POIs, deposits, the colonist, claim bounds and storm cells — with a
+  legend on the overlay.
+- ~~Overlay, panel, or a separate mode on small screens?~~ An overlay above the
+  play surface.
+- ~~Should clicking a marker select/focus the entity, or only show details?~~ It
+  selects, and the inspector follows; it does not move the camera.
 
 ---
 
@@ -963,6 +984,94 @@ existing POI interaction and state.
 
 ---
 
+## 20. Demolishing a structure left rovers queued to work on it
+
+**P2 · Done · `src/sim/systems/ConstructionSystem.ts`, `src/sim/state/RoverState.ts`**
+
+> Cancel a build site (or dismantle a structure) while a rover has a *queued*
+> order to work on it, and the rover keeps an order pointing at something that no
+> longer exists. When it gets there it has nothing to do, and the sim's own
+> invariant checker calls it corruption: `task-building-ref`.
+
+### Wanted
+
+Demolition is the one place a building leaves the colony, so it is the one place
+that has to take every reference to it with it — the rover's current order *and*
+everything waiting behind that order.
+
+### Resolution
+
+`ConstructionSystem.demolish` now prunes the fleet before it removes the building:
+for every rover, drop each queued task that targets the id, *then* finish the
+active task if it targets the id. The order is load-bearing — `finishTask`
+promotes `pending[0]`, so finishing first could hand the rover the very reference
+being deleted. The check also widened from `construct` to every task that names a
+building (`construct`, `clean`, `repair`) via a new pure helper,
+`RoverState.taskTargetsBuilding(task, buildingId)`, which is what
+`SimulationAssertions` already treated as one family.
+
+This was **pre-existing**, not new: measured at the base commit, the
+`sim/property-testing` rapid-placement-and-demolition property violated the
+invariant on **31 of 39** seed pairs. The P5 refining slice only surfaced it,
+because a twelfth blueprint shifts that property's RNG sequence onto a pair that
+happened to fail.
+
+### Acceptance criteria
+
+- [x] No rover task — active or queued — references a demolished building
+      (`task-building-ref` cannot be raised by a demolish).
+- [x] A rover mid-task on the demolished building is released and re-plans, as
+      before.
+- [x] A queued `clean` or `repair` for the demolished building is dropped too, not
+      just `construct`.
+- [x] The rapid-placement property holds across seed pairs, not only the one the
+      suite pins (`sim/property-testing`).
+- [x] Site material refunds and alert clearing are unchanged.
+
+---
+
+## 21. A process could produce output its inputs never paid for
+
+**P2 · Done · `src/sim/systems/ProductionSystem.ts`**
+
+> Two Water Extractors drawing on one ice silo — or, since P5, two Refineries on
+> one ore pile — could each convert a full rate's worth of output while the silo
+> only had enough input for one. The second line made water (or steel) out of
+> nothing.
+
+### Wanted
+
+"Nothing from nowhere except configured producers" (TDD §6) should hold at the
+tick level, not just on average: what a process produces in a tick must be bounded
+by what actually arrived in that tick.
+
+### Resolution
+
+`desiredThroughput` answers *per building*, before any of them draws, so it cannot
+see the competition — the fix belongs in `runProcess`. It now tracks `earned`, the
+smallest `obtained / wanted` fraction across every input (solid and fluid), and
+scales every output by it. A line that gets its full input is unchanged to the
+last bit; a line that comes up short produces proportionally less instead of
+inventing the difference. Inputs were already clamped (`LogisticsSystem.take`,
+`takeFluid`); outputs now follow the same discipline.
+
+Pinned by `tests/sim/refining.test.ts` ("two furnaces on one ore pile cannot smelt
+steel that is not there"). The 1-day stress hash moved when this landed
+(`rf1-09c307…` → `rf1-17fd8ba2b33ec1-055f4434298265`), which is the point: a
+250-building colony hits the contended case routinely.
+
+### Acceptance criteria
+
+- [x] Output mass in a tick never exceeds the blueprint yield applied to the input
+      actually consumed.
+- [x] An uncontended, fully-fed line is bit-identical to before.
+- [x] Applies to fluids as well as solids — the extractor's ice → water path had
+      the same hole.
+- [x] Storage never goes negative and no silo over-fills from a process
+      (`sim/invariants`, `sim/property-testing`, `sim/large-colony-stress`).
+
+---
+
 ## Cross-cutting notes
 
 - **#2 and #7 are coupled.** Both rework `StormEmitter`'s emission volume and
@@ -985,6 +1094,11 @@ existing POI interaction and state.
   that seeds a `DustDevil` moves when the constructor draws more.
 - **FX runs on sim time.** Anything animated (`#10`'s pulse especially) must
   freeze when the colony is paused, like the rest of the FX layer.
+- **#20 and #21 were both found by content work, not by their own suites.** A new
+  blueprint shifted a property test's RNG sequence onto a latent break, and a new
+  `solidOut` process made an old mass leak worth fixing. When a slice changes
+  `defs.ts`, expect the property and stress suites to move — re-run them, and
+  re-pin hashes only after the reason is understood.
 - **Smoke tests gate the transports.** `npm test` alone doesn't catch
   worker-transport issues — run `node scripts/mobile-smoke.mjs` and
   `scripts/worker-smoke.mjs` before calling an item done.

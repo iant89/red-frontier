@@ -226,7 +226,7 @@ export const CANONICAL_SCENARIOS = {
   foundation: {
     name: 'colony-foundation',
     description: 'Initial colony setup with warehouse, solar arrays, and rover deployment',
-    expectedHash: 'rf1-00d64469b1f8ed-045301f4e9a064',
+    expectedHash: 'rf1-1d7ae6c1b30534-0db8f0413ab365',
     build: () =>
       new TranscriptBuilder(101)
         .at(0, { type: 'building/place', kind: 'warehouse', x: 40, z: 0 })
@@ -239,7 +239,7 @@ export const CANONICAL_SCENARIOS = {
   logistics: {
     name: 'logistics-haul-loop',
     description: 'Iron mining with automated repeat-route hauling to silos',
-    expectedHash: 'rf1-1b403011c4e077-15884ea6a10eb6',
+    expectedHash: 'rf1-04698eb32329c3-1bd5148e7c7808',
     build: () =>
       new TranscriptBuilder(2026)
         .at(0, { type: 'rover/mine', roverId: 1000, depositId: 1, queue: false })
@@ -250,7 +250,7 @@ export const CANONICAL_SCENARIOS = {
   severeStorm: {
     name: 'severe-storm-protocol',
     description: 'Severe storm onset, rover shelter rules, colonist EVA recall, and storm clearance',
-    expectedHash: 'rf1-050d43576ad423-12a3abe54893ea',
+    expectedHash: 'rf1-1e512ca8a160cd-07318129a675dd',
     build: () =>
       new TranscriptBuilder(303)
         .at(0, { type: 'dev/storm/force', kind: 'severe' })

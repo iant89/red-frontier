@@ -246,6 +246,24 @@ body {
   background: var(--warn);
 }
 
+/* P5 — the component rack: same glance as the resource chips, but it counts
+   units against rack space instead of kg against silo space, so it sits apart
+   from them and reads a little smaller. Hidden entirely until a workshop gives
+   the colony a rack to hold anything. */
+.comp-rack {
+  flex: 0 1 auto;
+  gap: 4px;
+}
+
+.res-chip.comp {
+  min-width: 62px;
+  border-style: dashed;
+}
+
+.res-chip.comp .n {
+  font-size: 11.5px;
+}
+
 /* ------------------------------------------------------------ buttons --- */
 .toolbar {
   display: flex;

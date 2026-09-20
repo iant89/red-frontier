@@ -24,8 +24,8 @@
  * the shape is declared once and used for both.
  */
 
-import type { BuildingKind, ResourceId, RoverKind } from '../defs';
-import { BUILDINGS, RESOURCES, ROVERS } from '../defs';
+import type { BuildingKind, MineableResourceId, ResourceId, RoverKind } from '../defs';
+import { BUILDINGS, MINEABLE_RESOURCES, RESOURCES, ROVERS } from '../defs';
 import type { ColonistOrder } from '../lifesupport';
 import type { StormKindReal } from '../weather';
 
@@ -61,7 +61,13 @@ export type BuildingCommand =
   | { type: 'building/toggle'; buildingId: number; enabled: boolean }
   | { type: 'building/demolish'; buildingId: number }
   | { type: 'building/maintain'; buildingId: number }
-  | { type: 'building/assemble'; buildingId: number; kind: RoverKind };
+  | { type: 'building/assemble'; buildingId: number; kind: RoverKind }
+  /**
+   * Which production line a building runs (P5). `recipe` is an index into
+   * `RECIPES[kind]`; the sim refuses — and says why in the log — an index the
+   * blueprint does not have, so a stale panel cannot desync the tick.
+   */
+  | { type: 'building/recipe'; buildingId: number; recipe: number };
 
 /**
  * Colonist orders (TDD §14).
@@ -87,7 +93,7 @@ export type DevCommand =
   | { type: 'dev/lightning/strike' }
   | { type: 'dev/spawn/rover'; kind: RoverKind; x: number; z: number }
   | { type: 'dev/spawn/building'; kind: BuildingKind; x: number; z: number }
-  | { type: 'dev/spawn/deposit'; resource: ResourceId; x: number; z: number; kg: number }
+  | { type: 'dev/spawn/deposit'; resource: MineableResourceId; x: number; z: number; kg: number }
   | { type: 'dev/building/complete'; buildingId: number }
   | { type: 'dev/building/level'; buildingId: number; level: number }
   | { type: 'dev/building/health'; buildingId: number; pct: number }
@@ -133,6 +139,7 @@ export const PLAYER_COMMAND_TYPES: readonly PlayerCommandType[] = [
   'building/demolish',
   'building/maintain',
   'building/assemble',
+  'building/recipe',
   'colonist/order',
 ];
 
@@ -235,9 +242,11 @@ type FieldKind =
   | 'buildingKind'
   | 'roverKind'
   | 'resourceId'
+  | 'mineableResourceId' // a ResourceId with a seam — refined materials are rejected
   | 'stormKind'
   | 'rule'
-  | 'order';
+  | 'order'
+  | 'index'; // non-negative integer list position (a recipe), bounded — not an id
 
 interface CommandShape {
   /** field → kind. Every field must be listed; unknown keys are rejected. */
@@ -269,6 +278,7 @@ export const COMMAND_SHAPES: Record<SimCommandType, CommandShape> = {
   'building/demolish': { buildingId: 'id' },
   'building/maintain': { buildingId: 'id' },
   'building/assemble': { buildingId: 'id', kind: 'roverKind' },
+  'building/recipe': { buildingId: 'id', recipe: 'index' },
   'colonist/order': { order: 'order' },
   'dev/time': { sol: 'id', frac: 'unit' },
   'dev/storm/force': { kind: 'stormKind' },
@@ -278,7 +288,7 @@ export const COMMAND_SHAPES: Record<SimCommandType, CommandShape> = {
   'dev/lightning/strike': {},
   'dev/spawn/rover': { kind: 'roverKind', x: 'coord', z: 'coord' },
   'dev/spawn/building': { kind: 'buildingKind', x: 'coord', z: 'coord' },
-  'dev/spawn/deposit': { resource: 'resourceId', x: 'coord', z: 'coord', kg: 'amount' },
+  'dev/spawn/deposit': { resource: 'mineableResourceId', x: 'coord', z: 'coord', kg: 'amount' },
   'dev/building/complete': { buildingId: 'id' },
   'dev/building/level': { buildingId: 'id', level: 'pct' },
   'dev/building/health': { buildingId: 'id', pct: 'pct' },
@@ -319,12 +329,18 @@ function fieldOk(value: unknown, kind: FieldKind): boolean {
       return typeof value === 'string' && value in ROVERS;
     case 'resourceId':
       return typeof value === 'string' && value in RESOURCES;
+    case 'mineableResourceId':
+      return typeof value === 'string' && (MINEABLE_RESOURCES as string[]).includes(value);
     case 'stormKind':
       return typeof value === 'string' && STORM_KINDS.includes(value);
     case 'rule':
       return typeof value === 'string' && ROVER_RULES.includes(value);
     case 'order':
       return isColonistOrder(value);
+    case 'index':
+      // Bounded because it addresses a hand-authored table, not an entity:
+      // anything past a few hundred is a corrupt or hand-made command.
+      return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 255;
   }
 }
 

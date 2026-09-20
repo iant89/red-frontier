@@ -27,7 +27,7 @@ import type { FluidPools } from '../lifesupport';
 import type { Alert, LogEvent, Severity } from '../alerts';
 import type { DomainEvent } from '../domainEvents';
 import type { SunState } from '../clock';
-import type { BuildingKind, FluidId, ResourceAmounts } from '../defs';
+import type { BuildingKind, ComponentAmounts, FluidId, ResourceAmounts } from '../defs';
 import type { PowerResult } from '../power';
 import type { DifficultyId, WorldOptions } from '../difficulty';
 import { evaluateSite, maintenanceNeed } from '../rules';
@@ -275,6 +275,12 @@ export class ColonyMirror implements SimView {
   }
   get storage(): ResourceAmounts {
     return this.payload.storage;
+  }
+  get components(): ComponentAmounts {
+    return this.payload.components;
+  }
+  componentCapacity(): number {
+    return this.payload.componentCapacity;
   }
   get pools(): FluidPools {
     return this.payload.pools;

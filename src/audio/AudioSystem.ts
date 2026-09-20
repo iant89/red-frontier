@@ -136,6 +136,7 @@ const COMMAND_CUES: Record<SimCommandType, AudioCue> = {
   'building/demolish': 'demolish',
   'building/maintain': 'repair',
   'building/assemble': 'assemble',
+  'building/recipe': 'toggle',
   'colonist/order': 'suit',
   'dev/time': 'developer',
   'dev/storm/force': 'storm',

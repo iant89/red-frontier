@@ -16,10 +16,13 @@ import { migrateSave } from './SaveMigrations';
  *
  * Throws:
  * - "empty save" if data is null, undefined, or not an object (legacy behavior)
- * - "unsupported save version X" if version missing or outside 3..8
+ * - "unsupported save version X" if the version is missing, below the oldest
+ *   migration we kept (v3), or above `CURRENT_SAVE_VERSION` — a save from a
+ *   future build is refused rather than guessed at
  *
- * After version check, runs migrations v3..v7 → v8.
- * Returns the migrated object as SaveState (still loosely typed but version is 8).
+ * After the version check, runs the migration chain to the current version.
+ * Returns the migrated object as SaveState (still loosely typed, but on the
+ * current schema — field-level defaults are the restorer's job, not this one).
  *
  * The caller (Simulation.restore) is responsible for applying safe defaults
  * for missing arrays / fields (storage, fluids, etc.) — this codec only ensures

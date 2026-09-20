@@ -65,6 +65,14 @@ export const START_SOL_FRAC = 0.34;
  */
 export const BASE_STORAGE_PER_RESOURCE = 260;
 
+/**
+ * Component rack space with no workshop standing (P5). Zero on purpose: the
+ * landing pod has no machine shop, so a colony cannot hold — or craft — a single
+ * motor until it builds one. Same bootstrap logic as the Refinery for steel, one
+ * step further down the chain.
+ */
+export const BASE_COMPONENT_SLOTS = 0;
+
 // ------------------------------------------------------------ landing pod ----
 
 /**
@@ -447,8 +455,15 @@ export const DROP_RING_OUTER_FRAC = 0.85;
 
 export const AUTOSAVE_INTERVAL_S = 45;
 
-/** Current save schema version. Bump whenever the snapshot shape changes. */
-export const SAVE_VERSION = 8;
+/**
+ * Current save schema version. Bump whenever the snapshot shape changes.
+ *
+ * v9 (P5.1): the bulk ledger gains `steel`, a refined resource, and the heavy
+ * blueprints start costing it. Additive — see `persistence/migrations/v8.ts`.
+ * v10 (P5.2): the component ledger, a per-building `recipe` selection and the
+ * bench's work in progress. Additive — see `persistence/migrations/v9.ts`.
+ */
+export const SAVE_VERSION = 10;
 
 // -------------------------------------------------------------- history ----
 
