@@ -1,6 +1,6 @@
 # Red Frontier — Performance Baseline (Phase 0)
 
-*Recorded 2026-09-20, `SAVE_VERSION = 13`, commit `arena/01a0c041-red-frontier` base.*
+*Recorded 2026-09-20, `SAVE_VERSION = 15`, commit `arena/01a0c09f-red-frontier`.*
 *Node 22, 2 CPU workers, software GL (CI uses same).*
 
 This file is the Phase 0 baseline the commercial roadmap review asks for.
@@ -45,7 +45,7 @@ Measured 2026-09-20:
 - Heap: ~108 MB at end (no leak)
 - Max pending queue: 0 (bounded ≤10 enforced)
 - Active reservations: unique, no duplicates
-- Final StateHash: `rf1-17f926380467a3-0b6ffd671d40ac` (pinned in `tests/sim/large-colony-stress.test.ts`)
+- Final StateHash: `rf1-0602d23cbf6d99-10335f00abe039` (pinned in `tests/sim/large-colony-stress.test.ts`)
 - All invariants green
 
 7-day run (`--days 7`, 33,600 ticks) is supported but not run in CI by default.
@@ -56,9 +56,9 @@ Source: `src/sim/debug/Transcript.ts`, `scripts/replay-transcript.mjs`
 
 | Scenario | Seed | Ticks | Final Hash | Suite |
 |---|---|---|---|---|
-| colony-foundation | 101 | 800 | `rf1-14ed7eb836dc03-1164ec0689266e` | `sim/transcript` |
-| logistics-haul-loop | 2026 | 2000 | `rf1-17bc9bdd9b5057-0117bb605da5e9` | `sim/transcript` |
-| severe-storm-protocol | 303 | 1200 | `rf1-17d5135575ee97-0ffdd05072a1d3` | `sim/transcript` |
+| colony-foundation | 101 | 800 | `rf1-0dc0246485fd22-184c3b80f61d23` | `sim/transcript` |
+| logistics-haul-loop | 2026 | 2000 | `rf1-0aaa36bcc0b488-03d7d73ca3bcb8` | `sim/transcript` |
+| severe-storm-protocol | 303 | 1200 | `rf1-0aed83ab454620-0556950a99cfac` | `sim/transcript` |
 
 These hashes are pinned in both `Transcript.ts` (`CANONICAL_SCENARIOS`) and
 `tests/sim/transcript.test.ts`. Changing tick behavior must update them
@@ -76,7 +76,7 @@ tank + pump) and runs for 5 sols.
 Artifacts:
 
 - `golden-colony.transcript.json` — seed + commands + duration (diffable)
-- `golden-colony.hash.txt` — pinned final StateHash
+- `golden-colony.hash.txt` — pinned final StateHash (`rf1-024150dbf13fe8-03093564627b23`, re-pinned 2026-09-20 for save v15)
 - `golden-colony.save.json` — snapshot for manual inspection
 - `README.md` — how to regenerate
 

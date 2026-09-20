@@ -45,7 +45,7 @@ test('1 simulated day (4800 ticks) survives full day-night cycle and weather wea
   const result = runStressSimulation(sim, 4800, 1200);
   assert.equal(result.ticksRun, 4800);
   assert.ok(sim.clock.sol >= 1, `Sol clock must cross sol 1, got sol ${sim.clock.sol}`);
-  assert.equal(result.stateHash, 'rf1-0e69da95974d60-01fac118bd387d', 'Pinned 1-day stress state hash must match');
+  assert.equal(result.stateHash, 'rf1-0602d23cbf6d99-10335f00abe039', 'Pinned 1-day stress state hash must match');
 });
 
 test('no runaway task creation: rovers maintain bounded queues', () => {

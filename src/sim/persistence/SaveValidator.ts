@@ -104,5 +104,24 @@ export function validateCurrentSaveShape(data: Record<string, unknown>): string[
   if (typeof (data as { seed?: unknown }).seed !== 'number') {
     warnings.push('missing or invalid seed');
   }
+  // Phase 2: projects and unlocks are optional (a v14 save has neither). A
+  // present-but-malformed block is a warning, never a throw — the restorer
+  // sanitises field by field, and a corrupt board must not cost the colony.
+  const objectives = (data as { objectives?: unknown }).objectives;
+  if (objectives != null && typeof objectives !== 'object') {
+    warnings.push('malformed objectives block — will default to the opening project');
+  } else if (objectives != null) {
+    const o = objectives as { active?: unknown; completed?: unknown };
+    if (o.active != null && !Array.isArray(o.active)) {
+      warnings.push('malformed objectives.active — will default to the opening project');
+    }
+    if (o.completed != null && typeof o.completed !== 'object') {
+      warnings.push('malformed objectives.completed — completed projects dropped');
+    }
+  }
+  const unlocks = (data as { unlocks?: unknown }).unlocks;
+  if (unlocks != null && typeof unlocks !== 'object') {
+    warnings.push('malformed unlocks block — will default to an empty registry');
+  }
   return warnings;
 }

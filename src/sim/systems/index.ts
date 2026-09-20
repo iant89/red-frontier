@@ -5,3 +5,4 @@ export * from './LifeSupportSystem';
 export * from './ProductionSystem';
 export * from './ConstructionSystem';
 export * from './TutorialSystem';
+export * from './ObjectiveSystem';

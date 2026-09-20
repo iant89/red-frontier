@@ -69,6 +69,12 @@ export type DomainEvent =
     }
   | { type: 'colonist/critical'; colonistId: number; health: number }
   | { type: 'game/over'; reason: string; sol: number }
+  /** Phase 2: a project came onto the board (its prerequisites landed). */
+  | { type: 'objective/offered'; project: string; sol: number }
+  /** Phase 2: every requirement of a project held on the same tick. */
+  | { type: 'objective/completed'; project: string; sol: number }
+  /** Phase 2: an unlock changed hands — granted by a project, later by a POI. */
+  | { type: 'unlock/granted'; unlock: string; sol: number }
   | { type: 'tutorial/milestone'; milestone: string; sol: number }
   | { type: 'tutorial/warning'; warning: string; sol: number }
   | { type: 'tutorial/hint'; hint: string; sol: number };

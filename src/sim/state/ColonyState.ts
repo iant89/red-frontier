@@ -68,6 +68,8 @@ import type { Building } from './BuildingState';
 import type { HistorySample } from './HistoryState';
 import { emptyFlows, type FluidFlow } from './ResourceState';
 import { emptyTutorialState, type TutorialState } from './TutorialState';
+import { emptyObjectiveState, type ObjectiveState } from './ObjectiveState';
+import { emptyUnlocks, type UnlockRegistry } from '../unlocks';
 import type { Poi } from '../pois';
 
 export interface ColonyState {
@@ -114,6 +116,23 @@ export interface ColonyState {
   dropRng: () => number;
 
   tutorial: TutorialState;
+
+  /**
+   * Phase 2: the engineering-project board — which projects are on offer and
+   * which have landed. Ids only; the content is in `sim/projects/`.
+   */
+  objectives: ObjectiveState;
+  /**
+   * Phase 2: the unlock registry — the shared primitive projects (P2), POI
+   * rewards (P7) and campaign chapters (P9) all write to and read from.
+   */
+  unlocks: UnlockRegistry;
+  /**
+   * Sol the player last issued a direct order. The autonomy streak is measured
+   * from here (AUTONOMY.md §4.1; Phase 3 owns the full stat, Phase 2 records
+   * the number so the flagship project is measurable from sol 1).
+   */
+  lastDirectOrderSol: number;
 
   simTime: number;
   ticksRun: number;
@@ -233,6 +252,8 @@ export function createColonyState(params: ColonyStateParams): ColonyState {
   let nextDropSol = DROP_FIRST_SOL_MIN + dropRng() * (DROP_FIRST_SOL_MAX - DROP_FIRST_SOL_MIN);
 
   const tutorial = emptyTutorialState();
+  const objectives = emptyObjectiveState();
+  const unlocks = emptyUnlocks();
 
   const supplies = diff.suppliesMul * suppliesMulFor(worldOptions.supplies);
   pools.amounts = {
@@ -271,6 +292,9 @@ export function createColonyState(params: ColonyStateParams): ColonyState {
     nextDropSol,
     dropRng,
     tutorial,
+    objectives,
+    unlocks,
+    lastDirectOrderSol: 0,
     simTime: 0,
     ticksRun: 0,
     remainder: 0,

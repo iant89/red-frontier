@@ -31,7 +31,7 @@ instances, no hidden ownership, no DOM.
 | | `RoverSystem.tickLights` → `updateRover` → `moveRover` (per rover) | Orders resolve into a goal/phase, then the body executes and drives |
 | | `LifeSupportSystem.tickColonist` | EVA progress and suit draw after movement |
 | | `MaintenanceSystem.tickWear` | Wear accrues from the work actually done this tick |
-| 9 | `evaluateAlerts` → `HistorySystem.tick` | Conditions become alerts, vitals get sampled |
+| 9 | `evaluateAlerts` → `TutorialSystem.tick` → `ObjectiveSystem.tick` → `HistorySystem.tick` | Conditions become alerts, first-session milestones and projects are evaluated against the post-tick state, then vitals get sampled |
 
 Production (`ProductionSystem`) is invoked through the power and life-support
 hooks rather than as its own numbered step: the grid asks a building what it
@@ -59,12 +59,14 @@ hooks rather than as its own numbered step: the grid asks a building what it
 | `FailureSystem` | failure outcomes as domain events |
 | `AlertSystem` | domain events → `state.alerts` (keys, dedupe, expiry) |
 | `HistorySystem` | vitals time series + the flow-window roll |
+| `TutorialSystem` | first-session milestones, forecast-driven warnings, the opt-in funnel |
+| `ObjectiveSystem` | the project board: what is offered, what has landed, and the unlocks it pays |
 
 ## State
 
 `src/sim/state/` holds **data with no behaviour**: `ColonyState` plus
 `RoverState`, `BuildingState`, `PowerState`, `ResourceState`, `WaterState`,
-`WeatherState`, `HistoryState`, `EntityStore`. The model is not a classic ECS —
+`WeatherState`, `HistoryState`, `TutorialState`, `ObjectiveState`, `EntityStore`. The model is not a classic ECS —
 the PDF's components map onto fields:
 
 | PDF component | As-built |

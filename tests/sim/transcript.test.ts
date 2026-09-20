@@ -204,7 +204,7 @@ test('canonical scenario 1: colony foundation is pinned and deterministic', () =
     .build();
 
   const { hash, result } = replayAndHash(t);
-  assert.equal(hash, 'rf1-0cd469ef0eaa0f-0f6a0107be8d97');
+  assert.equal(hash, 'rf1-0dc0246485fd22-184c3b80f61d23');
   assertInvariants(result.sim);
 });
 
@@ -216,7 +216,7 @@ test('canonical scenario 2: logistics repeat-route haul loop is pinned and deter
     .build();
 
   const { hash, result } = replayAndHash(t);
-  assert.equal(hash, 'rf1-078ac65c8b159b-14711ef5615c96');
+  assert.equal(hash, 'rf1-0aaa36bcc0b488-03d7d73ca3bcb8');
   assertInvariants(result.sim);
 });
 
@@ -230,7 +230,7 @@ test('canonical scenario 3: severe storm protocol and shelter recall is pinned a
     .build();
 
   const { hash, result } = replayAndHash(t);
-  assert.equal(hash, 'rf1-0e121e5b87d901-013a17ea1aefad');
+  assert.equal(hash, 'rf1-0aed83ab454620-0556950a99cfac');
   assertInvariants(result.sim);
 });
 

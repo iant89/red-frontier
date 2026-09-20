@@ -22,6 +22,8 @@ import type { PoiKind } from '../pois';
 import type { RoverTask, RoverRules, RoverPartHealth } from '../state/RoverState';
 import type { PartReplacement } from '../state/BuildingState';
 import type { TutorialState } from '../state/TutorialState';
+import type { ObjectiveState, CompletionRecord } from '../state/ObjectiveState';
+import type { UnlockRegistry, UnlockRecord } from '../unlocks';
 import { SAVE_VERSION } from '../config';
 
 // ---- sub-schemas -----------------------------------------------------------
@@ -129,6 +131,26 @@ export interface ExplorationSave {
   nextDropSol: number;
 }
 
+/**
+ * Phase 2 — the project board (v15). Both fields are optional in the type
+ * because a v14 save simply does not have them; the migration supplies the
+ * empty defaults.
+ */
+export interface ObjectiveSave {
+  active: string[];
+  completed: Record<string, CompletionRecord>;
+}
+
+/**
+ * Phase 2 — the unlock registry (v15), plus the sol the player last issued a
+ * direct order. `lastDirectOrderSol` lives at the top level because it is a
+ * colony fact, not a project fact: AUTONOMY.md's streak is measured from it.
+ */
+export interface UnlockSave {
+  unlocks: UnlockRegistry;
+  lastDirectOrderSol: number;
+}
+
 // Weather snapshot — matches Weather.snapshot() return
 export interface WeatherSave {
   rngState?: number;
@@ -194,6 +216,10 @@ export interface SaveState {
   weather: WeatherSave;
   alerts: AlertSave;
   tutorial?: TutorialState | null;
+  /** v15 — engineering projects (Phase 2). Absent on older colonies. */
+  objectives?: ObjectiveSave | null;
+  /** v15 — unlock registry + the direct-order marker (Phase 2). */
+  unlocks?: UnlockSave | null;
 }
 
 /**

@@ -8,6 +8,10 @@
  * unlocalizable is not. New player-facing copy must go through here.
  *
  * Convention:
+ * - Copy that belongs to a **data table** lives with that table — blueprint
+ *   labels in `src/sim/defs.ts`, project titles, blurbs and requirement labels
+ *   in `src/sim/projects/catalog.ts`. Duplicating it here would let the two
+ *   drift; this file is for copy that UI code would otherwise inline.
  * - Keys are dot-namespaced: `tutorial.*`, `warning.*`, `project.*`, `bottleneck.*`, `dashboard.*`, `autonomy.*`, `poi.*`, `report.*`
  * - Functions that format numbers take values, not pre-formatted strings, so translators can reorder.
  * - No DOM, no three.js, no sim imports — pure strings.
