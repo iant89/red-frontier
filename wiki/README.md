@@ -102,6 +102,12 @@ https://github.com/<owner>/red-frontier.wiki.git
   create `Home` once in the web UI
   (<https://github.com/iant89/red-frontier/wiki/_new>), then run the publisher; it
   will fast-forward from there.
+- **The target is derived from `origin`** — `<owner>/<repo>.wiki.git`, beside whatever
+  `git remote get-url origin` reports. Every spelling a remote appears in is accepted:
+  HTTPS, SSH (`git@github.com:…`, `ssh://…`), a trailing slash copied out of a browser
+  address bar, extra path segments, and a token in the authority (kept, since that is
+  how the push authenticates). A remote that is not a GitHub repository is reported
+  rather than guessed, and `--url` overrides the derivation entirely.
 - The publisher also accepts `--url`, `--branch` and `--no-push`, and prints the
   exact command to finish manually if it cannot reach the remote.
 

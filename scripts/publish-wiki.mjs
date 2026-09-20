@@ -30,6 +30,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { wikiSiteUrl, wikiUrlFromInput, wikiUrlFromRemote } from './wiki-url.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WIKI_DIR = path.join(ROOT, 'wiki');
@@ -272,13 +273,32 @@ function check() {
 
 // ------------------------------------------------------------------- publish ----
 
+/**
+ * Where to publish: `--url` when given, otherwise the wiki repository beside
+ * `origin`. `origin` is spelled differently on every machine — an HTTPS clone, an
+ * `scp`-style SSH remote, a URL with a trailing slash copied out of the browser —
+ * so the parsing lives in `scripts/wiki-url.mjs`, where the spellings are pinned by
+ * tests, and only the reporting lives here.
+ */
 function wikiUrl() {
-  if (flags.url) return flags.url;
+  if (flags.url) {
+    const url = wikiUrlFromInput(flags.url);
+    if (!url) die('--url needs a git url, e.g. --url https://github.com/<owner>/<repo>.wiki.git');
+    return url;
+  }
   const remote = git(['remote', 'get-url', 'origin'], { allowFail: true });
-  if (!remote) die('no git remote "origin" — pass --url https://github.com/<owner>/<repo>.wiki.git');
-  const m = remote.match(/github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?$/);
-  if (!m) die(`cannot derive a wiki url from remote "${remote}" — pass --url`);
-  return `https://github.com/${m[1]}/${m[2]}.wiki.git`;
+  if (remote === FAIL || !remote)
+    die('no git remote "origin" — pass --url https://github.com/<owner>/<repo>.wiki.git');
+  const url = wikiUrlFromRemote(remote);
+  if (!url)
+    die(
+      `cannot derive a wiki url from remote "${remote}"\n` +
+        '  expected a GitHub repository remote such as\n' +
+        '    https://github.com/<owner>/<repo>.git   or   git@github.com:<owner>/<repo>.git\n' +
+        '  or pass the wiki url directly:\n' +
+        '    npm run wiki:publish -- --url https://github.com/<owner>/<repo>.wiki.git',
+    );
+  return url;
 }
 
 function cfg(key, cwd) {
@@ -429,8 +449,7 @@ async function publish() {
     return;
   }
   cleanup(dest);
-  const site = url.replace(/^https:\/\/github\.com\/([^/]+)\/([^.]+)\.wiki\.git$/, 'https://github.com/$1/$2/wiki');
-  ok(`published ${written} pages to ${site}`);
+  ok(`published ${written} pages to ${wikiSiteUrl(url)}`);
 }
 
 function cleanup(dest) {
