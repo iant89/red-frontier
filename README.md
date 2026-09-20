@@ -34,6 +34,54 @@ and [`docs/design/TDD.md`](docs/design/TDD.md).
 
 ## Running it
 
+### Game Launchers & Setup Scripts (Ubuntu & Windows 11)
+
+Ready-to-use, standalone game launcher and setup scripts are located in the [`launchers/`](launchers/) directory (kept separate from internal build & test utilities in `scripts/`):
+
+#### Ubuntu / Debian Linux
+1. **Download & Setup Dependencies:**
+   ```bash
+   ./launchers/setup_ubuntu.sh
+   # (or ./launchers/setup.sh)
+   # Verifies & installs Git, Node.js LTS (>= 18), curl, and npm dependencies
+   ```
+2. **Pull Latest Source & Build Game:**
+   ```bash
+   ./launchers/update_and_build.sh
+   # (or ./launchers/build.sh)
+   # Pulls latest commits from GitHub, updates dependencies, and runs production build
+   ```
+3. **Launch Local Preview Server:**
+   ```bash
+   ./launchers/launch_preview.sh
+   # (or ./launchers/preview.sh)
+   # Starts Vite preview server at http://localhost:4173 (playable locally)
+   ```
+
+#### Windows 11
+1. **Download & Setup Dependencies:**
+   ```cmd
+   launchers\setup_windows.bat
+   # (or launchers\setup.bat)
+   # Verifies & installs Git and Node.js LTS via winget/PowerShell and installs npm packages
+   ```
+2. **Pull Latest Source & Build Game:**
+   ```cmd
+   launchers\update_and_build.bat
+   # (or launchers\build.bat)
+   # Pulls latest commits from GitHub, updates dependencies, and builds the game
+   ```
+3. **Launch Local Preview Server:**
+   ```cmd
+   launchers\launch_preview.bat
+   # (or launchers\preview.bat)
+   # Opens default browser and starts preview server on port 4173
+   ```
+
+*(See [`launchers/README.md`](launchers/README.md) for full CLI flags, unattended options, and documentation).*
+
+### Manual Commands
+
 ```bash
 npm install
 npm run dev             # local dev server (Vite), http://localhost:5173
