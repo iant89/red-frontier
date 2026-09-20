@@ -2,6 +2,70 @@
 
 Persistent notes for future coding sessions.
 
+## Commercial roadmap — Phase 2: engineering projects (2026-09-20)
+
+**Goal:** Give the player meaningful objectives beyond "build whatever you want"
+(COMMERCIAL-ROADMAP.md Phase 2, re-baselined per COMMERCIAL-ROADMAP-REVIEW.md §5 P2).
+Full spec: `docs/COMMERCIAL-PHASE-2.md`. Branch `arena/01a0c09f-red-frontier`.
+
+**What shipped (save v15, suite 94 / 1058):**
+
+- **`src/sim/projects/`** — the content, all of it. `catalog.ts` (5 projects),
+  `types.ts` (declarative requirement records), `requirements.ts` (one evaluator:
+  current / target / met). Review §3.4 kept literally: *no project logic in code,
+  only in data tables* — a chapter in P9 is a list of these records.
+- **`src/sim/unlocks.ts`** — the registry P2/P7/P9 share (§3.3): 5 ids, saved,
+  sol-stamped, with the granting id. **Inert on purpose** — no blueprint is gated
+  yet, so the first projects stay completable with the shipping building set.
+- **`ObjectiveSystem`** — ticked after alerts + tutorial, before history, so a
+  project completes against the state the player sees. Offers (prereqs landed),
+  evaluates, completes (sticky, one-way), pays unlocks, projects `_view`.
+- **`lastDirectOrderSol`** — the autonomy streak marker, written by the command
+  dispatcher (the one path every order takes, so replays are faithful). Direct
+  orders (`rover/*`, `building/*`, `water/*`, `colonist/order`) reset it;
+  `dev/*`, `engineering/*`, `tutorial/dismiss` never do — an **allow-list**, so
+  P3's future `policy/*` commands fall outside it for free. `dev/time` moves the
+  marker with the clock so a jump cannot hand out ten sols of autonomy.
+- **UI** `src/ui/ProjectsPanel.ts` — board beside the vitals (left 310, width
+  300); tutorial moved to left 618 on wide screens, stacked under the projects at
+  ≤1240, bottom chip on ≤760. Markup is a pure function (`renderProjectsHtml`) so
+  `tests/ui/projects-panel` pins the copy with no DOM.
+
+**Two content decisions worth remembering:**
+
+1. `powerStable` needed a second pass. "No brownout + battery above 15%" let a
+   colony complete Establish Survival on the tick before its machines spun up.
+   It now also demands a load *and* generation covering it: a colony drawing
+   nothing is idle, not stable.
+2. Requirements that looked free were not: storm sheltering is on by default (so
+   "sheltered rover" became "garage online"), one Battery Bank met a 200 kWh
+   floor (now 400 = two banks), and starting rations covered 60 kg (now 120).
+   Check a requirement against a *fresh* colony before trusting it.
+
+**Flagship ordering (review §3.2):** `autonomousColony` closes the chain.
+`establishSurvival` opens it; `surviveFirstStorm` and `industrialize` branch off
+survival in parallel, so a player can reach the endgame without the storm branch.
+
+**Persistence:** v14 → v15 (`migrations/v14.ts`). Unknown project/unlock ids are
+dropped, duplicates collapsed, stamps validated, invented unlocks refused. A v14
+colony gets the opening project and a direct-order marker set to *its own* sol,
+so nobody wakes up with a ten-sol head start. Board + registry are in the
+StateHash `core` section → transcript, golden-colony and stress hashes re-pinned
+(`benchmarks/baseline.md` was stale before this pass; it is current now).
+
+**How to run:**
+
+```bash
+npm run typecheck && npm test          # 94 suites / 1058 checks
+npm run test:replay && npm run test:golden
+node scripts/run-tests.mjs sim/objectives ui/projects-panel
+```
+
+**Next:** Phase 3 — PolicySystem + the AUTONOMY stat (`docs/design/AUTONOMY.md`
+already defines it; the streak it is measured from is now recorded). The playtest
+for M2 ("can a player state their current project's goal unprompted?") is the
+open item for Phase 2 itself.
+
 ## Project wiki (2026-09-20)
 
 - **The wiki is generated, not hand-maintained.** Pages live in `wiki/` as ordinary

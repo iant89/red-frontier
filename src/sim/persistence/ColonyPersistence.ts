@@ -66,6 +66,9 @@ import { LifeSupportSystem } from '../systems/LifeSupportSystem';
 import { RoverSystem } from '../systems/RoverSystem';
 import { HistorySystem } from '../systems/HistorySystem';
 import { emptyTutorialState } from '../state/TutorialState';
+import { emptyObjectiveState, type CompletionRecord } from '../state/ObjectiveState';
+import { emptyUnlocks, type UnlockRecord } from '../unlocks';
+import { projectById } from '../projects/catalog';
 
 /** Build a SaveState from live ColonyState — former Simulation.snapshot body. */
 export function snapshotColony(state: ColonyState): SaveState {
@@ -169,6 +172,14 @@ export function snapshotColony(state: ColonyState): SaveState {
     })),
     weather: state.weather.snapshot() as SaveState['weather'],
     alerts: state.alerts.snapshot() as SaveState['alerts'],
+    objectives: {
+      active: [...state.objectives.active],
+      completed: { ...state.objectives.completed },
+    },
+    unlocks: {
+      unlocks: { ...state.unlocks },
+      lastDirectOrderSol: state.lastDirectOrderSol,
+    },
     tutorial: {
       milestones: { ...state.tutorial.milestones },
       warnings: { ...state.tutorial.warnings },
@@ -377,6 +388,65 @@ export function restoreColony(state: ColonyState, data: SaveState): void {
   state.alerts.reset();
   state.domainEvents.clear();
   if (data.alerts) state.alerts.restore(data.alerts);
+
+  // v15 engineering projects — the board and the unlock registry. Both were
+  // introduced together, so a save that has one and not the other is
+  // hand-edited; each field is restored on its own merits.
+  const savedObjectives = (data as { objectives?: unknown }).objectives as
+    | { active?: unknown; completed?: unknown }
+    | undefined;
+  if (savedObjectives && typeof savedObjectives === 'object') {
+    const base = emptyObjectiveState();
+    const savedCompleted = (savedObjectives.completed ?? {}) as Record<string, unknown>;
+    for (const [id, rec] of Object.entries(savedCompleted)) {
+      // An id this build does not ship is dropped, not invented — a retired
+      // project must not leave a ghost entry on the board forever.
+      if (!projectById(id)) continue;
+      const r = rec as { sol?: unknown; tick?: unknown } | null;
+      if (!r || !Number.isFinite(r.sol as number)) continue;
+      base.completed[id as keyof typeof base.completed] = {
+        sol: Math.max(0, Number(r.sol) || 0),
+        tick: Math.max(0, Math.floor(Number(r.tick) || 0)),
+      } as CompletionRecord;
+    }
+    if (Array.isArray(savedObjectives.active)) {
+      const active: string[] = [];
+      for (const id of savedObjectives.active) {
+        if (typeof id !== 'string' || !projectById(id)) continue;
+        if (base.completed[id as keyof typeof base.completed] || active.includes(id)) continue;
+        active.push(id);
+      }
+      // A save with nothing on the board and nothing completed is a colony that
+      // has not been handed its first project yet — give it the opening one.
+      base.active = (active.length === 0 && Object.keys(base.completed).length === 0
+        ? emptyObjectiveState().active
+        : active) as typeof base.active;
+    }
+    state.objectives = base;
+  } else {
+    state.objectives = emptyObjectiveState();
+  }
+
+  const savedUnlockBlock = (data as { unlocks?: unknown }).unlocks as
+    | { unlocks?: unknown; lastDirectOrderSol?: unknown }
+    | undefined;
+  const reg = emptyUnlocks();
+  const savedUnlocks = (savedUnlockBlock?.unlocks ?? {}) as Record<string, unknown>;
+  for (const id of Object.keys(reg) as (keyof typeof reg)[]) {
+    const rec = savedUnlocks[id as string] as { sol?: unknown; tick?: unknown; source?: unknown } | null;
+    if (!rec || !Number.isFinite(rec.sol as number)) continue;
+    reg[id] = {
+      sol: Math.max(0, Number(rec.sol) || 0),
+      tick: Math.max(0, Math.floor(Number(rec.tick) || 0)),
+      source: typeof rec.source === 'string' ? rec.source : 'unknown',
+    } as UnlockRecord;
+  }
+  state.unlocks = reg;
+  // An old colony never had a direct-order marker: it starts counting from the
+  // sol it was saved on, so nobody wakes up with a ten-sol head start.
+  state.lastDirectOrderSol = Number.isFinite(savedUnlockBlock?.lastDirectOrderSol as number)
+    ? Math.max(0, Number(savedUnlockBlock?.lastDirectOrderSol))
+    : state.clock.sol;
 
   // v14 tutorial state
   const savedTut = (data as { tutorial?: unknown }).tutorial as

@@ -40,6 +40,7 @@ import { ConstructionSystem, type ConstructionHostHooks } from './systems/Constr
 import { RoverSystem } from './systems/RoverSystem';
 import { HistorySystem } from './systems/HistorySystem';
 import { TutorialSystem } from './systems/TutorialSystem';
+import { ObjectiveSystem } from './systems/ObjectiveSystem';
 
 function event(state: ColonyState, severity: 'ok' | 'info' | 'warn', text: string): void {
   state.alerts.event(severity, text, state.simTime, state.clock.format());
@@ -193,6 +194,8 @@ export const DevBackdoors = {
     WeatherSystem.afterTimeJump(state);
     HistorySystem.afterTimeJump(state);
     TutorialSystem.afterTimeJump(state);
+    // Jumping the clock forward is not ten sols of autonomy.
+    ObjectiveSystem.afterTimeJump(state);
   },
 
   forceLightningStrike(

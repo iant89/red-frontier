@@ -473,7 +473,7 @@ export const AUTOSAVE_INTERVAL_S = 45;
  * v10 (P5.2): the component ledger, a per-building `recipe` selection and the
  * bench's work in progress. Additive — see `persistence/migrations/v9.ts`.
  */
-export const SAVE_VERSION = 14;
+export const SAVE_VERSION = 15;
 
 export const WATER_PIPE_LENGTH = 20;
 export const WATER_PIPE_MAX_RUN = 200;

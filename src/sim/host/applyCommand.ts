@@ -29,6 +29,11 @@ const ACK: SimAck = { ok: true };
  * Apply one verified player command (intent execution).
  */
 export function applyPlayerCommand(sim: Simulation, cmd: PlayerCommand): SimAck {
+  // One line, on the one path every order takes: the autonomy streak is reset
+  // by intent, not by effect, so a command the sim refuses still counts as the
+  // player having taken the controls. (ObjectiveSystem decides which commands
+  // are orders — P3's AUTONOMY.md owns the classification.)
+  sim.noteOrder(cmd.type);
   switch (cmd.type) {
     // ------------------------------------------------------- rover orders ----
     case 'rover/move':

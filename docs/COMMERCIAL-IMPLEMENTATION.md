@@ -4,9 +4,9 @@
 *This file is the living tracker; the two roadmap docs are the preserved source.*
 
 Last updated: 2026-09-20
-Branch: `arena/01a0c041-red-frontier`
-Save version: 13 (tutorial additive optional, no bump — see SAVE-COMPATIBILITY.md)
-Test suite: 92 suites / 1047 checks (after Phase 1 full: forecast + strings + tutorial)
+Branch: `arena/01a0c09f-red-frontier`
+Save version: 15 (v14 tutorial, v15 projects + unlock registry — see SAVE-COMPATIBILITY.md)
+Test suite: 94 suites / 1080 checks (after Phase 2: objectives + projects-panel)
 
 ---
 
@@ -107,7 +107,7 @@ Desired reaction: "I'm building a machine that keeps itself alive."
 - [x] Clear warnings — exemplar: "Your water reserve will run dry in 1.8 sols." — DONE via TutorialSystem reserveSols <1.0 critical / <2.5 low + TutorialPanel warning copy
 - [x] "Why this matters" explanations — DONE in strings + TutorialPanel .tut-h-why
 - [x] Simplified early-game UI — DONE TutorialPanel sits top-left near vitals, progress bar, dismissible, not modal
-- [ ] Guided first engineering project (hands first objective from wizard) — deferred to P2 ObjectiveSystem, hardcoded objective in tutorial already covers first-objective milestone
+- [x] Guided first engineering project (hands first objective from wizard) — DONE by P2: `emptyObjectiveState()` puts `Establish Survival` on the board at sol 0, so the colony has an objective before the player has clicked anything
 - [x] Funnel milestone events (dev menu first, playtest builds later) — DONE funnel in TutorialState, domainEvents, persisted, bounded
 - [ ] Playtest: give to someone who never played, don't explain, watch. Repeated questions = UX problems. — NEXT (manual)
 
@@ -145,22 +145,41 @@ See `docs/COMMERCIAL-PHASE-1.md` for full spec and remaining work.
 
 ---
 
-## Phase 2 — Engineering Projects (after P1)
+## Phase 2 — Engineering Projects (DONE, 2026-09-20)
 
 **Goal:** Give player meaningful objectives beyond "build whatever you want."
 
-Original examples: ESTABLISH SURVIVAL, SURVIVE FIRST STORM, INDUSTRIALIZE, REMOTE OPERATIONS, AUTONOMOUS COLONY (10 sols no manual intervention).
+All five roadmap projects shipped, in the review's dependency-honest order.
+Full spec: `docs/COMMERCIAL-PHASE-2.md`.
 
-Re-baselined notes (review §5 P2):
+### What shipped
 
-- `ObjectiveSystem` in `sim/systems/`, ticked after alerts, writing to `ColonyState.objectives`
-- Project definitions in data table (`sim/projects/`), never in code (§3.4) — campaign (P9) then becomes content authoring
-- Progress predicates read only deterministic sim state
-- Rewards route through unlock registry (§3.3) — decide what "Advanced automation" concretely unlocks (likely colony-level policies, P3)
-- First projects completable with today's building set (protects demo cutline)
-- UI: projects panel + situation-driven pips on HUD; wizard hands first project
+- [x] **`ObjectiveSystem`** (`src/sim/systems/ObjectiveSystem.ts`) — ticked after alerts and tutorial, before history, so a project completes against the same state the player sees. Offers, evaluates, completes, pays, and projects the view.
+- [x] **Project definitions as data** (`src/sim/projects/`) — `catalog.ts` (5 projects), `types.ts` (declarative requirement records), `requirements.ts` (one pure evaluator). No project logic in code (§3.4): a chapter in P9 is a list of these records.
+- [x] **Unlock registry** (`src/sim/unlocks.ts`) — the shared primitive P2/P7/P9 need (§3.3). Saved, deterministic, sol-stamped, with the granting id. **Inert on purpose**: no blueprint is gated yet, so the first projects stay completable with today's building set.
+- [x] **First projects honest to existing entities** — Battery Bank, Weather Radar Station, RTG, garage, per-rover rules, `rover/repeatRoute`. Where the roadmap's wording had no counterpart ("Communications"), the requirement names the machine that does the job.
+- [x] **The flagship is last** (§3.2) — `autonomousColony` closes the chain; `Establish Survival` opens it and the storm/industry branches run in parallel off it.
+- [x] **UI** — `src/ui/ProjectsPanel.ts` + `#projects-panel` styles: the board beside the vitals on desktop, a headline-and-bar chip on a phone. Situation-driven pips on the HUD remain open (see the spec's remaining work).
+- [x] **Autonomy streak recorded from sol 1** — `ColonyState.lastDirectOrderSol`, written by the command dispatcher. Direct orders (`rover/*`, `building/*`, `water/*`, `colonist/order`) reset it; `dev/*`, `engineering/*` and `tutorial/dismiss` never do; `dev/time` moves the marker with the clock. AUTONOMY.md (P3) owns the full stat.
+- [x] **Save v15** — `objectives` + `unlocks` + `lastDirectOrderSol`, migration `v14.ts`, sanitising restore, validator warnings, hostile-payload cases, re-pinned hashes.
+- [x] **State hash** — objectives/unlocks/lastDirectOrderSol in the `core` section; transcript, golden-colony and stress hashes re-recorded.
+- [x] **Tests** — `tests/sim/objectives.test.ts` (22 checks), `tests/ui/projects-panel.test.ts` (6 checks), both linked in `full.test.ts`.
 
-Hidden dependency: needs unlock registry (shared primitive with P7/P9). Design unlock registry once — sim-side deterministic saved set of `unlockId`s that blueprint availability, project rewards, POI contents, chapter progression all read from.
+### Re-baselined notes (review §5 P2)
+
+| Note | Status |
+|---|---|
+| `ObjectiveSystem` in `sim/systems/`, ticked after alerts, writing to `ColonyState.objectives` | DONE |
+| Project definitions in data table (`sim/projects/`), never in code (§3.4) | DONE |
+| Progress predicates read only deterministic sim state | DONE — declarative requirements over `ColonyState` |
+| Rewards route through unlock registry (§3.3) | DONE |
+| First projects completable with today's building set | DONE — verified by the completion test (seed 9001, survival chain) |
+| UI: projects panel + situation-driven pips on HUD | Panel DONE; pips open (deferred — HUD change) |
+| Hidden dependency: unlock registry (shared with P7/P9) | DONE — shipped one phase early, deliberately inert |
+
+### Definition of done (review §7)
+
+- M2: playtesters can state their current project's goal unprompted — the panel ships; the playtest is the open item.
 
 ---
 
@@ -214,8 +233,8 @@ Secretly needed by P1 — forecast utility is P1 infra (§3.1).
 
 ```
 P0'  Codify freeze (CI suite gate, golden transcript, invariant doc)  [DONE]
-P1'  First 30 min + Forecast utility + strings externalization        [NEXT]
-P2'  ObjectiveSystem (data-driven) + Unlock registry                  ← shared primitive
+P1'  First 30 min + Forecast utility + strings externalization        [DONE]
+P2'  ObjectiveSystem (data-driven) + Unlock registry                  [DONE] ← shared primitive
 P3'  PolicySystem (colony standing orders) + AUTONOMY stat
 P4'  Event log persistence + Dashboard + extended history
 P5'  Bottleneck analyzer (3 types)
@@ -290,11 +309,11 @@ Numbers placeholders — set before playtests so can't be moved to match results
 
 ## Immediate next steps (from roadmap's own Immediate Roadmap, dependency-honest)
 
-1. **First 30-Minute Experience** — make existing game understandable — NEXT
+1. **First 30-Minute Experience** — make existing game understandable — DONE (awaiting unguided playtest, M1)
    - Forecast utility (`sim/forecast.ts`)
    - Strings externalization
    - Tutorial system (situation warnings)
-2. **Engineering Projects** — explicit reasons to interact — after P1
+2. **Engineering Projects** — explicit reasons to interact — DONE (ObjectiveSystem + data table + unlock registry + panel)
 3. **Automation Progression** — manual→automated→autonomous central — after P2
 4. **Operations Dashboard** — complex colonies understandable — after P3
 5. **Bottleneck/Advisor** — simulation data → useful decisions — after P4
@@ -308,7 +327,26 @@ Numbers placeholders — set before playtests so can't be moved to match results
 
 ---
 
-## Artifacts produced this session (Phase 0 + Phase 1 full)
+## Artifacts produced this session (Phase 2)
+
+- `src/sim/unlocks.ts` — the unlock registry (ids, info, grant/has/list, pure)
+- `src/sim/projects/types.ts` — declarative requirement records + project/project-view shapes
+- `src/sim/projects/requirements.ts` — the one evaluator (current / target / met per kind)
+- `src/sim/projects/catalog.ts` — the five projects, their prerequisites and rewards
+- `src/sim/state/ObjectiveState.ts` — board state (active, completed) + empty board
+- `src/sim/systems/ObjectiveSystem.ts` — offer / evaluate / complete / pay / project, plus the direct-order classification
+- `src/ui/ProjectsPanel.ts` — the board panel (markup is a pure function, so it is testable without a DOM)
+- `src/sim/persistence/migrations/v14.ts` — v14 → v15 (empty board, empty registry, marker = save's sol)
+- Save schema v15, `ColonyPersistence` snapshot/restore, `SaveValidator` warnings, `StateHash` core section
+- Host read model: `ObjectiveView` in `viewModels.ts`, `view.ts`, `projection.ts`, `mirror.ts`, `Simulation.objectives`
+- `src/sim/domainEvents.ts` — `objective/offered`, `objective/completed`, `unlock/granted`
+- `src/app/Game.ts` + `src/style.css` — panel wiring and layout (docks beside the vitals; mobile chip)
+- `tests/sim/objectives.test.ts` (22 checks), `tests/ui/projects-panel.test.ts` (6 checks)
+- `docs/COMMERCIAL-PHASE-2.md` — the phase spec; this file updated
+- Pinned hashes re-recorded: canonical transcripts, golden colony, large-colony stress (`benchmarks/baseline.md`)
+- Save version 15; `tests/sim/maintenance.test.ts` version pin updated
+
+## Artifacts produced earlier (Phase 0 + Phase 1 full)
 
 Phase 0:
 - `tests/golden-colony/*` — golden colony transcript + hash + save + meta + README
@@ -338,7 +376,7 @@ Phase 1 infrastructure + tutorial (review §3.1, §4.6, §5 P1):
 - `docs/COMMERCIAL-PHASE-1.md` — full Phase 1 spec and remaining work (now marked DONE)
 - This file — implementation tracker (updated)
 - `package.json` — added `test:golden` and `test:golden:write` scripts
-- Pinned hashes updated: `tests/golden-colony/golden-colony.meta.json` → rf1-1ae69385827e00-021ba045379276, canonical transcripts → new hashes, large-colony-stress → rf1-0e69da95974d60-01fac118bd387d
+- Pinned hashes updated: `tests/golden-colony/golden-colony.meta.json` → rf1-024150dbf13fe8-03093564627b23, canonical transcripts → new hashes, large-colony-stress → rf1-0602d23cbf6d99-10335f00abe039
 
 ---
 

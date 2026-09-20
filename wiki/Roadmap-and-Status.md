@@ -68,11 +68,13 @@ product*, not structure.
 | Desktop + mobile UI, alerts, save/load | IN | `localStorage` slots, configurable autosave, in-play update card |
 | Developer mode | IN | runtime-only overlays; fabrications persist |
 | Profiling / benchmark / replay harness | IN | dev-only, tree-shaken |
+| First-30-minutes onboarding | IN | 12 milestones, forecast-driven warnings ("water runs dry in 1.8 sols"), dismissible hints, opt-in funnel |
+| Engineering projects + unlock registry | IN | five data-driven projects in `src/sim/projects/`, five unlocks, projects panel; **nothing is gated on an unlock yet** |
 | **POIs, SALVAGE, supply drops** | **PARTIAL** | discover + strip + burial clock; no survey confidence, no narrative logs |
 | Research tech tree | OUT | no `research` symbol anywhere in `src/` |
 | Multi-colonist skills / medicine | OUT | architecture hooks only (one `Colonist`) |
 | Nuclear / underground / closed-loop endgame | OUT | the RTG Array is a small baseload stand-in, not a reactor |
-| Victory conditions | OUT | there is no victory checker; the only hard loss is a dead colonist |
+| Victory conditions | OUT | there is no victory checker; the only hard loss is a dead colonist. The nearest thing is the **Autonomous Colony** project, which needs ten sols without a manual order and sits at the end of the project chain |
 
 ## The open list, in the order the code argues for it
 

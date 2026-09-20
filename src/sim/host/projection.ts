@@ -38,6 +38,8 @@ import { ALL_FLUIDS } from '../defs';
 import type { PowerTier } from '../config';
 import type { DifficultyId, WorldOptions } from '../difficulty';
 import type { Colonist } from '../lifesupport';
+import type { ObjectiveSnapshot } from '../projects/types';
+import { objectiveSnapshot } from '../systems/ObjectiveSystem';
 import type { OverlayState } from './overlays';
 import { BATTERY_PIN_OVERLAY } from './overlays';
 import type { SimTransport } from './SimHost';
@@ -140,6 +142,12 @@ export interface ViewPayload {
   reserveSols: Record<FluidId, number>;
   netRatePerSol: Record<FluidId, number>;
   storageCapacity: number;
+  /**
+   * Phase 2: the project board, as plain data. Built by the same function the
+   * local path's `Simulation.objectives` getter uses, so the two transports
+   * cannot disagree about what the colony has been asked to do.
+   */
+  objectives: ObjectiveSnapshot;
   tutorial: {
     milestones: Record<string, { completed: boolean; sol: number; tick: number }>;
     activeWarnings: string[];
@@ -291,6 +299,7 @@ export function projectView(
     reserveSols: fluidMap((f) => sim.reserveSols(f)),
     netRatePerSol: fluidMap((f) => sim.netRatePerSol(f)),
     storageCapacity: sim.storageCapacity(),
+    objectives: objectiveSnapshot(sim.state),
     tutorial: {
       milestones: { ...sim.state.tutorial.milestones } as any,
       activeWarnings: [...(sim.state.tutorial._activeWarnings ?? [])],

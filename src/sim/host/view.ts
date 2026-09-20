@@ -34,6 +34,7 @@ import type {
   AlertsView,
   BuildingView,
   ColonistView,
+  ObjectiveView,
   ResourceView,
   RoverView,
   WeatherView,
@@ -45,6 +46,9 @@ export type {
   AlertsView,
   BuildingView,
   ColonistView,
+  ObjectiveView,
+  ObjectiveProjectView,
+  ObjectiveRequirementView,
   ResourceView,
   RoverView,
   WeatherView,
@@ -104,6 +108,13 @@ export type SimFields = ResourceView & {
   readonly clock: ClockView;
   readonly weather: WeatherView;
   readonly tutorial: TutorialView;
+  /**
+   * Phase 2: the engineering-project board — what is on offer, what has
+   * landed, what has been earned. Read-only on purpose: a project closes
+   * itself when the colony meets it, so there is nothing for a panel to
+   * claim, and no command to invent.
+   */
+  readonly objectives: ObjectiveView;
 };
 
 // ---------------------------------------------------------- pure queries ----

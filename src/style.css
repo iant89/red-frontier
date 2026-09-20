@@ -1439,7 +1439,7 @@ body {
 /* --------------------------------------------------------- tutorial --- */
 #tutorial-panel {
   top: 62px;
-  left: 310px;
+  left: 618px;
   width: 340px;
   max-height: calc(100vh - 180px);
   overflow-y: auto;
@@ -1540,25 +1540,241 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-@media (max-width: 1080px) {
+/* ------------------------------------------------------ projects panel --- */
+/* Phase 2: the standing "what is the colony being asked to do" card. It sits
+   beside the vitals on wide screens and stacks under the tutorial when the
+   middle band narrows, so it never covers the gauges or the inspector. */
+#projects-panel {
+  top: 62px;
+  left: 310px;
+  width: 300px;
+  max-height: calc(100vh - 320px);
+  overflow-y: auto;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 9;
+  border-color: var(--accent-2);
+}
+
+.proj-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.proj-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--accent-2);
+}
+
+.proj-count {
+  font-size: 10px;
+  color: var(--ui-text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.proj-card {
+  border: 1px solid var(--ui-border-lit);
+  border-radius: 6px;
+  padding: 7px 8px;
+  background: rgba(28, 22, 15, 0.72);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.proj-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.proj-card-head b {
+  font-size: 12px;
+  color: var(--ui-text);
+}
+
+.proj-pct {
+  font-size: 10.5px;
+  color: var(--ui-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.proj-blurb {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--ui-text-dim);
+}
+
+.proj-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.09);
+  overflow: hidden;
+}
+
+.proj-bar-fill {
+  height: 100%;
+  background: var(--accent-2);
+  transition: width 180ms linear;
+}
+
+.proj-reqs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.proj-req {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--ui-text-dim);
+}
+
+.proj-req-mark {
+  width: 9px;
+  flex: none;
+  color: var(--ui-text-faint);
+}
+
+.proj-req.met {
+  color: var(--ok);
+}
+
+.proj-req-label {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.proj-req-num {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--ui-text-faint);
+}
+
+.proj-req.met .proj-req-num {
+  color: var(--ok);
+}
+
+.proj-why,
+.proj-reward {
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--ui-text-faint);
+}
+
+.proj-why .k,
+.proj-reward .k,
+.proj-earned .k,
+.proj-done .k {
+  font-size: 9.5px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--ui-border-lit);
+  margin-right: 4px;
+}
+
+.proj-reward .k {
+  color: var(--accent);
+}
+
+.proj-earned,
+.proj-done {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  align-items: baseline;
+  font-size: 10.5px;
+}
+
+.proj-unlock {
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  padding: 1px 7px;
+  color: var(--accent-2);
+  font-size: 10px;
+}
+
+.proj-done-row {
+  color: var(--ui-text-dim);
+}
+
+.proj-sol {
+  color: var(--ui-text-faint);
+}
+
+.proj-empty {
+  font-size: 11px;
+  color: var(--ui-text-faint);
+}
+
+@media (max-width: 1240px) {
+  /* The middle band is too narrow for two cards: the tutorial slides under it. */
   #tutorial-panel {
-    left: 8px;
-    right: auto;
-    top: 360px;
-    width: min(340px, calc(100vw - 16px));
+    left: 308px;
+    top: 300px;
+    width: min(300px, calc(100vw - 640px));
+    max-height: calc(100vh - 420px);
+  }
+}
+
+@media (max-width: 1080px) {
+  #projects-panel {
+    left: 308px;
+    width: min(300px, calc(100vw - 640px));
+  }
+}
+
+@media (max-width: 900px) {
+  #projects-panel {
+    left: 260px;
+    width: min(300px, calc(100vw - 540px));
+  }
+
+  #tutorial-panel {
+    left: 260px;
+    width: min(300px, calc(100vw - 540px));
   }
 }
 
 @media (max-width: 760px) {
+  /* Phone: the card keeps its headline and progress bar and drops the detail. */
+  #projects-panel {
+    left: 6px;
+    right: 6px;
+    bottom: 82px;
+    top: auto;
+    width: auto;
+    max-height: 30vh;
+  }
+
+  #projects-panel .proj-reqs,
+  #projects-panel .proj-why,
+  #projects-panel .proj-blurb {
+    display: none;
+  }
+
   #tutorial-panel {
     top: auto;
-    bottom: 140px;
+    bottom: 186px;
     left: 6px;
     right: 6px;
     width: auto;
-    max-height: 40vh;
+    max-height: 30vh;
   }
 }
+
 
 /* ------------------------------------------------------------ hintbar --- */
 #hintbar {

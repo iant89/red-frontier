@@ -1,5 +1,5 @@
 {
-  "version": 14,
+  "version": 15,
   "seed": 9001,
   "difficulty": "pioneer",
   "worldHalf": 640,
@@ -2556,6 +2556,32 @@
         "stamp": "Sol 6 · 04:36"
       }
     ]
+  },
+  "objectives": {
+    "active": [
+      "surviveFirstStorm",
+      "industrialize"
+    ],
+    "completed": {
+      "establishSurvival": {
+        "sol": 0,
+        "tick": 181
+      }
+    }
+  },
+  "unlocks": {
+    "unlocks": {
+      "stableOperations": {
+        "sol": 0,
+        "tick": 181,
+        "source": "establishSurvival"
+      },
+      "stormForecasting": null,
+      "advancedAutomation": null,
+      "remoteExploration": null,
+      "autonomousColony": null
+    },
+    "lastDirectOrderSol": 0
   },
   "tutorial": {
     "milestones": {

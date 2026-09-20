@@ -85,6 +85,7 @@ import { HistorySystem } from './systems/HistorySystem';
 import { GarageSystem } from './systems/GarageSystem';
 import { MaintenanceSystem } from './systems/MaintenanceSystem';
 import { TutorialSystem } from './systems/TutorialSystem';
+import { ObjectiveSystem, objectiveSnapshot } from './systems/ObjectiveSystem';
 import { DevBackdoors } from './DevBackdoors';
 
 import {
@@ -696,6 +697,7 @@ export class Simulation {
       netRatePerSol: (f) => this.netRatePerSol(f),
       instantRatePerSol: (f) => this.instantRatePerSol(f),
     });
+    ObjectiveSystem.tick(this.state);
     HistorySystem.tick(this.state);
   }
 
@@ -738,6 +740,24 @@ export class Simulation {
       funnel: [...this.state.tutorial.funnel],
       stats: { ...this.state.tutorial.stats },
     };
+  }
+
+  /**
+   * Phase 2: the engineering-project board as the panels read it. Built from
+   * live state on demand (the same projection the worker payload carries), so
+   * a restore paints a correct panel before the first tick lands.
+   */
+  get objectives(): import('./host/viewModels').ObjectiveView {
+    return objectiveSnapshot(this.state);
+  }
+
+  /**
+   * Record a player-issued order against the autonomy streak. The command
+   * dispatcher is the one path every order takes, in-process or across the
+   * worker, which is what makes the streak replay-faithful.
+   */
+  noteOrder(commandType: string): void {
+    ObjectiveSystem.noteCommand(this.state, commandType);
   }
 
   solsOfReserve(f: FluidId): number {

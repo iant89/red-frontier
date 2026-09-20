@@ -5,9 +5,9 @@
 
 ## Current schema
 
-- `SAVE_VERSION = 13` (`src/sim/config.ts`)
+- `SAVE_VERSION = 15` (`src/sim/config.ts`)
 - `CURRENT_SAVE_VERSION = SAVE_VERSION` (`src/sim/persistence/SaveSchema.ts`)
-- Supported load range: **v3..v13 inclusive** (v3 is earliest kept migration, older is refused)
+- Supported load range: **v3..v15 inclusive** (v3 is earliest kept migration, older is refused)
 - Storage: localStorage named slots via `SaveStore` (`src/ui/SaveStore.ts`), one slot per expedition
 - Future desktop: file-based saves + Steam Cloud (see commercial review §4.2), but codec/migration contract unchanged
 
@@ -38,6 +38,8 @@ This is already how v3→v13 was built. This doc codifies it so future phases ca
 | v11 | Rover maintenance: `parts` health + Repair Bay jobs (P5 slice 3) | `v11.ts` | Yes, healthy parts + empty jobs | `sim/maintenance` |
 | v12 | Water utilities: `water` active/links/tanks (P5 slice 4) | `v12.ts` | Yes, uncommissioned + empty tanks | `sim/water` |
 | v13 | Engineering: `upgrades`, `upgradeJob`, `paint`, 3 new components | `v13.ts` (implied via v12→13) | Yes, stock hardware defaults | `sim/engineering`, `hud/engineering` |
+| v14 | Tutorial: `tutorial` milestones, warnings, hints, funnel, stats | `v13.ts` (v13→v14) | Yes, empty tutorial state | `sim/tutorial` |
+| v15 | Engineering projects (Phase 2): `objectives` board, `unlocks` registry, `lastDirectOrderSol` | `v14.ts` | Yes — unknown project/unlock ids dropped; an old colony gets the opening project and a marker set to its own sol | `sim/objectives` |
 
 Additive means: old save loads without losing progress, new fields default to empty/healthy/stock. Never throw away a field that old saves relied on.
 
@@ -65,6 +67,9 @@ See `src/sim/persistence/SaveValidator.ts` — `decodeSave(unknown)` asserts obj
 - Corrupt weather fallback, lightningMul fallback
 - Invalid POI kind filtering, reservedBy coercion
 - Historical migrations v3→v13 round-trip determinism
+- v15 boards: unknown project ids dropped, duplicate ids collapsed, a completion
+  with no sol stamp discarded, invented unlock ids refused, malformed blocks
+  defaulted (`sim/objectives`)
 
 Each new version must add at least one hostile case (e.g. hand-edited rack, future recipe index, orphan tank).
 
@@ -82,6 +87,9 @@ Saved (authoritative, hashed):
 - Weather (rngState, lightningRngState, active/scheduled cells, dust, wind, muls)
 - Alerts active + log
 - Colonist
+- Project board: `active` ids, `completed` with sol/tick stamps (v15)
+- Unlock registry: sol, tick and the granting id per unlock (v15)
+- `lastDirectOrderSol` — the sol the player last issued a direct order (v15)
 
 Not saved (runtime-only, re-derived):
 

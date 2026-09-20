@@ -389,4 +389,8 @@ export class ColonyMirror implements SimView {
   get tutorial() {
     return this.payload.tutorial as any;
   }
+
+  get objectives() {
+    return this.payload.objectives;
+  }
 }

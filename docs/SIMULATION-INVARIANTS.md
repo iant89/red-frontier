@@ -50,12 +50,13 @@ This file is the Phase 0 deliverable the commercial roadmap review asks for
 | `colonist-shelter-ref` | `shelterId` -1 EVA / 0 pod / or live building | No dangling shelter | `sim/invariants`, `sim/life-support` |
 | `water-network` | Links valid (existing ports, a<b, cost=pipeCost, dist≤max, no dup), tanks 0..capacity when active, no orphan tanks, sum==pools.water | Water topology honest | `sim/water` (15 checks), `sim/invariants`, `hud/water` |
 | `engineering-state` | Upgrades allowed for kind, tier 1..3, paint known, job valid, garage bay unique | No invalid refits | `sim/engineering` (15 checks), `sim/invariants`, `hud/engineering` |
+| `objective-board` | Board ids exist in the project catalogue, a completed project is never re-offered, an unlock is granted at most once | No phantom projects, no double rewards | `sim/objectives` (22 checks) |
 
 ## Determinism & replay (not in SimulationAssertions but part of Phase 0 freeze)
 
 | Invariant | What it checks | Pinned by |
 |---|---|---|
-| Same seed + same transcript → same StateHash | `hashSimulation` = `rf1-<14hex>-<14hex>` over canonical JSON, sorted keys, entities sorted by id | `sim/transcript` (canonical 3 hashes), `sim/determinism`, `sim/state-hash`, `sim/large-colony-stress`, `tests/golden-colony` |
+| Same seed + same transcript → same StateHash | `hashSimulation` = `rf1-<14hex>-<14hex>` over canonical JSON, sorted keys, entities sorted by id. The `core` section carries the project board, the unlock registry and `lastDirectOrderSol`, so a colony that earned something different hashes differently | `sim/transcript` (canonical 3 hashes), `sim/determinism`, `sim/state-hash`, `sim/objectives`, `sim/large-colony-stress`, `tests/golden-colony` |
 | Save/load preserves deterministic state | Snapshot → restore → step produces same hash as live | `sim/persistence`, `sim/save-validation`, `sim/water`, `sim/maintenance`, `sim/engineering` |
 | Replay produces identical state hashes | `npm run test:replay` green | `sim/transcript`, CI `replay` job (Phase 0) |
 | Worker and in-process produce same results | View payloads equal, commands ack same | `sim/worker`, `sim/host`, `worker-smoke` (both transports, CI) |

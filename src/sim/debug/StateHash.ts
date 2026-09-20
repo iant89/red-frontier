@@ -123,6 +123,14 @@ function project(sim: Simulation): unknown {
     // different number of motors are different colonies.
     components: sim.components,
     water: { active: sim.state.water.active, links: sim.state.water.links, tanks: sim.state.water.tanks },
+    // P2: which projects the colony has been handed, which it has landed, and
+    // what it has earned. Content lives in data tables; this is the board.
+    objectives: {
+      active: sim.state.objectives.active,
+      completed: sim.state.objectives.completed,
+    },
+    unlocks: sim.state.unlocks,
+    lastDirectOrderSol: sim.state.lastDirectOrderSol,
     tutorial: {
       milestones: sim.state.tutorial.milestones,
       warnings: sim.state.tutorial.warnings,
@@ -287,6 +295,9 @@ export function hashSimulationSection(sim: Simulation, section: StateSection): s
         clock: p.clock,
         nextDropSol: p.nextDropSol,
         history: p.history,
+        objectives: (p as any).objectives,
+        unlocks: (p as any).unlocks,
+        lastDirectOrderSol: (p as any).lastDirectOrderSol,
         tutorial: (p as any).tutorial,
       };
       break;

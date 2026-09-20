@@ -29,6 +29,41 @@ import type { ColonistActivity, ColonistOrder } from '../lifesupport';
 import type { StormCell, StormKind, StormKindReal, WeatherRadar } from '../weather';
 import type { TutorialState, MilestoneId, WarningId, HintId } from '../state/TutorialState';
 
+/**
+ * Phase 2 — one requirement's live numbers on a project card. `label` is copy
+ * from the project data table; the numbers are what the sim evaluated this
+ * tick, so the panel never recomputes them.
+ */
+export interface ObjectiveRequirementView {
+  readonly key: string;
+  readonly label: string;
+  readonly current: number;
+  readonly target: number;
+  readonly unit: 'count' | 'kg' | 'kWh' | 'sols' | 'percent';
+  readonly met: boolean;
+}
+
+/** Phase 2 — a project on the board, with its progress and what it pays. */
+export interface ObjectiveProjectView {
+  readonly id: string;
+  readonly title: string;
+  readonly blurb: string;
+  readonly why: string;
+  readonly requirements: ReadonlyArray<ObjectiveRequirementView>;
+  readonly met: number;
+  readonly total: number;
+  readonly rewards: ReadonlyArray<{ readonly id: string; readonly title: string; readonly granted: boolean }>;
+}
+
+/** Phase 2 — the board: what is offered, what landed, what was earned. */
+export interface ObjectiveView {
+  readonly active: ReadonlyArray<ObjectiveProjectView>;
+  readonly completed: ReadonlyArray<{ readonly id: string; readonly title: string; readonly sol: number }>;
+  readonly unlocks: ReadonlyArray<{ readonly id: string; readonly title: string; readonly sol: number }>;
+  /** Sols since the last direct order — the autonomy streak (AUTONOMY.md §4.1). */
+  readonly solsWithoutOrder: number;
+}
+
 export interface TutorialView {
   readonly milestones: Readonly<Record<MilestoneId, { completed: boolean; sol: number; tick: number }>>;
   readonly activeWarnings: ReadonlyArray<WarningId>;
