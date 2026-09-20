@@ -21,6 +21,11 @@ Persistent notes for future coding sessions.
   `engineering/upgrades.ts`, the docs, and a live `npm test` (currently
   *87 suites / 983 checks*). If you change a constant that a page quotes, change the
   page in the same PR — `Grep: wiki/ <old-value>` finds them.
+- **`npm run wiki:preview` serves `wiki/` like the GitHub wiki does**
+  (`scripts/preview-wiki.mjs`, `marked` resolved at runtime via
+  `npm i --no-save marked` — intentionally not a project dependency). It rewrites the
+  same relative links to local routes, so clicking around the preview is a real link
+  test of the whole wiki before anything is published.
 - **Publisher checks (`--check`) run before every publish** and fail the run on:
   a relative link that is not a `Page.md` sibling, a missing anchor in our own pages,
   a missing `assets/` file, a page without a `# Title` or the Home breadcrumb, an

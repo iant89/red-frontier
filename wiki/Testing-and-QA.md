@@ -2,12 +2,15 @@
 
 # Testing and QA
 
-**87 suites / 983 checks**, green in roughly a minute on a warm machine. The
-suite is the unit of work, not the file: each one pins one corner of the game and
-declares what it covers, so you can run the piece you touched instead of the whole
-planet.
+**87 suites / 983 checks**, all green. The suite is the unit of work, not the file:
+each one pins one corner of the game and declares what it covers, so you can run
+the piece you touched instead of the whole planet.
 
-Verified on `main` (`46a75e8`) — `npm test` → *"87 suites, 983 checks passed"*.
+Measured on `main` at `46a75e8`: `npm test` →
+*"✔ 87 suites, 983 checks passed (256.5s)"* — full coverage in about four minutes,
+while a single suite is usually under two seconds. `npm run test:serial` keeps the
+linked single-process run for debugging, and `npm run test:affected` is the one you
+will actually live in.
 
 ## Commands
 

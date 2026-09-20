@@ -103,7 +103,8 @@ reviews like code, and is published to the GitHub wiki by
 [`scripts/publish-wiki.mjs`](https://github.com/iant89/red-frontier/blob/main/scripts/publish-wiki.mjs).
 
 ```bash
-node scripts/publish-wiki.mjs --check     # validate links, titles and assets
+node scripts/publish-wiki.mjs --check     # validate links, titles, assets, anchors
+npm run wiki:preview                      # read it rendered, links clickable (:5175)
 node scripts/publish-wiki.mjs --dry-run   # show what would change
 node scripts/publish-wiki.mjs -m "docs: clarify the tick order"
 ```

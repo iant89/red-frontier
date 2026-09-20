@@ -45,6 +45,9 @@ $EDITOR wiki/Rover-Logistics.md
 # 2. validate links, titles and assets
 node scripts/publish-wiki.mjs --check
 
+# 2b. optionally, read it rendered like the wiki does (needs: npm i --no-save marked)
+npm run wiki:preview            # → http://localhost:5175
+
 # 3. see what would be published
 node scripts/publish-wiki.mjs --dry-run
 
