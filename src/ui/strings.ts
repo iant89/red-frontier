@@ -115,15 +115,26 @@ export const STRINGS = {
   'dashboard.sub.autonomy': (identity: string) => identity,
   'dashboard.bestAutonomy': (best: number) => `best ${best.toFixed(1)} sols`,
 
-  // Bottleneck — Phase 5
+  // Bottleneck — Phase 5 (the advisor panel; copy the analyzer data tables
+  // don't carry lives here, per this file's data-table convention)
   'bottleneck.water.title': 'Water Bottleneck',
   'bottleneck.power.title': 'Power Bottleneck',
   'bottleneck.oxygen.title': 'Oxygen Bottleneck',
+  'bottleneck.title': 'Bottleneck Advisor',
+  'bottleneck.close': 'Close (Esc)',
   'bottleneck.production': 'Production',
   'bottleneck.consumption': 'Consumption',
   'bottleneck.projectedShortage': 'Projected shortage',
+  'bottleneck.shortageNone': 'not draining at the current rate',
   'bottleneck.contributing': 'Contributing factors',
   'bottleneck.solutions': 'Possible solutions',
+  'bottleneck.severity.watch': 'Watch',
+  'bottleneck.severity.warning': 'Warning',
+  'bottleneck.severity.critical': 'Critical',
+  'bottleneck.focus': 'Focus this machine',
+  'bottleneck.oath': 'The advisor names the problem. Solving it stays yours.',
+  'bottleneck.empty': 'No bottlenecks.',
+  'bottleneck.emptySub': 'No reserve is draining and the grid is fed. The advisor speaks when something is short — and never fixes it for you.',
   'bottleneck.increaseMining': 'Increase mining',
   'bottleneck.reduceConsumption': 'Reduce consumption',
   'bottleneck.buildStorage': 'Build storage',

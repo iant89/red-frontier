@@ -88,6 +88,7 @@ import { TutorialSystem } from './systems/TutorialSystem';
 import { ObjectiveSystem, objectiveSnapshot } from './systems/ObjectiveSystem';
 import { AutonomySystem, autonomySnapshot } from './systems/AutonomySystem';
 import { PolicySystem, POLICY_UNLOCK, policySnapshot } from './systems/PolicySystem';
+import { bottleneckSnapshot } from './bottlenecks/analyzer';
 import { UNLOCKS, hasUnlock } from './unlocks';
 import type { PolicyId } from './state/PolicyState';
 import { DevBackdoors } from './DevBackdoors';
@@ -806,6 +807,15 @@ export class Simulation {
   /** Phase 3: the autonomy stat as the dashboard and the projects read it. */
   get autonomy(): import('./host/viewModels').AutonomyView {
     return autonomySnapshot(this.state);
+  }
+
+  /**
+   * Phase 5: the bottleneck advisory as the advisor panel reads it. Built
+   * from live state on demand — the same pure analyzer the worker payload
+   * uses — so a restore paints a correct panel before the first tick lands.
+   */
+  get bottlenecks(): import('./host/viewModels').BottlenecksView {
+    return bottleneckSnapshot(this.state);
   }
 
   solsOfReserve(f: FluidId): number {

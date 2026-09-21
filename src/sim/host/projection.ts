@@ -43,6 +43,8 @@ import { objectiveSnapshot } from '../systems/ObjectiveSystem';
 import { autonomySnapshot } from '../systems/AutonomySystem';
 import { policySnapshot, type PolicySnapshot } from '../systems/PolicySystem';
 import type { AutonomySnapshot } from '../systems/AutonomySystem';
+import { bottleneckSnapshot } from '../bottlenecks/analyzer';
+import type { BottleneckSnapshot } from '../bottlenecks/types';
 import type { OverlayState } from './overlays';
 import { BATTERY_PIN_OVERLAY } from './overlays';
 import type { SimTransport } from './SimHost';
@@ -156,6 +158,12 @@ export interface ViewPayload {
   /** Phase 3: the autonomy stat, built by the same function the local getter uses. */
   autonomy: AutonomySnapshot;
   policies: PolicySnapshot;
+  /**
+   * Phase 5: the ranked bottleneck advisory, built by the same pure analyzer
+   * the local getter uses, so the two transports cannot disagree about what
+   * is short or why. Read-only — advice never crosses back as a command.
+   */
+  bottlenecks: BottleneckSnapshot;
   tutorial: {
     milestones: Record<string, { completed: boolean; sol: number; tick: number }>;
     activeWarnings: string[];
@@ -321,6 +329,7 @@ export function projectView(
     objectives: objectiveSnapshot(sim.state),
     autonomy: autonomySnapshot(sim.state),
     policies: policySnapshot(sim.state),
+    bottlenecks: bottleneckSnapshot(sim.state),
     tutorial: {
       milestones: { ...sim.state.tutorial.milestones } as any,
       activeWarnings: [...(sim.state.tutorial._activeWarnings ?? [])],

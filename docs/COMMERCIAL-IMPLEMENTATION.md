@@ -4,9 +4,9 @@
 *This file is the living tracker; the two roadmap docs are the preserved source.*
 
 Last updated: 2026-09-21
-Branch: `arena/01a0c1a4-red-frontier`
-Save version: 18 (v16 autonomy, v17 standing orders, v18 long records — see SAVE-COMPATIBILITY.md)
-Test suite: 98 suites / 1170 checks (after Phase 4: event-journal + dashboard)
+Branch: `arena/01a0c3fd-red-frontier`
+Save version: 18 (v16 autonomy, v17 standing orders, v18 long records — see SAVE-COMPATIBILITY.md; Phase 5 derives everything, no bump)
+Test suite: 100 suites / 1192 checks (after Phase 5: bottleneck analyzer + advisor)
 
 ---
 
@@ -222,7 +222,7 @@ plus the review's P13 rider:
 
 ---
 
-## Phase 5 — Build the Bottleneck System (NEXT)
+## Phase 5 — Build the Bottleneck System (DONE, 2026-09-21)
 
 **Goal:** Turn raw simulation info into useful engineering decisions.
 
@@ -231,6 +231,22 @@ Mock: WATER BOTTLENECK panel with production/consumption, projected shortage, co
 Re-baselined: one pure analyzer module in sim/ (testable without UI): inputs = history + current state; outputs = ranked bottlenecks with contributing factors and static solution suggestions per bottleneck type. Scope: 3 types at first (water, power, oxygen), not general solver.
 
 Secretly needed by P1 — forecast utility is P1 infra (§3.1).
+
+### What this Phase 5 pass shipped (full spec: `docs/COMMERCIAL-PHASE-5.md`)
+
+- [x] **Pure analyzer** — `src/sim/bottlenecks/`: `types.ts` (plain-JSON report/snapshot), `solutions.ts` (static advice as data — mock lines echoed: "Increase mining", "Reduce consumption", "Build storage", repair echoes), `analyzer.ts` (the measurement: P1 forecast tiers for fluids, the grid resolver's own books for power, producer scrutiny, feed/buffer/consumer factors, ranked severity → projection → triage order oxygen/water/power; capped at 4 factors + 4 solutions — the mock's proportions, never a spreadsheet)
+- [x] **Three kinds only** — water, oxygen, power. `BOTTLENECK_KINDS` is a 3-item tuple: not a general solver, per the review.
+- [x] **Measured factors only** — every cause is read out of state and entity-linked ("pick the machine it names"): damaged (`repair` echo), switched off (`switch-on` echo), starved/throttled/idle with the sim's own idleReason, empty ice silo + stranded rovers, nearest-ice distance from the build centroid, thin tankage, the thirstiest consumer, demand/generation gap, brownout shed tier, battery-dies-before-dawn runway (vs the clock's own sun model), daylight dust, pod-only pack, the heaviest running machine with its measured draw (the mock's "Refinery consuming excess power"). Oxygen correctly degrades to a symptom when water fails first ("Fix water first" outranks another generator).
+- [x] **Don't-auto-solve is architecture** — factors/solutions are strings + entity ids; the payload field is read-only; the panel's only interaction is `focus` (the alert-card gesture); each card ends with the oath ("The advisor names the problem. Solving it stays yours."). The P4 dashboard remains advice-free (its "NEXT BOTTLENECK" absence stays pinned).
+- [x] **Advisor panel** — `src/ui/AdvisorPanel.ts`: roadmap-mock cards (headline + severity, per-sol rates, projected shortage with sub-sol breach styling, dashed factors, careted solutions), pure model/render/badge functions + shell class. Entry: `B` hotkey + ⚠ topbar button + Esc-chain slot. **Badge**: count in worst-severity tone, hidden when clear — the one place a shortage shouts with the panel closed.
+- [x] **Boundary wiring** — `bottlenecks` on the projection payload, `BottlenecksView` in viewModels/view, mirror getter, `Simulation.bottlenecks` parity getter — same four seams P3's policies used; worker and in-process agree by construction, restore paints before the first tick.
+- [x] **No save bump, no hash move** — the advisory is fully derived (first commercial phase with no migration). Transcript/golden/stress hashes pass untouched.
+- [x] **P13 rider** — single-points-of-failure surfacing shipped with Phase 4 (dashboard SPOF strip) rather than rebuilt here.
+- [x] **Tests** — `sim/bottlenecks` (15: quiet-when-healthy, water critical + mock factors/solutions, repair/switch-on echoes, caps, oxygen-as-symptom, power tiers 10%/4%, deficit numbers, dead-before-dawn, pod-pack advice, advice-is-sentences, ranking, determinism + JSON roundtrip, transport parity) + `ui/advisor` (7: mock formatting, units, breach flag, badge, section order, markers/focus/oath, escaping, empty state). 100 suites / 1192 checks green.
+
+### Definition of done
+
+- For any of the three watched shortages the player can answer "why" from the panel (measured, machine-linked factors) and has ≥3 distinct moves to consider. Playtest confirmation rides the shared M1–M9 batch.
 
 ---
 
@@ -242,9 +258,9 @@ P1'  First 30 min + Forecast utility + strings externalization        [DONE]
 P2'  ObjectiveSystem (data-driven) + Unlock registry                  [DONE] ← shared primitive
 P3'  PolicySystem (colony standing orders) + AUTONOMY stat
 P4'  Event log persistence + Dashboard + extended history
-P5'  Bottleneck analyzer (3 types)
-P13' Single-points-of-failure surfacing (one dashboard row — ride along with P5)
-P6'  Survey confidence + expedition planning
+P5'  Bottleneck analyzer (3 types)                                          [DONE]
+P13' Single-points-of-failure surfacing (one dashboard row — ride along with P5)  [DONE with P4]
+P6'  Survey confidence + expedition planning                                 [NEXT]
 P7'  POI consequences (narrative first, unlocks second)
 P8'  Rover history & naming                                           [cheap, slot anywhere]
 P11' Colony report (shareable card) — after event log, before campaign
@@ -321,8 +337,8 @@ Numbers placeholders — set before playtests so can't be moved to match results
 2. **Engineering Projects** — explicit reasons to interact — DONE (ObjectiveSystem + data table + unlock registry + panel)
 3. **Automation Progression** — manual→automated→autonomous central — DONE (autonomy stat + PolicySystem, P3)
 4. **Operations Dashboard** — complex colonies understandable — DONE (extended history + event journal + dashboard, P4; M4 playtest open)
-5. **Bottleneck/Advisor** — simulation data → useful decisions — NEXT (pure analyzer, 3 types)
-6. **Exploration + POIs** — reason to leave starting colony — after P5
+5. **Bottleneck/Advisor** — simulation data → useful decisions — DONE (pure analyzer, 3 types + advisor panel, P5)
+6. **Exploration + POIs** — reason to leave starting colony — NEXT (P6 survey confidence + expeditions, P7 consequences)
 7. **Campaign** — beginning/middle/end — after P6/P7
 8. **Replayability** — scenarios + starting conditions — after campaign
 9. **Vertical-Slice Demo** — prove fun before heavy polish — after P1–P5 + packaging
@@ -419,12 +435,33 @@ Phase 1 infrastructure + tutorial (review §3.1, §4.6, §5 P1):
 
 ---
 
+## Artifacts produced this session (Phase 5)
+
+- `src/sim/bottlenecks/types.ts` — plain-JSON `BottleneckReport` / `BottleneckSnapshot` (no Map, no Infinity)
+- `src/sim/bottlenecks/solutions.ts` — static advice tables as data (mock lines echoed)
+- `src/sim/bottlenecks/analyzer.ts` — the pure analyzer: 3 kinds, measured factors, static solutions, deterministic ranking
+- `src/sim/host/projection.ts` — payload field `bottlenecks` via `bottleneckSnapshot(sim.state)`
+- `src/sim/host/viewModels.ts` — `BottleneckView` family; `src/sim/host/view.ts` — `SimFields.bottlenecks`; `src/sim/host/mirror.ts` — getter
+- `src/sim/Simulation.ts` — `bottlenecks` parity getter
+- `src/ui/AdvisorPanel.ts` — overlay card(s), pure model/render/badge, focus-only interaction
+- `src/ui/HUD.ts` — ⚠ topbar button + severity-toned count badge, open/close plumbing, update loop wiring
+- `src/app/InputController.ts` — `B` hotkey + Esc-chain slot
+- `src/ui/strings.ts` — `bottleneck.*` panel chrome copy
+- `src/style.css` — `.adv-*` card styles + `#advisor-btn` badge tones
+- `tests/sim/bottlenecks.test.ts` (15 checks), `tests/ui/advisor.test.ts` (7 checks), `tests/full.test.ts` — link
+- `docs/COMMERCIAL-PHASE-5.md` — full spec
+- `wiki/Interface-and-Controls.md` — advisor row + section
+- This file — implementation tracker (updated)
+- Save version unchanged (18); all pinned hashes unchanged
+
+---
+
 ## How to run Phase 0 gates locally
 
 ```bash
 npm install
 npm run typecheck
-npm test                    # 98 suites / 1170 checks, ~10 min
+npm test                    # 100 suites / 1192 checks, ~10 min
 npm run test:replay         # canonical 3 scenarios
 node scripts/generate-golden-colony.mjs --check  # golden colony hash
 npm run test:bench          # fleet scaling

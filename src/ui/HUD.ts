@@ -20,6 +20,7 @@ import { UNLOCKS, blueprintLock, blueprintLockReason } from '../sim/unlocks';
 import { projectPip, autonomyChip } from './ProjectsPanel';
 import type { ProjectsPanelModel } from './ProjectsPanel';
 import { DashboardPanel } from './DashboardPanel';
+import { AdvisorPanel, advisorBadge, advisorModelFromView } from './AdvisorPanel';
 import {
   BUILDINGS,
   BUILDING_ORDER,
@@ -254,6 +255,9 @@ export class HUD {
   private vitalsCollapsed = false;
   /** Phase 4 — the operations dashboard overlay (reads the mirror only). */
   private readonly dashboard = new DashboardPanel();
+  /** Phase 5 — the bottleneck advisor overlay (advice; never writes back). */
+  private readonly advisor: AdvisorPanel;
+  private advisorBadgeKey = '';
   private projectPipKey = '';
   private autonomyKey = '';
   private inspectorCollapsed = false;
@@ -277,6 +281,9 @@ export class HUD {
   constructor(cb: HUDCallbacks) {
     this.cb = cb;
     this.root = document.getElementById('app')!;
+    // Phase 5: the advisor only ever asks to focus a machine — the same
+    // intent an alert card would send.
+    this.advisor = new AdvisorPanel({ onAction: (a, arg) => this.cb.onAction(a, arg) });
     this.buildChrome();
     this.buildPalette();
     this.setSpeed(1);
@@ -421,6 +428,7 @@ export class HUD {
         <button class="btn" id="dev-btn" title="Developer mode — world editor (~ backtick)">🛠</button>
         <button class="btn" id="history-btn" title="Alert history (H)">📜</button>
         <button class="btn" id="dash-btn" title="Operations dashboard (O)">📊</button>
+        <button class="btn" id="advisor-btn" title="Bottleneck advisor (B)">⚠ <span class="advisor-n" id="advisor-n" style="display:none">0</span></button>
         <button class="btn" id="menu-btn" title="Pause menu — save, settings, expedition info">☰</button>
         <div class="toolbar" id="speeds"></div>
       </div>
@@ -620,6 +628,10 @@ export class HUD {
     this.el('dash-btn').addEventListener('pointerdown', (e) => {
       e.stopPropagation();
       this.dashboard.toggle();
+    });
+    this.el('advisor-btn').addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.advisor.toggle();
     });
     this.el('menu-btn').addEventListener('pointerdown', (e) => {
       e.stopPropagation();
@@ -1556,6 +1568,10 @@ export class HUD {
   updateVitals(sim: SimView): void {
     // Phase 4: the dashboard reads the same mirror; it self-guards on change.
     this.dashboard.update(sim);
+    // Phase 5: the advisor reads the same mirror, and so does the badge —
+    // the one place a shortage shouts even while the panel is shut.
+    this.advisor.update(sim);
+    this.updateAdvisorBadge(sim);
     // ---- clock & sun ----
     this.el('clock-line').textContent = sim.clock.format();
     this.el('phase-label').textContent = sim.clock.phase();
@@ -2042,6 +2058,44 @@ export class HUD {
   /** Hide the dashboard. Returns true if it was open (for Esc chaining). */
   closeDashboard(): boolean {
     return this.dashboard.close();
+  }
+
+  /**
+   * Phase 5 — the ⚠ badge counts active bottlenecks in the worst severity's
+   * tone, and hides entirely when nothing is short. Self-guards on change.
+   */
+  private updateAdvisorBadge(sim: SimView): void {
+    const badge = advisorBadge(advisorModelFromView(sim));
+    const key = badge ? `${badge.text}:${badge.tone}:${badge.title}` : 'clear';
+    if (key === this.advisorBadgeKey) return;
+    this.advisorBadgeKey = key;
+    const n = this.el('advisor-n');
+    const btn = this.el('advisor-btn');
+    if (!badge) {
+      n.style.display = 'none';
+      btn.classList.remove('has-watch', 'has-warning', 'has-critical');
+      btn.title = 'Bottleneck advisor (B)';
+      return;
+    }
+    n.style.display = '';
+    n.textContent = badge.text;
+    btn.classList.remove('has-watch', 'has-warning', 'has-critical');
+    btn.classList.add(`has-${badge.tone}`);
+    btn.title = badge.title;
+  }
+
+  /** Phase 5 — bottleneck advisor (B). Overlay open/close is HUD-owned. */
+  toggleAdvisor(): void {
+    this.advisor.toggle();
+  }
+
+  isAdvisorOpen(): boolean {
+    return this.advisor.isOpen();
+  }
+
+  /** Hide the advisor. Returns true if it was open (for Esc chaining). */
+  closeAdvisor(): boolean {
+    return this.advisor.close();
   }
 
   /** Hide the history modal. Returns true if it was open (for Esc chaining). */
