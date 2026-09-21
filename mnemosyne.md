@@ -2,6 +2,76 @@
 
 Persistent notes for future coding sessions.
 
+## Commercial roadmap — Phase 4: colony operations dashboard (2026-09-21)
+
+**Goal:** let players answer "why is my colony failing?" without spreadsheet
+archaeology (COMMERCIAL-ROADMAP.md Phase 4, re-baselined per
+COMMERCIAL-ROADMAP-REVIEW.md §5 P4, §3.5 event log, §5 P13 SPOF row).
+Full spec: `docs/COMMERCIAL-PHASE-4.md`. Branch `arena/01a0c1a4-red-frontier`.
+(Phase 3 landed earlier via PR #72: autonomy stat + PolicySystem, save v16/v17 —
+see `docs/COMMERCIAL-PHASE-3.md`; it has no entry of its own here.)
+
+**What shipped (save v18, suite 98 / 1170):**
+
+- **Extended vitals** — `HistorySample` widened: `ore` (mined bulk sum,
+  steel *not* included), `steel`, `components` (rack units), `roverUtil`
+  (moving|working ÷ fleet — same split as AUTONOMY coverage), `prod`/`cons`
+  per-fluid trailing-sol *rates* (kg/sol) from the existing flowWindow
+  arithmetic split by direction (`HistorySystem.flowRatePerSol`).
+- **Sol downsampling** — `state.solHistory` ring (`SOL_HISTORY_ROWS=240`),
+  rolled by `HistorySystem.tick(state, newSol)` on the clock's roll (same flag
+  AutonomySystem takes; Simulation forwards it). Row = sol means (gen/load/
+  util), sol-worst battery, end-of-sol pools/ledgers, per-fluid sol totals
+  (summed from the trailing window at roll time, ±1 tick by convention).
+  `state._solAcc` is **derived**: unsaved, unhashed, reset in
+  `HistorySystem.clear`/`afterTimeJump`. Rows feed nothing back.
+- **Event journal (review §3.5)** — `state.journal`, bounded
+  (`EVENT_JOURNAL_MAX=300`), sol-stamped (`clock.solsElapsed`, fractional).
+  `DomainEventLog.sink` (one-line hook, fires at push) is bound in
+  `createColonyState` and resolves the state lazily — restore keeps the log
+  instance and never unwires it. `journalWorthy` refuses the streaming types
+  (`resource/produced|consumed`, `rover/moved`); the save sanitiser re-applies
+  the same list, so hostile saves carry nothing the live ring wouldn't hold.
+  P11 (colony report) and P12 (incident timeline) aggregate over this ring.
+- **Dashboard UI** — `src/ui/DashboardPanel.ts`. Pure `dashboardModelFromView`
+  + `renderDashboardHtml` + `renderGraphControlsHtml` (pinned in
+  `tests/ui/dashboard.test.ts`); class is a shell. Six rows in the roadmap
+  mock's order, thresholds: fluids crit <1.0 / warn <2.5 sols reserve (the
+  tutorial/AUTONOMY-B4 floors), power crit = life-support shed or ≤5% battery,
+  warn = any brownout or ≤25%. Nine graph checkboxes (power, water, oxygen,
+  food, ore, utilization, battery, production, consumption) with a Live/Sols
+  scope toggle, choices persisted in localStorage; ratio charts pin [0,1].
+  Entry: 📊 topbar + `O` key; Esc chain link sits in InputController with the
+  other overlays. SPOF strip reads `autonomy.singlePoints` (measured by P3's
+  resilience — one UI element teaches redundancy, review §5 P13).
+  **"NEXT BOTTLENECK" is deliberately absent** (P5 owns it —
+  description/advice separation, pinned by a test).
+- **Save v18** — `history: { sols, journal }` block. `migrations/v17.ts`
+  (v17→v18, empty rings), `persistence/historySave.ts` shared sanitiser
+  (re-bounds rings keeping newest, refuses streaming entries, drops hostile
+  rows), validator warnings. Range stays v3..CURRENT.
+- **Hash** — `solHistory` + `journal` joined the `core` section (they outlive
+  the 120-sample ring, so they pin long-run determinism the ring can't;
+  `_solAcc` stays out). Transcripts/golden/stress re-pinned — shape change
+  only; no tick output moved (the freeze's deliberate repin).
+
+**Gotchas worth remembering:**
+
+- `HistorySample` gained nested records (`prod`/`cons`) — the view projection
+  now deep-copies samples (`copySample`/`copySolRow`); a shallow spread would
+  alias sim state into the mirror.
+- `run(sim, n)` in tests/fixtures advances **sols**, not ticks (4800 ticks/sol
+  — a stray `run(sim, 100)` is a soak).
+- `validateCurrentSaveShape` is the validator warnings entry point.
+- Version pins live in at least `tests/sim/maintenance.test.ts` and
+  `tests/sim/policies.test.ts` (`CURRENT_SAVE_VERSION`/`SAVE_VERSION` asserts).
+- Headless smoke in this sandbox: `node scripts/setup-playwright.mjs` first;
+  run history at setSpeed(3) and *poll* for samples — rAF is throttled badly
+  (~1 sample per several wall seconds at 1×). Page screenshots time out on the
+  WebGL canvas; DOM/canvas assertions work fine.
+- The dashboard's journal is *not* projected to the mirror yet (save + sim
+  only, by design); P11/P12 add a bounded projection when they consume it.
+
 ## Commercial roadmap — Phase 2: engineering projects (2026-09-20)
 
 **Goal:** Give the player meaningful objectives beyond "build whatever you want"

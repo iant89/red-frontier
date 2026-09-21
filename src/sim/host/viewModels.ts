@@ -17,7 +17,7 @@ import type {
 } from '../defs';
 import type { PartReplacement } from '../state/BuildingState';
 import type { Alert, LogEvent, Severity } from '../alerts';
-import type { FluidFlow, HistorySample } from '../Simulation';
+import type { FluidFlow, HistorySample, SolHistoryRow } from '../Simulation';
 import type {
   RoverGoal,
   RoverPhase,
@@ -207,6 +207,8 @@ export interface ResourceView {
   readonly flows: Readonly<Record<FluidId, Readonly<FluidFlow>>>;
   readonly lastFlows: Readonly<Record<FluidId, Readonly<FluidFlow>>>;
   readonly history: ReadonlyArray<Readonly<HistorySample>>;
+  /** Phase 4 — the downsampled one-row-per-sol record (dashboard's sols view). */
+  readonly solHistory: ReadonlyArray<Readonly<SolHistoryRow>>;
   readonly storedKWh: number;
   /**
    * Manufactured components (P5): whole units on the rack. Counted, not

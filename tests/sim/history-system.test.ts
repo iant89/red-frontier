@@ -19,6 +19,7 @@ import {
   HISTORY_INTERVAL_S,
   SIM_TICK,
   SOL_SECONDS,
+  SOL_HISTORY_ROWS,
 } from '../../src/sim/config';
 import { run } from '../fixtures/sim';
 import { group, test, finish } from '../harness';
@@ -254,7 +255,8 @@ test('HistorySystem owns tick/resetFlows/clear; Simulation does not', () => {
   assert.ok(histSrc.includes('static afterTimeJump'));
   assert.ok(!simSrc.includes('private recordHistory'));
   assert.ok(!simSrc.includes('private resetFlows'));
-  assert.ok(simSrc.includes('HistorySystem.tick(this.state)'));
+  // Phase 4: the same call now also forwards the clock's new-sol flag.
+  assert.ok(simSrc.includes('HistorySystem.tick(this.state, newSol)'));
   // Phase 18: restore / time-jump call sites moved out of Simulation into
   // ColonyPersistence / DevBackdoors — still HistorySystem.clear/afterTimeJump.
   assert.ok(persSrc.includes('HistorySystem.clear(state)'));
@@ -279,5 +281,124 @@ test('HistorySystem does not own alerts or failure actions', () => {
 test('SIM_TICK constant still drives the main loop (sanity)', () => {
   assert.ok(SIM_TICK > 0);
 });
+
+// ====================================== Phase 4 — extended vitals series ====
+
+group('HistorySystem Phase 4 — extended sample series');
+
+test('sample carries ore/steel/components/util and split flow rates', () => {
+  const sim = fresh();
+  HistorySystem.tick(sim.state);
+  const s = sim.history[0];
+  for (const k of ['ore', 'steel', 'components', 'roverUtil'] as const) {
+    assert.equal(typeof s[k], 'number', `${k} sampled`);
+    assert.ok(Number.isFinite(s[k]), `${k} finite`);
+  }
+  for (const dir of [s.prod, s.cons]) {
+    assert.deepEqual(Object.keys(dir), ['water', 'oxygen', 'food']);
+  }
+});
+
+test('ore sums mined materials only; steel and components are their own series', () => {
+  const sim = fresh();
+  sim.state.storage.iron = 10;
+  sim.state.storage.ice = 4;
+  sim.state.storage.steel = 5;
+  sim.state.components.motor = 2;
+  HistorySystem.tick(sim.state);
+  const s = sim.history[0];
+  assert.equal(s.ore, 14, 'regolith/iron/silicon/aluminum/ice only');
+  assert.equal(s.steel, 5, 'steel reported separately');
+  assert.equal(s.components, 2, 'whole units on the rack');
+});
+
+test('roverUtil is the fraction of the fleet holding a live task', () => {
+  const sim = fresh();
+  assert.equal(sim.rovers.length, 2, 'landing fleet is two rovers');
+  HistorySystem.tick(sim.state);
+  assert.equal(sim.history[0].roverUtil, 0, 'idle fleet: nobody tasked');
+
+  sim.rovers[0].phase = 'moving';
+  sim.state.simTime += HISTORY_INTERVAL_S;
+  HistorySystem.tick(sim.state);
+  assert.equal(sim.history[sim.history.length - 1].roverUtil, 0.5, 'one of two on a task');
+
+  sim.rovers[0].phase = 'disabled';
+  sim.rovers[1].phase = 'working';
+  sim.state.simTime += HISTORY_INTERVAL_S;
+  HistorySystem.tick(sim.state);
+  assert.equal(
+    sim.history[sim.history.length - 1].roverUtil,
+    0.5,
+    'a disabled rover still counts against the fleet, the working one still counts for it',
+  );
+});
+
+// ============================================ Phase 4 — sol downsampling ====
+
+group('HistorySystem Phase 4 — sol-bucketed downsampling');
+
+test('the clock roll closes one row with means, worst battery and end values', () => {
+  const sim = fresh();
+  // Three samples spread over the sol with distinctive values.
+  for (const dt of [0, HISTORY_INTERVAL_S, HISTORY_INTERVAL_S * 2]) {
+    sim.state.simTime += dt;
+    HistorySystem.tick(sim.state);
+  }
+  assert.equal(sim.history.length, 3);
+  const genSum = sim.history.reduce((a, s) => a + s.genKw, 0);
+  sim.state.pools.amounts.water = 42;
+  HistorySystem.tick(sim.state, true);
+  assert.equal(sim.solHistory.length, 1, 'one row closed');
+  const row = sim.solHistory[0];
+  assert.equal(row.sol, sim.clock.sol, 'row takes the just-completed sol number');
+  assert.ok(Math.abs(row.genKwAvg - genSum / 3) < 1e-9, 'generation is the sample mean');
+  assert.equal(row.water, 42, 'pools are end-of-sol values');
+  assert.ok(row.storedFracMin <= 1 && row.storedFracMin >= 0, 'battery column is the sol worst');
+});
+
+test('rolling with no samples closes no row (time jump midpoint)', () => {
+  const sim = fresh();
+  HistorySystem.tick(sim.state, true);
+  assert.equal(sim.solHistory.length, 0, 'nothing accumulated, nothing closed');
+});
+
+test('rows cap at SOL_HISTORY_ROWS, keeping the newest sols', () => {
+  const sim = fresh();
+  for (let i = 0; i < SOL_HISTORY_ROWS + 3; i++) {
+    sim.state.simTime += HISTORY_INTERVAL_S;
+    sim.clock.sol = i + 1; // pretend the sol just rolled
+    HistorySystem.tick(sim.state, true);
+  }
+  assert.equal(sim.solHistory.length, SOL_HISTORY_ROWS);
+  assert.equal(sim.solHistory[solHistoryLast(sim)].sol, SOL_HISTORY_ROWS + 3 - 1 + 1);
+  assert.equal(sim.solHistory[0].sol, 4, 'oldest rows fall off the front');
+});
+
+test('row flow columns sum the closed sols flow window', () => {
+  const sim = fresh();
+  sim.state.simTime += HISTORY_INTERVAL_S;
+  sim.state.flows.water.produced = 5;
+  HistorySystem.tick(sim.state); // window picks up the 5 kg at reset
+  sim.state.flows.water.consumed = 2;
+  sim.state.simTime += HISTORY_INTERVAL_S;
+  HistorySystem.tick(sim.state);
+  HistorySystem.tick(sim.state, true);
+  const row = sim.solHistory[0];
+  assert.ok(Math.abs(row.prod.water - 5) < 1e-9, 'produced totals the sol');
+  assert.ok(Math.abs(row.cons.water - 2) < 1e-9, 'consumed totals the sol');
+});
+
+test('clear resets the accumulator — a restored colony closes no stale row', () => {
+  const sim = fresh();
+  HistorySystem.tick(sim.state);
+  HistorySystem.clear(sim.state);
+  HistorySystem.tick(sim.state, true);
+  assert.equal(sim.solHistory.length, 0, 'no partial row from before the restore');
+});
+
+function solHistoryLast(sim: Simulation): number {
+  return sim.solHistory.length - 1;
+}
 
 finish();

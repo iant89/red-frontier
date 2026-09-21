@@ -24,6 +24,7 @@ the colony — see [Architecture Overview](Architecture-Overview.md).
 | Focus selection | `F` | Focus button |
 | Blueprints 1–9 | `1`…`9` | — |
 | Save | `Ctrl`/`Cmd`+`S` | auto every 45 s |
+| Operations dashboard | `O` | 📊 topbar button |
 | Developer panel | `` ` `` (backquote) | 🛠 topbar button |
 
 Speed modes are `Paused / 1× / 2× / 4×`, multiplying sim steps per frame — the
@@ -69,6 +70,17 @@ Cycle with `V`: **none · power · life · water · weather**.
 - *water* — pipe routes, directional flow beads, amber diamonds at ports that
   need attention
 - *weather* — the storm field, cells and tracks (paired with the radar station)
+
+## The operations dashboard
+
+`O` or the 📊 topbar button opens **Red Frontier Operations**: the colony's six
+headline rows (power, water, oxygen, food with fill % and a stability status,
+fleet operational count, the autonomy streak), a *single points of failure*
+strip naming any critical chain with exactly one producer, and nine toggleable
+history graphs (power, water, oxygen, food, ore, rover utilization, battery
+reserves, production, consumption) over the live ring or the per-sol record. It
+is strictly a read: the dashboard states what the colony is doing and names no
+fix — diagnosis stays the player's job.
 
 ## The map
 

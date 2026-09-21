@@ -318,6 +318,7 @@ export class InputController {
     if (e.key === 'Escape') {
       if (
         this.d.hud.closeWorldMap() ||
+        this.d.hud.closeDashboard() ||
         this.d.hud.closeAlertHistory() ||
         this.d.hud.closeBuildInfo()
       ) {
@@ -353,6 +354,12 @@ export class InputController {
     }
     if (key === 'h') {
       this.d.hud.openAlertHistory();
+      this.d.audio.select();
+      return;
+    }
+    if (key === 'o') {
+      // Phase 4 — the operations dashboard reads the mirror; it never writes.
+      this.d.hud.toggleDashboard();
       this.d.audio.select();
       return;
     }

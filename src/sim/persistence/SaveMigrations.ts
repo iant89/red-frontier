@@ -10,6 +10,7 @@ import { migrateV13Save } from './migrations/v13';
 import { migrateV14Save } from './migrations/v14';
 import { migrateV15Save } from './migrations/v15';
 import { migrateV16Save } from './migrations/v16';
+import { migrateV17Save } from './migrations/v17';
 import { CURRENT_SAVE_VERSION } from './SaveSchema';
 import { migrateV3Save } from './migrations/v3';
 import { migrateV4Save } from './migrations/v4';
@@ -24,7 +25,7 @@ import { migrateV11Save } from './migrations/v11';
 export type MigratableSave = Record<string, unknown> & { version: number };
 
 /**
- * Migrate any supported historical save (v3..v16) to current (v17).
+ * Migrate any supported historical save (v3..v17) to current (v18).
  * Assumes `data.version` has already been validated as number in supported range.
  */
 export function migrateSave(data: Record<string, unknown>): MigratableSave {
@@ -46,6 +47,7 @@ export function migrateSave(data: Record<string, unknown>): MigratableSave {
   if (current.version === 14) current = migrateV14Save(current) as MigratableSave;
   if (current.version === 15) current = migrateV15Save(current) as MigratableSave;
   if (current.version === 16) current = migrateV16Save(current) as MigratableSave;
+  if (current.version === 17) current = migrateV17Save(current) as MigratableSave;
 
   if (current.version !== CURRENT_SAVE_VERSION) {
     throw new Error(`unsupported save version ${current.version}`);
@@ -62,6 +64,7 @@ export {
   migrateV14Save,
   migrateV15Save,
   migrateV16Save,
+  migrateV17Save,
   migrateV4Save,
   migrateV5Save,
   migrateV6Save,

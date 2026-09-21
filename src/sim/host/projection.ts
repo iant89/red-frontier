@@ -25,7 +25,7 @@
 
 import type { WaterNetworkView } from '../utilities/WaterNetwork';
 
-import type { Simulation, HistorySample, FluidFlow, Rover, Building } from '../Simulation';
+import type { Simulation, HistorySample, SolHistoryRow, FluidFlow, Rover, Building } from '../Simulation';
 import type { ComponentAmounts } from '../defs';
 import type { Deposit } from '../World';
 import type { Poi } from '../pois';
@@ -126,6 +126,8 @@ export interface ViewPayload {
   flows: Record<FluidId, FluidFlow>;
   lastFlows: Record<FluidId, FluidFlow>;
   history: HistorySample[];
+  /** Phase 4 — the downsampled one-row-per-sol record (bounded, saved). */
+  solHistory: SolHistoryRow[];
   rovers: RoverView[];
   buildings: BuildingView[];
   colonist: ColonistView;
@@ -171,9 +173,19 @@ function livePins(sim: Simulation, overlays: OverlayState): number[] {
   return sim.rovers.filter((r) => wanted.has(r.id)).map((r) => r.id);
 }
 
-/** Shallow object copy for plain records (history samples, alert rows). */
+/** Shallow object copy for plain records (alert rows, deposits). */
 function copy<T extends object>(src: T): T {
   return { ...src };
+}
+
+/** Phase 4 — samples carry fluid-rate records; nested bags are owned copies. */
+function copySample(src: HistorySample): HistorySample {
+  return { ...src, prod: { ...src.prod }, cons: { ...src.cons } };
+}
+
+/** Phase 4 — a sol row owns its per-fluid totals too. */
+function copySolRow(src: SolHistoryRow): SolHistoryRow {
+  return { ...src, prod: { ...src.prod }, cons: { ...src.cons } };
 }
 
 /** Deep enough that nested mutable bags (cargo, maps, pending) are owned. */
@@ -282,7 +294,8 @@ export function projectView(
     pools: { amounts: { ...sim.pools.amounts }, capacity: { ...sim.pools.capacity } },
     flows: copyFlows(sim.flows),
     lastFlows: copyFlows(sim.lastFlows),
-    history: sim.history.map(copy),
+    history: sim.history.map(copySample),
+    solHistory: sim.solHistory.map(copySolRow),
     rovers: sim.rovers.map(projectRover),
     buildings: sim.buildings.map(projectBuilding),
     colonist: projectColonist(sim.colonist),

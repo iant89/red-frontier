@@ -133,5 +133,19 @@ export function validateCurrentSaveShape(data: Record<string, unknown>): string[
   if (policies != null && typeof policies !== 'object') {
     warnings.push('malformed policies block — every standing order will be off');
   }
+  // Phase 4: the history block is optional (a v17 save has none); a malformed
+  // one is empty charts and an empty log, never a lost colony.
+  const history = (data as { history?: unknown }).history;
+  if (history != null && typeof history !== 'object') {
+    warnings.push('malformed history block — charts and event log start empty');
+  } else if (history != null) {
+    const h = history as { sols?: unknown; journal?: unknown };
+    if (h.sols != null && !Array.isArray(h.sols)) {
+      warnings.push('malformed history.sols — sol charts start empty');
+    }
+    if (h.journal != null && !Array.isArray(h.journal)) {
+      warnings.push('malformed history.journal — event log starts empty');
+    }
+  }
   return warnings;
 }

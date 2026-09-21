@@ -173,6 +173,8 @@ function project(sim: Simulation): unknown {
       dead: sim.colonist.dead,
     },
     history: sim.history,
+    solHistory: sim.solHistory,
+    journal: sim.journal,
 
     rovers: byId(sim.rovers).map((r) => ({
       id: r.id,
@@ -304,6 +306,11 @@ export function hashSimulationSection(sim: Simulation, section: StateSection): s
         clock: p.clock,
         nextDropSol: p.nextDropSol,
         history: p.history,
+        // Phase 4: the saved long records. Both outlive the 120-sample ring,
+        // so hashing them pins long-run determinism the ring no longer can.
+        // `_solAcc` stays out — derived transient, rebuilt on restore.
+        solHistory: (p as any).solHistory,
+        journal: (p as any).journal,
         objectives: (p as any).objectives,
         unlocks: (p as any).unlocks,
         lastDirectOrderSol: (p as any).lastDirectOrderSol,

@@ -5,9 +5,9 @@
 
 ## Current schema
 
-- `SAVE_VERSION = 17` (`src/sim/config.ts`)
+- `SAVE_VERSION = 18` (`src/sim/config.ts`)
 - `CURRENT_SAVE_VERSION = SAVE_VERSION` (`src/sim/persistence/SaveSchema.ts`)
-- Supported load range: **v3..v17 inclusive** (v3 is earliest kept migration, older is refused)
+- Supported load range: **v3..v18 inclusive** (v3 is earliest kept migration, older is refused)
 - Storage: localStorage named slots via `SaveStore` (`src/ui/SaveStore.ts`), one slot per expedition
 - Future desktop: file-based saves + Steam Cloud (see commercial review §4.2), but codec/migration contract unchanged
 
@@ -42,6 +42,7 @@ This is already how v3→v13 was built. This doc codifies it so future phases ca
 | v15 | Engineering projects (Phase 2): `objectives` board, `unlocks` registry, `lastDirectOrderSol` | `v14.ts` | Yes — unknown project/unlock ids dropped; an old colony gets the opening project and a marker set to its own sol | `sim/objectives` |
 | v16 | Autonomy stat (Phase 3): `autonomy` block — window start, best/lifetime, rung, coverage buckets, single points, last break | `v15.ts` + `autonomySave.ts` (shared sanitiser) | Yes — window opens at the save's own sol (or its Phase 2 marker), `best`/`lifetime` 0, rung re-earned; hostile blocks clamped field by field | `sim/autonomy` |
 | v17 | Standing orders (Phase 3): `policies` block — four policies, `held` building ids, action count | `v16.ts` + `policySave.ts` (shared sanitiser) | Yes — every policy off; numbers clamped, unknown resources/ids dropped | `sim/policies` |
+| v18 | Long records (Phase 4): `history` block — downsampled `sols` rows + bounded `journal` event ring | `v17.ts` + `historySave.ts` (shared sanitiser) | Yes — empty charts and log; rings re-bounded, streaming events refused, hostile rows dropped | `sim/event-journal` |
 
 Additive means: old save loads without losing progress, new fields default to empty/healthy/stock. Never throw away a field that old saves relied on.
 

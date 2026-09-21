@@ -109,11 +109,11 @@ import {
   lightningVulnerability,
 } from './state/BuildingState';
 import type { FluidFlow } from './state/ResourceState';
-import type { HistorySample } from './state/HistoryState';
+import type { HistorySample, SolHistoryRow, JournalEntry } from './state/HistoryState';
 import { batteryCapacityKWh } from './state/PowerState';
 
 // Re-export for backward compat (old import sites still work)
-export type { RoverTask, RoverCommand, RoverRules, Rover, RoverGoal, RoverPhase, Building, HistorySample, FluidFlow } from './state';
+export type { RoverTask, RoverCommand, RoverRules, Rover, RoverGoal, RoverPhase, Building, HistorySample, SolHistoryRow, JournalEntry, FluidFlow } from './state';
 export type { Colonist } from './lifesupport';
 export { defaultRoverRules, cargoMass, roverStatusText, remainingCostTotal, lightningVulnerability };
 
@@ -263,6 +263,12 @@ export class Simulation {
 
   get history(): HistorySample[] { return this.state.history; }
   set history(v: HistorySample[]) { this.state.history = v; }
+
+  /** Phase 4 — downsampled one-row-per-sol record (saved; feeds nothing). */
+  get solHistory(): SolHistoryRow[] { return this.state.solHistory; }
+
+  /** Phase 4 — the persisted, bounded, sol-stamped event journal. */
+  get journal(): JournalEntry[] { return this.state.journal; }
 
   get gameOver(): { reason: string; sol: number } | null { return this.state.gameOver; }
   set gameOver(v: { reason: string; sol: number } | null) { this.state.gameOver = v; }
@@ -709,7 +715,8 @@ export class Simulation {
       instantRatePerSol: (f) => this.instantRatePerSol(f),
     });
     ObjectiveSystem.tick(this.state);
-    HistorySystem.tick(this.state);
+    // Phase 4: the clock's new-sol flag closes one downsampled sol row.
+    HistorySystem.tick(this.state, newSol);
   }
 
   /** Test/cheat hook (TDD §22): drop a bolt on the most exposed target now. */

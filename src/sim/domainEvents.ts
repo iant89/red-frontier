@@ -91,12 +91,20 @@ export type DomainEventType = DomainEvent['type'];
 /**
  * Per-tick (actually per-drain-window) collector. Systems push; hosts drain
  * after `Simulation.step`. Drained arrays are readonly snapshots.
+ *
+ * Phase 4: an optional `sink` sees every event at push time (the persisted
+ * journal in HistoryState wires itself here). Sinks run synchronously and
+ * must never push back into the log.
  */
 export class DomainEventLog {
   private pending: DomainEvent[] = [];
 
+  /** Side channel invoked with each pushed event (Phase 4 event journal). */
+  sink: ((event: DomainEvent) => void) | null = null;
+
   push(event: DomainEvent): void {
     this.pending.push(event);
+    this.sink?.(event);
   }
 
   /** Clear and return events since the last drain. */

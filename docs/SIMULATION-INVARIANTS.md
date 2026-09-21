@@ -56,7 +56,7 @@ This file is the Phase 0 deliverable the commercial roadmap review asks for
 
 | Invariant | What it checks | Pinned by |
 |---|---|---|
-| Same seed + same transcript → same StateHash | `hashSimulation` = `rf1-<14hex>-<14hex>` over canonical JSON, sorted keys, entities sorted by id. The `core` section carries the project board, the unlock registry and `lastDirectOrderSol`, so a colony that earned something different hashes differently | `sim/transcript` (canonical 3 hashes), `sim/determinism`, `sim/state-hash`, `sim/objectives`, `sim/large-colony-stress`, `tests/golden-colony` |
+| Same seed + same transcript → same StateHash | `hashSimulation` = `rf1-<14hex>-<14hex>` over canonical JSON, sorted keys, entities sorted by id. The `core` section carries the project board, the unlock registry, `lastDirectOrderSol`, the autonomy stat, the standing orders and the Phase 4 long records (sol history + event journal), so a colony that earned — or remembers — something different hashes differently | `sim/transcript` (canonical 3 hashes), `sim/determinism`, `sim/state-hash`, `sim/objectives`, `sim/autonomy`, `sim/policies`, `sim/event-journal`, `sim/large-colony-stress`, `tests/golden-colony` |
 | Save/load preserves deterministic state | Snapshot → restore → step produces same hash as live | `sim/persistence`, `sim/save-validation`, `sim/water`, `sim/maintenance`, `sim/engineering` |
 | Replay produces identical state hashes | `npm run test:replay` green | `sim/transcript`, CI `replay` job (Phase 0) |
 | Worker and in-process produce same results | View payloads equal, commands ack same | `sim/worker`, `sim/host`, `worker-smoke` (both transports, CI) |

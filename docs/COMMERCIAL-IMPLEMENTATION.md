@@ -3,10 +3,10 @@
 *Tracks progress against `COMMERCIAL-ROADMAP.md` (verbatim) and `COMMERCIAL-ROADMAP-REVIEW.md` (re-baseline).*
 *This file is the living tracker; the two roadmap docs are the preserved source.*
 
-Last updated: 2026-09-20
-Branch: `arena/01a0c09f-red-frontier`
-Save version: 15 (v14 tutorial, v15 projects + unlock registry — see SAVE-COMPATIBILITY.md)
-Test suite: 94 suites / 1080 checks (after Phase 2: objectives + projects-panel)
+Last updated: 2026-09-21
+Branch: `arena/01a0c1a4-red-frontier`
+Save version: 18 (v16 autonomy, v17 standing orders, v18 long records — see SAVE-COMPATIBILITY.md)
+Test suite: 98 suites / 1170 checks (after Phase 4: event-journal + dashboard)
 
 ---
 
@@ -183,41 +183,46 @@ Full spec: `docs/COMMERCIAL-PHASE-2.md`.
 
 ---
 
-## Phase 3 — Make Automation the Progression System
+## Phase 3 — Make Automation the Progression System (DONE, 2026-09-20, PR #72)
 
 **Goal:** Progression about moving from manual → autonomous.
 
 MANUAL → ASSISTED → AUTOMATED → REDUNDANT → AUTONOMOUS
 Player: OPERATOR → ENGINEER → COLONY ARCHITECT
 
-Re-baselined notes:
+Both slices shipped per `docs/COMMERCIAL-PHASE-3.md` (the full spec):
 
-- Missing piece is PolicySystem: player-authored standing orders ("keep iron >500kg") that sim satisfies by issuing same commands player would
-- Two hard requirements: policies act through command path so transcripts/determinism survive; policy-issued actions marked so autonomy stat stays honest (§4.1 AUTONOMY.md)
-- Ship 3–5 policies, not scripting language
-- OPERATOR/ENGINEER/ARCHITECT label tied to how much work is policy-driven
-- Needs AUTONOMY stat defined — DONE in `docs/design/AUTONOMY.md` (three faces: streak, coverage, resilience, command classification, breaker rules, rung gates, save v14 schema, test plan)
+- [x] **Slice 1 — the stat** (`AutonomyState` + `AutonomySystem`): streak with the five breakers (edge-triggered), three-bucket coverage, resilience/single-points, the five-rung ladder with OPERATOR/ENGINEER/COLONY ARCHITECT identity, command classification (intervention/policy/dev, refused ≠ intervention), `autonomy/break` + `autonomy/rung` events, HUD `Autonomy 6.8 sols · ENGINEER` chip, P2 flagship retargeted onto the measured streak. Save v16.
+- [x] **Slice 2 — PolicySystem**: four standing orders — stockpile (seam scorer + seam claim), night power (tier ≥ 2 shed with hysteresis), storm shelter (re-arm + recall), auto-maintain (worst-first repair/clean) — acting through the same seams a player's order takes, marked policy-issued so the stat stays honest. `policy/*` commands + protocol shapes; Standing Orders card gated on `advancedAutomation`; `policy/acted` events. Save v17.
+- [x] **Re-baselined notes all met**: policies act inside the sim (transcripts/determinism survive — never via noteCommandResult); 4 policies, no scripting language; the identity label is measured from the stat; AUTONOMY.md defined first (§4.1).
+- [x] Tests: `tests/sim/autonomy.test.ts` (23), `tests/sim/policies.test.ts` (18+); hashes re-pinned.
 
 ---
 
-## Phase 4 — Build the Colony Operations Dashboard
+## Phase 4 — Build the Colony Operations Dashboard (DONE, 2026-09-21)
 
 **Goal:** Let players understand what increasingly complex colony is doing.
 
-Mock: POWER 84% STABLE, WATER 71% WARNING, etc., AUTONOMY 6.8 sols, NEXT BOTTLENECK
+Full spec: `docs/COMMERCIAL-PHASE-4.md`. All three re-baselined pieces shipped
+plus the review's P13 rider:
 
-Re-baselined notes:
+- [x] **Extended history** — `HistorySample` widened: ore (mined bulk), steel, components, `roverUtil` (the AUTONOMY work split: moving/working ÷ fleet), and `prod`/`cons` trailing-sol rates per fluid (the existing flow-window arithmetic split by direction).
+- [x] **Sol-bucketed downsampling** — `SolHistoryRow` ring (`SOL_HISTORY_ROWS = 240`): sol-average gen/load/utilization, sol-worst battery, end-of-sol pools/ledgers, per-fluid sol totals. The within-sol accumulator is derived (unsaved, unhashed, reset with the windows); rows feed nothing back.
+- [x] **Persisted event journal (§3.5)** — `state.journal`, bounded (`EVENT_JOURNAL_MAX = 300`), sol-stamped. `DomainEventLog.sink` (one-line hook) journals at push time: every system writes it unknowingly. Streaming types (resource/produced|consumed, rover/moved) are refused by `journalWorthy`, and the restorer re-applies the list to hostile saves. P11/P12 aggregate later.
+- [x] **Dashboard UI** — `src/ui/DashboardPanel.ts`: pure model + pure markup + canvas, overlay on the alert-history frame. Six rows matching the roadmap mock (POWER/WATER/OXYGEN/FOOD %, ROVERS n/m, AUTONOMY streak·identity), the nine graph checkboxes with a Live/Sols scope toggle (live ring vs `solHistory`), persisted choices. Topbar 📊 button + `O` hotkey + Esc chain. Reads the mirror only — no command path exists out of it.
+- [x] **P13 single-points-of-failure row** — chains below their redundancy gate named on the card (measured, via AutonomySystem resilience), or "None — every critical chain has a spare."
+- [x] **"NEXT BOTTLENECK" withheld** — P5's panel; description/advice stay separate (pinned in `ui/dashboard`).
+- [x] **Save v18** — `history: { sols, journal }` block, `migrations/v17.ts`, shared sanitiser `persistence/historySave.ts` (rings re-bounded, streaming refused), validator warnings. Range v3..v18.
+- [x] **State hash** — `solHistory` + `journal` in `core` (both outlive the 120-sample ring: long-run determinism pinned); `_solAcc` excluded (derived). Transcript, golden colony and stress hashes deliberately re-pinned — shape change only, no tick output moved.
+- [x] **Tests** — `sim/history-system` +9, `sim/event-journal` (12, new), `ui/dashboard` (14, new); 98 suites / 1170 checks green; browser smoke: dashboard opens, rows/graphs/scope/checks behave, zero console errors.
 
-- Foundation exists: HistorySystem samples power + fluid vitals; DomainEventLog streams 19 event types; HUD vitals panel
-- Missing: ore/steel/components series, rover utilization, dashboard UI, retention/downsampling
-- Extend HistorySystem: add ore/steel/components series, rover utilization (fraction fleet with task), production/consumption per resource (flow accumulators exist), sol-bucketed downsampling so 200-sol colony doesn't hold 300k samples
-- Dashboard reads mirror, must not touch sim state (host seam enforces, keep dashboard pure view)
-- Do NOT put "NEXT BOTTLENECK" in dashboard — that's P5 advisory panel, keeps description/advice separate
-- Prereq: persisted event log (shared with P11/P12) — DomainEventLog streams in-memory today but isn't saved. Build bounded persisted sol-stamped event ring once (P4 infra) and P11/P12 become aggregations.
+### Definition of done (review §7)
+
+- M4: for any observed failure, playtesters can answer "why failing" from the dashboard alone — the panel ships; the playtest is the open item.
 
 ---
 
-## Phase 5 — Build the Bottleneck System
+## Phase 5 — Build the Bottleneck System (NEXT)
 
 **Goal:** Turn raw simulation info into useful engineering decisions.
 
@@ -314,9 +319,9 @@ Numbers placeholders — set before playtests so can't be moved to match results
    - Strings externalization
    - Tutorial system (situation warnings)
 2. **Engineering Projects** — explicit reasons to interact — DONE (ObjectiveSystem + data table + unlock registry + panel)
-3. **Automation Progression** — manual→automated→autonomous central — after P2
-4. **Operations Dashboard** — complex colonies understandable — after P3
-5. **Bottleneck/Advisor** — simulation data → useful decisions — after P4
+3. **Automation Progression** — manual→automated→autonomous central — DONE (autonomy stat + PolicySystem, P3)
+4. **Operations Dashboard** — complex colonies understandable — DONE (extended history + event journal + dashboard, P4; M4 playtest open)
+5. **Bottleneck/Advisor** — simulation data → useful decisions — NEXT (pure analyzer, 3 types)
 6. **Exploration + POIs** — reason to leave starting colony — after P5
 7. **Campaign** — beginning/middle/end — after P6/P7
 8. **Replayability** — scenarios + starting conditions — after campaign
@@ -327,7 +332,41 @@ Numbers placeholders — set before playtests so can't be moved to match results
 
 ---
 
-## Artifacts produced this session (Phase 2)
+## Artifacts produced this session (Phase 4)
+
+- `src/sim/state/HistoryState.ts` — extended `HistorySample`, `SolHistoryRow`, `SolAccumulator`, journal entry type + `journalWorthy` skip list + `pushJournal`
+- `src/sim/systems/HistorySystem.ts` — wider sample, `tick(state, newSol)` + `rollSol`, `fleetUtilization`, `flowRatePerSol`, accumulator resets
+- `src/sim/state/ColonyState.ts` — `solHistory` / `journal` / `_solAcc` fields, `DomainEventLog.sink` wiring
+- `src/sim/domainEvents.ts` — the `sink` hook
+- `src/sim/Simulation.ts` — `newSol` forwarded to HistorySystem; `solHistory` / `journal` accessors; type re-exports
+- `src/sim/config.ts` — `SOL_HISTORY_ROWS = 240`, `EVENT_JOURNAL_MAX = 300`, save version 18
+- `src/sim/persistence/SaveSchema.ts` — `history` block (`HistorySave`) v18
+- `src/sim/persistence/historySave.ts` — the block's shared sanitiser
+- `src/sim/persistence/migrations/v17.ts` — v17 → v18
+- `src/sim/persistence/SaveMigrations.ts`, `ColonyPersistence.ts`, `SaveValidator.ts` — chain, snapshot/restore, warnings
+- `src/sim/debug/StateHash.ts` — `solHistory` + `journal` into the `core` section
+- `src/sim/host/projection.ts`, `mirror.ts`, `viewModels.ts` — `solHistory` in the read model; samples deep-copied
+- `src/ui/DashboardPanel.ts` — the operations dashboard (pure model/markup + canvas graphs)
+- `src/ui/HUD.ts` — 📊 topbar button, dashboard delegates, per-frame update
+- `src/app/InputController.ts` — `O` hotkey + the Esc chain link
+- `src/ui/strings.ts` — `dashboard.*` copy
+- `src/style.css` — `#dashboard-overlay` styles
+- `tests/sim/history-system.test.ts` (+9), `tests/sim/event-journal.test.ts` (12, new), `tests/ui/dashboard.test.ts` (14, new), `tests/full.test.ts` links
+- `tests/sim/maintenance.test.ts`, `tests/sim/policies.test.ts` — version pins 18
+- Pinned hashes re-recorded: canonical transcripts (`Transcript.ts` + test), golden colony, `tests/sim/large-colony-stress.test.ts`, `benchmarks/baseline.md`
+- `docs/COMMERCIAL-PHASE-4.md` — the phase spec; `docs/SAVE-COMPATIBILITY.md` v18 row; `docs/SIMULATION-INVARIANTS.md` hash-section note; this file updated
+- Browser smoke (playwright, sandbox): wizard → O opens dashboard → 6 rows in mock order → 4 vitals graphs paint from live history → checkbox adds a 5th → sols empty-state → Esc/buttons — all green, zero console errors
+
+## Artifacts produced earlier (Phase 3)
+
+- `src/sim/state/AutonomyState.ts`, `src/sim/systems/AutonomySystem.ts` — the stat (streak/coverage/resilience/rungs), `AUTONOMY_TUNING`, `autonomySnapshot`
+- `src/sim/state/PolicyState.ts`, `src/sim/systems/PolicySystem.ts` — the four standing orders, `policySnapshot`, `POLICY_UNLOCK`
+- `src/ui/ProjectsPanel.ts` — autonomy chip + Standing Orders card
+- Save v16 (`migrations/v15.ts`, `autonomySave.ts`) + v17 (`migrations/v16.ts`, `policySave.ts`), validator warnings
+- `tests/sim/autonomy.test.ts` (23), `tests/sim/policies.test.ts` (18)
+- `docs/COMMERCIAL-PHASE-3.md` — the phase spec
+
+## Artifacts produced earlier (Phase 2)
 
 - `src/sim/unlocks.ts` — the unlock registry (ids, info, grant/has/list, pure)
 - `src/sim/projects/types.ts` — declarative requirement records + project/project-view shapes
@@ -385,7 +424,7 @@ Phase 1 infrastructure + tutorial (review §3.1, §4.6, §5 P1):
 ```bash
 npm install
 npm run typecheck
-npm test                    # 89 suites / 1027 checks, ~4.5 min
+npm test                    # 98 suites / 1170 checks, ~10 min
 npm run test:replay         # canonical 3 scenarios
 node scripts/generate-golden-colony.mjs --check  # golden colony hash
 npm run test:bench          # fleet scaling

@@ -39,6 +39,7 @@ import {
   SPAWN_X,
   SPAWN_Z,
   devLevelMul,
+  EVENT_JOURNAL_MAX,
 } from '../config';
 import {
   emptyAmounts,
@@ -65,7 +66,8 @@ import { makePools, makeColonist, type Colonist, type FluidPools } from '../life
 import { DROP_FIRST_SOL_MIN, DROP_FIRST_SOL_MAX } from '../config';
 import { defaultRoverRules, type Rover, type RoverTask } from './RoverState';
 import type { Building } from './BuildingState';
-import type { HistorySample } from './HistoryState';
+import type { HistorySample, SolHistoryRow, JournalEntry, SolAccumulator } from './HistoryState';
+import { emptySolAccumulator, pushJournal } from './HistoryState';
 import { emptyFlows, type FluidFlow } from './ResourceState';
 import { emptyTutorialState, type TutorialState } from './TutorialState';
 import { emptyObjectiveState, type ObjectiveState } from './ObjectiveState';
@@ -110,6 +112,23 @@ export interface ColonyState {
   flowWindow: Array<{ t: number; f: Record<FluidId, FluidFlow> }>;
   history: HistorySample[];
   lastHistoryAt: number;
+  /**
+   * Phase 4 — the downsampled long record: one row per closed sol, bounded.
+   * Saved from v18; the dashboard's sols view (and later the P11 report)
+   * reads these. Feeds nothing back into the sim.
+   */
+  solHistory: SolHistoryRow[];
+  /**
+   * Phase 4 — the persisted event journal: discrete domain events, bounded,
+   * sol-stamped (COMMERCIAL-ROADMAP-REVIEW §3.5). Saved from v18. Streaming
+   * events never enter (see HistoryState's skip list). Feeds nothing back.
+   */
+  journal: JournalEntry[];
+  /**
+   * Phase 4 — transient within-sol accumulator for the rolling sol row.
+   * Derived, never saved, never hashed; reset with the sampling windows.
+   */
+  _solAcc: SolAccumulator;
 
   gameOver: { reason: string; sol: number } | null;
   dustTransmission: number;
@@ -200,6 +219,9 @@ export function createColonyState(params: ColonyStateParams): ColonyState {
   const flows = emptyFlows();
   const lastFlows = emptyFlows();
   const history: HistorySample[] = [];
+  const solHistory: SolHistoryRow[] = [];
+  const journal: JournalEntry[] = [];
+  const solAcc = emptySolAccumulator();
   const flowWindow: Array<{ t: number; f: Record<FluidId, FluidFlow> }> = [];
   const lastHistoryAt = -Infinity;
 
@@ -278,7 +300,7 @@ export function createColonyState(params: ColonyStateParams): ColonyState {
     food: Math.min(fluid.food, POD_STARTING_FLUIDS.food * supplies),
   };
 
-  return {
+  const state: ColonyState = {
     version: SAVE_VERSION,
     seed,
     difficulty,
@@ -303,6 +325,9 @@ export function createColonyState(params: ColonyStateParams): ColonyState {
     flowWindow,
     history,
     lastHistoryAt,
+    solHistory,
+    journal,
+    _solAcc: solAcc,
     gameOver: null,
     dustTransmission: BASE_DUST_TRANSMISSION,
     nextDropSol,
@@ -323,6 +348,13 @@ export function createColonyState(params: ColonyStateParams): ColonyState {
     _componentCapacity,
     stormAnnounced: false,
   };
+
+  // Phase 4 — journal every discrete domain event as it is pushed. The hook
+  // resolves the state lazily, so a restore swapping `journal`/`clock` on
+  // this object never unwires it (restore keeps this very DomainEventLog).
+  state.domainEvents.sink = (e) => pushJournal(state.journal, e, state.clock.solsElapsed, EVENT_JOURNAL_MAX);
+
+  return state;
 }
 
 /**

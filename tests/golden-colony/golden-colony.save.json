@@ -1,5 +1,5 @@
 {
-  "version": 17,
+  "version": 18,
   "seed": 9001,
   "difficulty": "pioneer",
   "worldHalf": 640,
@@ -2638,6 +2638,610 @@
       "food",
       "fleet",
       "spares"
+    ]
+  },
+  "history": {
+    "sols": [
+      {
+        "sol": 1,
+        "genKwAvg": 26.338199921162598,
+        "loadKwAvg": 29.610042186351915,
+        "storedFracMin": 0,
+        "roverUtilAvg": 0.6623376623376604,
+        "water": 58.409516534026274,
+        "oxygen": 12.824133703474674,
+        "food": 96.30180076961706,
+        "ore": 307.8193911460693,
+        "steel": 0,
+        "components": 0,
+        "prod": {
+          "water": 3.782798951415137,
+          "oxygen": 1.378296408441971,
+          "food": 1.2917523614488264
+        },
+        "cons": {
+          "water": 7.374246831230431,
+          "oxygen": 0.5542249999999882,
+          "food": 0.9896875000000672
+        }
+      },
+      {
+        "sol": 2,
+        "genKwAvg": 23.030508114125453,
+        "loadKwAvg": 23.030508114125453,
+        "storedFracMin": 0,
+        "roverUtilAvg": 0.008333333333333333,
+        "water": 65.58258064681584,
+        "oxygen": 13.81813679628396,
+        "food": 96.2774335055696,
+        "ore": 360.6285565065358,
+        "steel": 0,
+        "components": 0,
+        "prod": {
+          "water": 16.87282845386054,
+          "oxygen": 1.8340030928110123,
+          "food": 1.4756327359791963
+        },
+        "cons": {
+          "water": 9.69976434107232,
+          "oxygen": 0.8400000000000474,
+          "food": 1.4999999999999694
+        }
+      },
+      {
+        "sol": 3,
+        "genKwAvg": 22.379132755977068,
+        "loadKwAvg": 22.379132755977068,
+        "storedFracMin": 0,
+        "roverUtilAvg": 0,
+        "water": 72.46173029960687,
+        "oxygen": 14.758651126542073,
+        "food": 96.19709789380975,
+        "ore": 340.68679600757184,
+        "steel": 0,
+        "components": 0,
+        "prod": {
+          "water": 16.382914952707708,
+          "oxygen": 1.7807516252944406,
+          "food": 1.4197127964541163
+        },
+        "cons": {
+          "water": 9.502800886078047,
+          "oxygen": 0.8401750000000474,
+          "food": 1.5003124999999693
+        }
+      },
+      {
+        "sol": 4,
+        "genKwAvg": 21.476470341442752,
+        "loadKwAvg": 21.476470341442752,
+        "storedFracMin": 0,
+        "roverUtilAvg": 0,
+        "water": 78.93935864258007,
+        "oxygen": 15.623436581939925,
+        "food": 96.03161333005212,
+        "ore": 321.59319890707627,
+        "steel": 0,
+        "components": 0,
+        "prod": {
+          "water": 15.686209303993229,
+          "oxygen": 1.7050227504342053,
+          "food": 1.3345638444562256
+        },
+        "cons": {
+          "water": 9.207616547181182,
+          "oxygen": 0.8401750000000474,
+          "food": 1.5003124999999693
+        }
+      },
+      {
+        "sol": 5,
+        "genKwAvg": 18.68669762322966,
+        "loadKwAvg": 18.68669762322966,
+        "storedFracMin": 0,
+        "roverUtilAvg": 0,
+        "water": 84.49316182613937,
+        "oxygen": 16.26616793931829,
+        "food": 95.51383535691001,
+        "ore": 304.98660770445275,
+        "steel": 0,
+        "components": 0,
+        "prod": {
+          "water": 13.643311602198198,
+          "oxygen": 1.4829686524130075,
+          "food": 0.9822704350715517
+        },
+        "cons": {
+          "water": 8.088544004801136,
+          "oxygen": 0.8401750000000474,
+          "food": 1.5003124999999693
+        }
+      }
+    ],
+    "journal": [
+      {
+        "sol": 0.34,
+        "type": "building/placed",
+        "buildingId": 1002,
+        "kind": "warehouse",
+        "x": 34,
+        "z": 0
+      },
+      {
+        "sol": 0,
+        "type": "autonomy/break",
+        "reason": "intervention",
+        "streak": 0
+      },
+      {
+        "sol": 0,
+        "type": "autonomy/rung",
+        "from": "manual",
+        "to": "assisted",
+        "identity": "operator"
+      },
+      {
+        "sol": 0,
+        "type": "tutorial/milestone",
+        "milestone": "first-resource-found"
+      },
+      {
+        "sol": 0,
+        "type": "tutorial/milestone",
+        "milestone": "first-mine"
+      },
+      {
+        "sol": 0,
+        "type": "tutorial/milestone",
+        "milestone": "first-build"
+      },
+      {
+        "sol": 0,
+        "type": "tutorial/milestone",
+        "milestone": "first-power"
+      },
+      {
+        "sol": 0,
+        "type": "tutorial/milestone",
+        "milestone": "first-automation"
+      },
+      {
+        "sol": 0.34208333333333313,
+        "type": "building/placed",
+        "buildingId": 1003,
+        "kind": "solar",
+        "x": 30.020218157203516,
+        "z": 15.962033134720288
+      },
+      {
+        "sol": 0,
+        "type": "autonomy/break",
+        "reason": "intervention",
+        "streak": 0.002083333333333104
+      },
+      {
+        "sol": 0.34416666666666623,
+        "type": "building/placed",
+        "buildingId": 1004,
+        "kind": "battery",
+        "x": 22.306006985677246,
+        "z": 25.660125727574247
+      },
+      {
+        "sol": 0,
+        "type": "autonomy/break",
+        "reason": "intervention",
+        "streak": 0.002083333333333104
+      },
+      {
+        "sol": 0,
+        "type": "tutorial/milestone",
+        "milestone": "first-move"
+      },
+      {
+        "sol": 0.34624999999999934,
+        "type": "building/placed",
+        "buildingId": 1005,
+        "kind": "extractor",
+        "x": 11.62868487307274,
+        "z": 31.949549106720884
+      },
+      {
+        "sol": 0,
+        "type": "autonomy/break",
+        "reason": "intervention",
+        "streak": 0.002083333333333104
+      },
+      {
+        "sol": 0.34833333333333244,
+        "type": "building/placed",
+        "buildingId": 1006,
+        "kind": "oxygenator",
+        "x": -0.5933818188676382,
+        "z": 33.9948216353173
+      },
+      {
+        "sol": 0,
+        "type": "autonomy/break",
+        "reason": "intervention",
+        "streak": 0.002083333333333104
+      },
+      {
+        "sol": 0.35041666666666554,
+        "type": "building/placed",
+        "buildingId": 1007,
+        "kind": "greenhouse",
+        "x": -16.483527088375457,
+        "z": 29.737070042739457
+      },
+      {
+        "sol": 0,
+        "type": "autonomy/break",
+        "reason": "intervention",
+        "streak": 0.002083333333333104
+      },
+      {
+        "sol": 0.35249999999999865,
+        "type": "building/placed",
+        "buildingId": 1008,
+        "kind": "refinery",
+        "x": -28.514799310144422,
+        "z": 18.517727190510914
+      },
+      {
+        "sol": 0,
+        "type": "autonomy/break",
+        "reason": "intervention",
+        "streak": 0.002083333333333104
+      },
+      {
+        "sol": 0.35458333333333175,
+        "type": "building/placed",
+        "buildingId": 1009,
+        "kind": "workshop",
+        "x": -33.87061973511935,
+        "z": 2.9632952534203936
+      },
+      {
+        "sol": 0,
+        "type": "autonomy/break",
+        "reason": "intervention",
+        "streak": 0.002083333333333104
+      },
+      {
+        "sol": 0.35666666666666486,
+        "type": "building/placed",
+        "buildingId": 1010,
+        "kind": "garage",
+        "x": -31.297165017382973,
+        "z": -13.2848583686353
+      },
+      {
+        "sol": 0,
+        "type": "autonomy/break",
+        "reason": "intervention",
+        "streak": 0.002083333333333104
+      },
+      {
+        "sol": 0.35874999999999796,
+        "type": "building/placed",
+        "buildingId": 1011,
+        "kind": "waterTank",
+        "x": -21.39689329569446,
+        "z": -26.42296268953702
+      },
+      {
+        "sol": 0,
+        "type": "autonomy/break",
+        "reason": "intervention",
+        "streak": 0.002083333333333104
+      },
+      {
+        "sol": 0.36083333333333106,
+        "type": "building/placed",
+        "buildingId": 1012,
+        "kind": "pumpStation",
+        "x": -10.506577808748217,
+        "z": -32.33592155403522
+      },
+      {
+        "sol": 0,
+        "type": "autonomy/break",
+        "reason": "intervention",
+        "streak": 0.002083333333333104
+      },
+      {
+        "sol": 0.3670833333333304,
+        "type": "building/completed",
+        "buildingId": 1002,
+        "kind": "warehouse"
+      },
+      {
+        "sol": 0.3691666666666635,
+        "type": "building/completed",
+        "buildingId": 1003,
+        "kind": "solar"
+      },
+      {
+        "sol": 0.3712499999999966,
+        "type": "building/completed",
+        "buildingId": 1004,
+        "kind": "battery"
+      },
+      {
+        "sol": 0.3733333333333297,
+        "type": "building/completed",
+        "buildingId": 1005,
+        "kind": "extractor"
+      },
+      {
+        "sol": 0,
+        "type": "tutorial/milestone",
+        "milestone": "first-water"
+      },
+      {
+        "sol": 0.3754166666666628,
+        "type": "building/completed",
+        "buildingId": 1006,
+        "kind": "oxygenator"
+      },
+      {
+        "sol": 0,
+        "type": "tutorial/milestone",
+        "milestone": "first-oxygen"
+      },
+      {
+        "sol": 0.3774999999999959,
+        "type": "building/completed",
+        "buildingId": 1007,
+        "kind": "greenhouse"
+      },
+      {
+        "sol": 0,
+        "type": "tutorial/milestone",
+        "milestone": "first-food"
+      },
+      {
+        "sol": 0,
+        "type": "unlock/granted",
+        "unlock": "stableOperations"
+      },
+      {
+        "sol": 0,
+        "type": "objective/completed",
+        "project": "establishSurvival"
+      },
+      {
+        "sol": 0,
+        "type": "objective/offered",
+        "project": "surviveFirstStorm"
+      },
+      {
+        "sol": 0,
+        "type": "objective/offered",
+        "project": "industrialize"
+      },
+      {
+        "sol": 0.379583333333329,
+        "type": "building/completed",
+        "buildingId": 1008,
+        "kind": "refinery"
+      },
+      {
+        "sol": 0.3816666666666621,
+        "type": "building/completed",
+        "buildingId": 1009,
+        "kind": "workshop"
+      },
+      {
+        "sol": 0.3837499999999952,
+        "type": "building/completed",
+        "buildingId": 1010,
+        "kind": "garage"
+      },
+      {
+        "sol": 0,
+        "type": "autonomy/break",
+        "reason": "intervention",
+        "streak": 0.024999999999997247
+      },
+      {
+        "sol": 0,
+        "type": "autonomy/break",
+        "reason": "intervention",
+        "streak": 0.04374999999999518
+      },
+      {
+        "sol": 0,
+        "type": "autonomy/break",
+        "reason": "intervention",
+        "streak": 0.045833333333328286
+      },
+      {
+        "sol": 0,
+        "type": "tutorial/milestone",
+        "milestone": "first-haul"
+      },
+      {
+        "sol": 0,
+        "type": "tutorial/warning",
+        "warning": "power-low"
+      },
+      {
+        "sol": 0,
+        "type": "tutorial/warning",
+        "warning": "battery-low"
+      },
+      {
+        "sol": 0.6925000000000124,
+        "type": "rover/repaired",
+        "roverId": 1000,
+        "reason": "garage-service"
+      },
+      {
+        "sol": 0.7027083333333474,
+        "type": "power/shortage",
+        "level": "critical",
+        "generationKw": 28.12545974961687,
+        "demandKw": 125.53365602460192
+      },
+      {
+        "sol": 0,
+        "type": "autonomy/break",
+        "reason": "power-critical",
+        "streak": 0.2272916666666956
+      },
+      {
+        "sol": 1,
+        "type": "tutorial/warning",
+        "warning": "battery-low"
+      },
+      {
+        "sol": 1,
+        "type": "tutorial/warning",
+        "warning": "battery-low"
+      },
+      {
+        "sol": 2,
+        "type": "tutorial/milestone",
+        "milestone": "first-objective"
+      },
+      {
+        "sol": 2,
+        "type": "tutorial/warning",
+        "warning": "battery-low"
+      },
+      {
+        "sol": 2.191250000000118,
+        "type": "rover/disabled",
+        "roverId": 1013,
+        "reason": "battery-depleted"
+      },
+      {
+        "sol": 2,
+        "type": "tutorial/warning",
+        "warning": "rover-stranded"
+      },
+      {
+        "sol": 2,
+        "type": "tutorial/warning",
+        "warning": "storm-inbound"
+      },
+      {
+        "sol": 2.5818750000001045,
+        "type": "storm/started",
+        "kind": "devil"
+      },
+      {
+        "sol": 2,
+        "type": "tutorial/warning",
+        "warning": "battery-low"
+      },
+      {
+        "sol": 2,
+        "type": "tutorial/warning",
+        "warning": "rover-stranded"
+      },
+      {
+        "sol": 2.8985416666668207,
+        "type": "storm/ended"
+      },
+      {
+        "sol": 2,
+        "type": "tutorial/milestone",
+        "milestone": "first-storm-survived"
+      },
+      {
+        "sol": 3.0285416666668366,
+        "type": "rover/disabled",
+        "roverId": 1000,
+        "reason": "battery-depleted"
+      },
+      {
+        "sol": 3,
+        "type": "tutorial/warning",
+        "warning": "battery-low"
+      },
+      {
+        "sol": 3,
+        "type": "tutorial/warning",
+        "warning": "rover-stranded"
+      },
+      {
+        "sol": 3,
+        "type": "tutorial/warning",
+        "warning": "storm-inbound"
+      },
+      {
+        "sol": 3,
+        "type": "tutorial/warning",
+        "warning": "battery-low"
+      },
+      {
+        "sol": 3,
+        "type": "tutorial/warning",
+        "warning": "rover-stranded"
+      },
+      {
+        "sol": 3.849375000000201,
+        "type": "storm/started",
+        "kind": "regional"
+      },
+      {
+        "sol": 3,
+        "type": "tutorial/warning",
+        "warning": "panels-dirty"
+      },
+      {
+        "sol": 4,
+        "type": "tutorial/warning",
+        "warning": "battery-low"
+      },
+      {
+        "sol": 4,
+        "type": "tutorial/warning",
+        "warning": "rover-stranded"
+      },
+      {
+        "sol": 4,
+        "type": "tutorial/warning",
+        "warning": "panels-dirty"
+      },
+      {
+        "sol": 4.520416666666871,
+        "type": "storm/ended"
+      },
+      {
+        "sol": 4.582500000000214,
+        "type": "rover/disabled",
+        "roverId": 1001,
+        "reason": "battery-depleted"
+      },
+      {
+        "sol": 4,
+        "type": "tutorial/warning",
+        "warning": "battery-low"
+      },
+      {
+        "sol": 4,
+        "type": "tutorial/warning",
+        "warning": "rover-stranded"
+      },
+      {
+        "sol": 4,
+        "type": "tutorial/warning",
+        "warning": "panels-dirty"
+      },
+      {
+        "sol": 5,
+        "type": "tutorial/warning",
+        "warning": "battery-low"
+      },
+      {
+        "sol": 5,
+        "type": "tutorial/warning",
+        "warning": "rover-stranded"
+      }
     ]
   },
   "tutorial": {
