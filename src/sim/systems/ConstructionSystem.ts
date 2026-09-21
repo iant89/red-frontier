@@ -62,6 +62,7 @@ import { cargoMass, enterWork, taskTargetsBuilding } from '../state/RoverState';
 import { emptyCraft } from '../state/BuildingState';
 import { LogisticsSystem } from './LogisticsSystem';
 import { evaluateSite } from '../rules';
+import { blueprintLock, blueprintLockReason } from '../unlocks';
 import type { BuildingKind, ResourceAmounts } from '../defs';
 import { BUILDINGS, ROVERS, RESOURCES, ALL_RESOURCES, emptyAmounts } from '../defs';
 import type { Severity } from '../alerts';
@@ -114,6 +115,11 @@ export class ConstructionSystem {
    * `building/place` re-checks before anything is sited.
    */
   static verdict(state: ColonyState, kind: BuildingKind, x: number, z: number): string | null {
+    // Gating before ground: a blueprint the colony has not earned is refused
+    // whatever the terrain says. The rule is `blueprintLock`, shared with the
+    // host mirror, so the ghost preview and the placement agree.
+    const missing = blueprintLock(state.unlocks, BUILDINGS[kind].requiresUnlock);
+    if (missing) return blueprintLockReason(missing);
     return evaluateSite(kind, x, z, {
       ground: state.world,
       buildings: state.buildings,

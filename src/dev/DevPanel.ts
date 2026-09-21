@@ -28,6 +28,7 @@ import type { StormKindReal } from '../sim/weather';
 import { stormLabel } from '../sim/weather';
 import { DEV_MAX_BUILDING_LEVEL, DEV_UPGRADE_STEP } from '../sim/config';
 import { DevMode, type SpawnSpec } from './DevMode';
+import { formatRequirement } from '../ui/ProjectsPanel';
 
 export type DevSelection =
   | { type: 'rover' | 'building' | 'colonist'; id: number }
@@ -47,6 +48,8 @@ export interface DevPanelCallbacks {
   setHint(text: string | null): void;
   /** Flip the developer-mode master switch (independent of panel visibility). */
   onToggleEnabled(on: boolean): void;
+  /** Whether the projects card is collapsed — the M2 readout records it. */
+  isProjectsCardCollapsed?(): boolean;
   onClose(): void;
 }
 
@@ -71,6 +74,49 @@ function fracToClock(frac: number): string {
   const h = Math.floor(hours);
   const m = Math.floor((hours - h) * 60);
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+/** The M2 playtest readout as plain fields. Pure — pinned in tests. */
+export interface PlaytestReadout {
+  project: string;
+  next: string;
+  landed: string;
+  streak: string;
+  card: string;
+}
+
+export function playtestReadout(sim: SimView, cardCollapsed: boolean): PlaytestReadout {
+  const board = sim.objectives;
+  const lead = board
+    ? [...board.active].sort((a, b) => b.met / b.total - a.met / a.total)[0]
+    : undefined;
+  const nextReq = lead?.requirements.find((r) => !r.met);
+  const first = board?.completed[0];
+  return {
+    project: lead ? `${lead.title} ${lead.met}/${lead.total}` : board && board.completed.length ? 'all complete' : '—',
+    next: nextReq ? `${nextReq.label} (${formatRequirement(nextReq)})` : lead ? 'all requirements hold' : '—',
+    landed: first
+      ? `${board!.completed.length} · first "${first.title}" on sol ${Math.round(first.sol) + 1}`
+      : `0 · sol ${sim.clock.sol + 1} now`,
+    streak: sim.autonomy
+      ? `${sim.autonomy.current.toFixed(1)} sols hands-off · ${sim.autonomy.rung.toUpperCase()}`
+      : board
+        ? `${board.solsWithoutOrder.toFixed(1)} sols without an order`
+        : '—',
+    card: cardCollapsed ? 'collapsed' : 'open',
+  };
+}
+
+export function playtestReadoutText(sim: SimView, cardCollapsed: boolean): string {
+  const r = playtestReadout(sim, cardCollapsed);
+  return [
+    `[M2] ${sim.clock.format()}`,
+    `project: ${r.project}`,
+    `next: ${r.next}`,
+    `landed: ${r.landed}`,
+    `streak: ${r.streak}`,
+    `card: ${r.card}`,
+  ].join('\n');
 }
 
 export class DevPanel {
@@ -231,6 +277,23 @@ export class DevPanel {
         </div>
       </details>
 
+      <details class="dev-sec">
+        <summary>📋 Playtest (M2)</summary>
+        <div class="dev-grid">
+          <div class="stat"><span class="k">Project</span><span class="v" id="dv-pt-project">—</span></div>
+          <div class="stat"><span class="k">Next ask</span><span class="v" id="dv-pt-next">—</span></div>
+          <div class="stat"><span class="k">Landed</span><span class="v" id="dv-pt-landed">—</span></div>
+          <div class="stat"><span class="k">Streak</span><span class="v" id="dv-pt-streak">—</span></div>
+          <div class="stat"><span class="k">Card</span><span class="v" id="dv-pt-card">—</span></div>
+          <div class="note dim">Read-only. The M2 check is "can the player state their
+            current project's goal unprompted?" — see docs/PLAYTEST-M2.md for the script.
+            Copy this block into the session log at each checkpoint.</div>
+          <div class="dev-row">
+            <button class="btn" id="dv-pt-copy" title="Copy the playtest readout as plain text">⧉ Copy readout</button>
+          </div>
+        </div>
+      </details>
+
       <details class="dev-sec" open>
         <summary id="dv-sel-title">🎯 Selection</summary>
         <div class="dev-grid" id="dv-sel-body">
@@ -239,6 +302,17 @@ export class DevPanel {
       </details>
     `;
 
+    this.el('dv-pt-copy').addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      const sim = this.cb.getSim();
+      if (!sim) return;
+      const text = playtestReadoutText(sim, this.cb.isProjectsCardCollapsed?.() ?? false);
+      const nav = (globalThis as { navigator?: { clipboard?: { writeText(t: string): Promise<void> } } }).navigator;
+      nav?.clipboard?.writeText(text).then(
+        () => this.setStatus('Playtest readout copied.'),
+        () => this.setStatus(text),
+      ) ?? this.setStatus(text);
+    });
     this.el('dv-close').addEventListener('pointerdown', (e) => {
       e.stopPropagation();
       this.cb.onClose();
@@ -434,6 +508,9 @@ export class DevPanel {
     const sched = this.el('dv-storms-on') as HTMLInputElement;
     if (!this.focused(sched)) sched.checked = !sim.weather.rollsSuppressed;
 
+    // ---- playtest readout (M2) ------------------------------------------------
+    this.updatePlaytest(sim);
+
     // ---- selection -----------------------------------------------------------
     const sel = this.cb.getSelection();
     const key = sel ? `${sel.type}:${sel.id}` : 'none';
@@ -442,6 +519,22 @@ export class DevPanel {
       this.rebuildSelection(sim, sel);
     }
     this.patchSelection(sim, sel);
+  }
+
+  /**
+   * The M2 playtest block: everything the facilitator writes down at a
+   * checkpoint, derived from the view so it costs the sim nothing. Time-to-
+   * first-landing is the sol of the first completed project; the "card" line
+   * records whether the player has the projects card open or collapsed, which
+   * is the one behaviour the playtest cannot otherwise see.
+   */
+  private updatePlaytest(sim: SimView): void {
+    const readout = playtestReadout(sim, this.cb.isProjectsCardCollapsed?.() ?? false);
+    this.el('dv-pt-project').textContent = readout.project;
+    this.el('dv-pt-next').textContent = readout.next;
+    this.el('dv-pt-landed').textContent = readout.landed;
+    this.el('dv-pt-streak').textContent = readout.streak;
+    this.el('dv-pt-card').textContent = readout.card;
   }
 
   private rebuildSelection(sim: SimView, sel: DevSelection): void {

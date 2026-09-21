@@ -123,5 +123,15 @@ export function validateCurrentSaveShape(data: Record<string, unknown>): string[
   if (unlocks != null && typeof unlocks !== 'object') {
     warnings.push('malformed unlocks block — will default to an empty registry');
   }
+  // Phase 3: the autonomy block is optional (a v15 save has none) and sanitised
+  // field by field; a malformed one is a warning and a fresh window.
+  const autonomy = (data as { autonomy?: unknown }).autonomy;
+  if (autonomy != null && typeof autonomy !== 'object') {
+    warnings.push('malformed autonomy block — will start a fresh autonomy streak');
+  }
+  const policies = (data as { policies?: unknown }).policies;
+  if (policies != null && typeof policies !== 'object') {
+    warnings.push('malformed policies block — every standing order will be off');
+  }
   return warnings;
 }

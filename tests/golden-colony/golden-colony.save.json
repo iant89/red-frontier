@@ -1,5 +1,5 @@
 {
-  "version": 15,
+  "version": 17,
   "seed": 9001,
   "difficulty": "pioneer",
   "worldHalf": 640,
@@ -1358,12 +1358,6 @@
       {
         "severity": "info",
         "text": "Materials delivered to the Pump Station site.",
-        "time": 78.74999999999767,
-        "stamp": "Sol 1 · 16:28"
-      },
-      {
-        "severity": "info",
-        "text": "Materials delivered to the Pump Station site.",
         "time": 78.79999999999767,
         "stamp": "Sol 1 · 16:28"
       },
@@ -2376,6 +2370,12 @@
         "stamp": "Sol 1 · 17:19"
       },
       {
+        "severity": "info",
+        "text": "Life-support power was shed. The colony ran itself for 0.2 sols.",
+        "time": 87.0499999999972,
+        "stamp": "Sol 1 · 17:19"
+      },
+      {
         "severity": "warn",
         "text": "Cargo Rover is low on power — returning to charge.",
         "time": 153.35000000000062,
@@ -2582,6 +2582,63 @@
       "autonomousColony": null
     },
     "lastDirectOrderSol": 0
+  },
+  "policies": {
+    "stockpile": {
+      "on": false,
+      "resource": "ice",
+      "minKg": 200
+    },
+    "nightPower": {
+      "on": false,
+      "minBatteryPct": 40
+    },
+    "stormShelter": {
+      "on": false
+    },
+    "autoMaintain": {
+      "on": false,
+      "maxWearPct": 30
+    },
+    "held": [],
+    "actions": 0
+  },
+  "autonomy": {
+    "startedAt": 0.7027083333333474,
+    "best": 0.2272916666666956,
+    "bestRung": "assisted",
+    "lifetimeSols": 4.999999999997483,
+    "rung": "assisted",
+    "coverage": 0,
+    "coverageBuckets": [
+      {
+        "autoSec": 0,
+        "orderSec": 0
+      },
+      {
+        "autoSec": 0,
+        "orderSec": 0
+      },
+      {
+        "autoSec": 0,
+        "orderSec": 0
+      }
+    ],
+    "producersOnlineSols": 4.962499999997517,
+    "everAutoTask": true,
+    "lastBreak": {
+      "at": 0.7027083333333474,
+      "reason": "power-critical",
+      "streak": 0.2272916666666956,
+      "detail": "Life-support power was shed"
+    },
+    "singlePoints": [
+      "water",
+      "oxygen",
+      "food",
+      "fleet",
+      "spares"
+    ]
   },
   "tutorial": {
     "milestones": {

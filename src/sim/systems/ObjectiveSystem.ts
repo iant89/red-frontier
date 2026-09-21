@@ -50,7 +50,9 @@ export function isDirectOrder(commandType: string): boolean {
 
 /** How many sols since the player last told the colony to do something. */
 export function solsWithoutOrder(state: ColonyState): number {
-  return Math.max(0, state.clock.sol - state.lastDirectOrderSol);
+  // Phase 3: the autonomy streak (AUTONOMY.md) — fractional sols since the
+  // open window began. Ends on accepted orders and on breakers alike.
+  return Math.max(0, state.clock.solsElapsed - state.autonomy.startedAt);
 }
 
 /** One project's live progress, for the panel. */

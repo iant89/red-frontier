@@ -84,11 +84,18 @@ export const PROJECTS: ProjectDef[] = [
   {
     id: 'autonomousColony',
     title: 'Autonomous Colony',
-    blurb: 'Survive ten sols without issuing a single manual order.',
-    why: 'The defining challenge of Red Frontier. A policy doing the work is the fantasy working — and until the colony can run a week unattended, you are the machine.',
+    blurb: 'Run the colony without issuing a single manual order — for as long as the difficulty asks.',
+    why: 'The defining challenge of Red Frontier. A policy doing the work is the fantasy working — and until the colony can run unattended, you are the machine.',
     after: ['remoteOperations'],
     requirements: [
-      { type: 'solsWithoutOrder', sols: 10, label: 'Ten sols without a manual order' },
+      // Difficulty-scaled per the review (§3.2): a Settler learning the chains
+      // is asked for a long weekend, a Pioneer for most of a week, a Survivor
+      // for the full ten the roadmap named. The number is data, not a branch.
+      {
+        type: 'solsWithoutOrder',
+        sols: { settler: 3, pioneer: 5, survivor: 10 },
+        label: 'Sols without a manual order',
+      },
     ],
     rewards: ['autonomousColony'],
   },

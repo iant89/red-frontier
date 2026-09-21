@@ -41,6 +41,7 @@ import { RoverSystem } from './systems/RoverSystem';
 import { HistorySystem } from './systems/HistorySystem';
 import { TutorialSystem } from './systems/TutorialSystem';
 import { ObjectiveSystem } from './systems/ObjectiveSystem';
+import { AutonomySystem } from './systems/AutonomySystem';
 
 function event(state: ColonyState, severity: 'ok' | 'info' | 'warn', text: string): void {
   state.alerts.event(severity, text, state.simTime, state.clock.format());
@@ -196,6 +197,7 @@ export const DevBackdoors = {
     TutorialSystem.afterTimeJump(state);
     // Jumping the clock forward is not ten sols of autonomy.
     ObjectiveSystem.afterTimeJump(state);
+    AutonomySystem.afterTimeJump(state);
   },
 
   forceLightningStrike(

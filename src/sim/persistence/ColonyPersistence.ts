@@ -67,6 +67,9 @@ import { RoverSystem } from '../systems/RoverSystem';
 import { HistorySystem } from '../systems/HistorySystem';
 import { emptyTutorialState } from '../state/TutorialState';
 import { emptyObjectiveState, type CompletionRecord } from '../state/ObjectiveState';
+import { emptyAutonomyState } from '../state/AutonomyState';
+import { sanitiseAutonomy } from './autonomySave';
+import { sanitisePolicies } from './policySave';
 import { emptyUnlocks, type UnlockRecord } from '../unlocks';
 import { projectById } from '../projects/catalog';
 
@@ -180,6 +183,23 @@ export function snapshotColony(state: ColonyState): SaveState {
       unlocks: { ...state.unlocks },
       lastDirectOrderSol: state.lastDirectOrderSol,
     },
+    policies: {
+      stockpile: { ...state.policies.stockpile },
+      nightPower: { ...state.policies.nightPower },
+      stormShelter: { ...state.policies.stormShelter },
+      autoMaintain: { ...state.policies.autoMaintain },
+      held: [...state.policies.held],
+      actions: state.policies.actions,
+    },
+    autonomy: (() => {
+      const { _holding: _t, ...rest } = state.autonomy;
+      return {
+        ...rest,
+        coverageBuckets: rest.coverageBuckets.map((b) => ({ ...b })),
+        singlePoints: [...rest.singlePoints],
+        lastBreak: rest.lastBreak ? { ...rest.lastBreak } : null,
+      };
+    })(),
     tutorial: {
       milestones: { ...state.tutorial.milestones },
       warnings: { ...state.tutorial.warnings },
@@ -447,6 +467,20 @@ export function restoreColony(state: ColonyState, data: SaveState): void {
   state.lastDirectOrderSol = Number.isFinite(savedUnlockBlock?.lastDirectOrderSol as number)
     ? Math.max(0, Number(savedUnlockBlock?.lastDirectOrderSol))
     : state.clock.sol;
+
+  // v16 autonomy (Phase 3). A save without the block — or with a hostile one —
+  // starts a window at its own time with no retroactive credit.
+  {
+    const now = state.clock.solsElapsed;
+    const base = emptyAutonomyState(Math.min(now, state.lastDirectOrderSol));
+    state.autonomy = sanitiseAutonomy((data as { autonomy?: unknown }).autonomy, base, now);
+  }
+
+  // v17 standing orders (Phase 3, slice 2). Missing or hostile → all off.
+  state.policies = sanitisePolicies(
+    (data as { policies?: unknown }).policies,
+    new Set(state.buildings.map((b) => b.id)),
+  );
 
   // v14 tutorial state
   const savedTut = (data as { tutorial?: unknown }).tutorial as

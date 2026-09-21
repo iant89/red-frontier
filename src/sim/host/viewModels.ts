@@ -55,6 +55,33 @@ export interface ObjectiveProjectView {
   readonly rewards: ReadonlyArray<{ readonly id: string; readonly title: string; readonly granted: boolean }>;
 }
 
+/** Phase 3 — the autonomy stat (AUTONOMY.md): one number, three faces, one rung. */
+export interface AutonomyView {
+  /** Sols the open hands-off window has run. */
+  readonly current: number;
+  readonly best: number;
+  readonly lifetimeSols: number;
+  readonly rung: 'manual' | 'assisted' | 'automated' | 'redundant' | 'autonomous';
+  readonly bestRung: 'manual' | 'assisted' | 'automated' | 'redundant' | 'autonomous';
+  readonly identity: 'operator' | 'engineer' | 'architect';
+  /** Fraction of recent rover work that was self-directed, [0, 1]. */
+  readonly coverage: number;
+  /** Critical chains still below their redundancy gate. */
+  readonly singlePoints: ReadonlyArray<string>;
+  readonly lastBreak: { readonly at: number; readonly reason: string; readonly streak: number; readonly detail: string } | null;
+}
+
+/** Phase 3 — the standing orders as the panel reads them. */
+export interface PolicyView {
+  readonly unlocked: boolean;
+  readonly stockpile: { readonly on: boolean; readonly resource: string; readonly minKg: number; readonly currentKg: number };
+  readonly nightPower: { readonly on: boolean; readonly minBatteryPct: number; readonly shedding: number };
+  readonly stormShelter: { readonly on: boolean };
+  readonly autoMaintain: { readonly on: boolean; readonly maxWearPct: number; readonly worstWearPct: number };
+  readonly actions: number;
+  readonly lines: Readonly<Record<'stockpile' | 'nightPower' | 'stormShelter' | 'autoMaintain', string>>;
+}
+
 /** Phase 2 — the board: what is offered, what landed, what was earned. */
 export interface ObjectiveView {
   readonly active: ReadonlyArray<ObjectiveProjectView>;

@@ -86,6 +86,10 @@ import { GarageSystem } from './systems/GarageSystem';
 import { MaintenanceSystem } from './systems/MaintenanceSystem';
 import { TutorialSystem } from './systems/TutorialSystem';
 import { ObjectiveSystem, objectiveSnapshot } from './systems/ObjectiveSystem';
+import { AutonomySystem, autonomySnapshot } from './systems/AutonomySystem';
+import { PolicySystem, POLICY_UNLOCK, policySnapshot } from './systems/PolicySystem';
+import { UNLOCKS, hasUnlock } from './unlocks';
+import type { PolicyId } from './state/PolicyState';
 import { DevBackdoors } from './DevBackdoors';
 
 import {
@@ -677,6 +681,10 @@ export class Simulation {
     // 6/7/8. logistics, jobs, movement, construction
     ConstructionSystem.tickSiteMaterials(this.state);
     ConstructionSystem.assignBuilders(this.state, this.constructionHooks);
+    // Phase 3: standing orders act before generic fleet dispatch, so a
+    // stockpile run outranks a routine haul and a shed lands next PowerSystem
+    // tick (position decided with ask-user; no existing system moved).
+    PolicySystem.tick(this.state);
     FleetAutomationSystem.tick(this.state, this.fleetHooks);
     for (const r of this.rovers) {
       if (r.phase === 'disabled') continue;
@@ -692,6 +700,9 @@ export class Simulation {
 
     // 9. failure checks → alerts → tutorial → history
     this.evaluateAlerts();
+    // Phase 3: breakers read the alert transitions just made; the flagship
+    // project (ObjectiveSystem, next) reads the streak this maintains.
+    AutonomySystem.tick(this.state, newSol);
     TutorialSystem.tick(this.state, {
       reserveSols: (f) => this.reserveSols(f),
       netRatePerSol: (f) => this.netRatePerSol(f),
@@ -758,6 +769,36 @@ export class Simulation {
    */
   noteOrder(commandType: string): void {
     ObjectiveSystem.noteCommand(this.state, commandType);
+  }
+
+  /**
+   * Phase 3: the autonomy window ends only on an *accepted* intervention — a
+   * refused order steered nothing. Called by the dispatcher with the ack.
+   */
+  noteCommandResult(commandType: string, accepted: boolean): void {
+    AutonomySystem.noteCommand(this.state, commandType, accepted);
+  }
+
+  /**
+   * Phase 3: set one standing order. Refused (false) when the colony has not
+   * earned colony-level automation yet or the payload names nothing.
+   */
+  setPolicy(policy: PolicyId, patch: Record<string, unknown>): boolean {
+    if (POLICY_UNLOCK && !hasUnlock(this.state.unlocks, POLICY_UNLOCK)) {
+      this.event('warn', `Standing orders need ${UNLOCKS[POLICY_UNLOCK].title} — finish the project that grants it.`);
+      return false;
+    }
+    return PolicySystem.set(this.state, policy, patch);
+  }
+
+  /** Phase 3: the standing orders as the panel reads them. */
+  get policies(): import('./host/viewModels').PolicyView {
+    return policySnapshot(this.state);
+  }
+
+  /** Phase 3: the autonomy stat as the dashboard and the projects read it. */
+  get autonomy(): import('./host/viewModels').AutonomyView {
+    return autonomySnapshot(this.state);
   }
 
   solsOfReserve(f: FluidId): number {

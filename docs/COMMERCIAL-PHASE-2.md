@@ -1,8 +1,8 @@
 # Red Frontier — Commercial Phase 2: Engineering Projects
 
 *Implementation spec for Phase 2 of COMMERCIAL-ROADMAP.md, re-baselined per COMMERCIAL-ROADMAP-REVIEW.md §5 P2 and §3.3.*
-*Status: DONE — ObjectiveSystem + data-driven project table + unlock registry + projects panel shipped.*
-*Branch: `arena/01a0c09f-red-frontier` · save v15 · suite 94 suites / 1080 checks*
+*Status: DONE — ObjectiveSystem + data-driven project table + unlock registry + projects panel shipped; follow-ups (HUD pip, difficulty-scaled autonomy, blueprint gating mechanism, M2 playtest instrument) landed.*
+*Branches: `arena/01a0c09f-red-frontier` (core), `arena/01a0c0f6-red-frontier` (follow-ups) · save v15 · suite 94 suites / 1091 checks*
 
 ---
 
@@ -18,7 +18,7 @@ The five projects from the roadmap, all five shipped:
 | **Survive the First Storm** | weather radar, 400 kWh of battery, garage (fleet shelter), 80 kg water | Storm Forecasting |
 | **Industrialize** | refinery, workshop, 300 kg ore in the silo, one automated haul route | Advanced Automation |
 | **Remote Operations** | three rovers, RTG online, garage online, 100 kg water, 120 kg rations | Remote Exploration |
-| **Autonomous Colony** | ten sols without a manual order | Autonomous Colony |
+| **Autonomous Colony** | 3 / 5 / 10 sols (settler / pioneer / survivor) without a manual order | Autonomous Colony |
 
 Two design decisions the review forced, both kept:
 
@@ -74,7 +74,14 @@ does not exist.
 | `powerStable` | not shedding, the reserve above a floor, **and generation covering demand** |
 | `roverRule` / `repeatRoute` / `roverCount` | what the fleet has been told to do, and how much of it there is |
 | `stormsSurvived` / `poisDiscovered` | lifetime counters and the discovery map |
-| `solsWithoutOrder` | `state.clock.sol − state.lastDirectOrderSol` |
+| `solsWithoutOrder` | Phase 3's autonomy streak (`clock.solsElapsed − autonomy.startedAt`, whole sols) — ends on accepted orders *and* breakers; target is a `ScaledNumber` read by `state.difficulty` |
+
+A requirement's target may be a **`ScaledNumber`** — a plain number, or a
+`{ settler, pioneer, survivor }` table resolved by `scaledTarget()` against
+`ColonyState.difficulty` (falling back to `pioneer`, then to whatever the table
+carries, never to zero). That is how the review's difficulty-scaled autonomy
+(§3.2) lives in the catalogue as data rather than as a branch in the evaluator;
+any other requirement can adopt it by widening its field type.
 
 `powerStable` is the one that took a second pass. "Not browning out and the
 battery above 15%" let a colony complete the first project on the tick before
@@ -90,10 +97,19 @@ in the sim; without one registry each of them would invent its own (§3.3). So
 the registry ships *first*, as a saved, deterministic set of `unlockId`s with a
 sol stamp and the id of whatever granted it.
 
-It is deliberately **inert**: nothing is locked behind an unlock yet, and every
-blueprint stays available from sol 1 — the roadmap's own review insists the
-first projects be completable with today's building set. The first consumers are
-Phase 3's policies (`advancedAutomation`) and Phase 7's POI contents.
+It has one consumer today — **blueprint gating** — and the gate is empty by
+design. `BuildingDef.requiresUnlock?: UnlockId` seals a blueprint until the
+colony holds the unlock; one rule, `blueprintLock()`, is read by the sim's
+siting authority (`ConstructionSystem.verdict`, which also covers `place` and
+the dev backdoor), by the worker mirror's optimistic `placeVerdict` (from the
+projected unlock list, so the ghost and the placement agree), and by the build
+bar, which keeps the sealed blueprint visible with a 🔒 badge naming the
+missing unlock and turns a click into a hintbar explanation instead of an armed
+ghost. No shipping blueprint sets `requiresUnlock` — the roadmap's own review
+insists the first projects be completable with today's building set, and the
+catalogue integrity test asserts both that nothing is gated and that no project
+could ever require the building its own reward unseals. Phase 3's policies
+(`advancedAutomation`) and Phase 7's POI contents are the next consumers.
 
 ---
 
@@ -109,10 +125,13 @@ Phase 3's policies (`advancedAutomation`) and Phase 7's POI contents.
 | Commands | `applyCommand` records a direct order against the autonomy streak (the one path every order takes, so a replay is faithful) |
 | Events | `objective/offered`, `objective/completed`, `unlock/granted` |
 | Read model | `ObjectiveView` in `host/viewModels.ts`, projected in `projection.ts`, mirrored in `mirror.ts` |
-| UI | `src/ui/ProjectsPanel.ts` + `#projects-panel` styles (docks beside the vitals; collapses to a headline on a phone) |
+| UI | `src/ui/ProjectsPanel.ts` + `#projects-panel` styles (docks beside the vitals; header click collapses it to a headline, remembered in `rf-collapse-projects`) |
+| HUD pip | `projectPip()` in `ProjectsPanel.ts`, rendered as `#proj-pip` on the vitals header: lead project + `met/total` (+N more), toned `idle / progress / near / done` by situation, tooltip names the next unmet requirement; click toggles the card |
+| Gating | `BuildingDef.requiresUnlock`, `blueprintLock` / `blueprintLockReason` in `unlocks.ts`, enforced in `ConstructionSystem.verdict` and `ColonyMirror.placeVerdict`; `.build-btn.locked` + `.lock` badge in the HUD |
+| Playtest | `docs/PLAYTEST-M2.md` protocol; dev panel **Playtest (M2)** section (`playtestReadout` / `playtestReadoutText`, copy-to-clipboard) |
 | Save | schema **v15**, migration `v14.ts`, snapshot/restore with sanitising, validator warnings |
 | Hash | objectives / unlocks / `lastDirectOrderSol` in the `core` section — pinned hashes re-recorded |
-| Tests | `tests/sim/objectives.test.ts` (22), `tests/ui/projects-panel.test.ts` (6) |
+| Tests | `tests/sim/objectives.test.ts` (27), `tests/ui/projects-panel.test.ts` (9), `tests/hud/panels.test.ts` (+2 pip / lock), `tests/hud/devpanel.test.ts` (+1 readout) |
 
 ---
 
@@ -135,28 +154,36 @@ field exists now, written by the command dispatcher:
 
 ## Remaining Phase 2 work
 
-- [ ] **Playtest (M2)**: can a player state their current project's goal
-      unprompted? This is now measurable — the panel is on screen from sol 1.
-- [ ] **Situation-driven pips on the HUD**: the panel carries the detail; the
-      review also asked for a compact pip beside the vitals. Deferred because it
-      is a HUD change, and the panel answers the same question today.
-- [ ] **Difficulty-scaled autonomy**: `autonomousColony` asks for a flat 10 sols.
-      The review suggests 3 (settler) / 5 (pioneer); that is a balance pass, and
-      the number lives in the data table when it happens.
-- [ ] **Blueprint gating**: nothing is locked behind an unlock yet, by design.
-      Phase 3's policies and Phase 7's POI rewards are the first consumers.
+- [x] **Situation-driven pips on the HUD**: `#proj-pip` on the vitals header.
+      The panel carries the detail; the pip carries the glance, and survives the
+      card being collapsed.
+- [x] **Difficulty-scaled autonomy**: `autonomousColony` asks for
+      `{ settler: 3, pioneer: 5, survivor: 10 }` sols via `ScaledNumber` — the
+      number stayed in the data table.
+- [x] **Blueprint gating**: the mechanism (`requiresUnlock`) is in, enforced on
+      both sides of the host boundary and shown on the build bar. The table
+      gates nothing, and a test keeps it that way until a phase chooses to.
+- [x] **Playtest (M2) — instrumented**: protocol in `docs/PLAYTEST-M2.md`;
+      dev panel readout gives the facilitator the ground truth to score against.
+- [ ] **Playtest (M2) — run it**: five or more sessions per the protocol. A
+      human task; tick this with the session count and median score.
+
+Also fixed on the way: a Settler (or "abundant supplies") start seeded the pod
+with more oxygen than its tank holds, which the `fluid-range` invariant refused
+on the first tick. Starting fluids are now clamped to pod capacity.
 
 ## Definition of done (review §7)
 
 - **M2**: playtesters can state their current project's goal unprompted — the
-  panel is shipped and testable; the playtest itself is the open item.
+  panel, the pip and the measuring instrument are shipped; the sessions are the
+  open item.
 
 ## How to run
 
 ```bash
 npm run typecheck
-npm test                     # 94 suites / 1080 checks (sim/objectives, ui/projects-panel)
+npm test                     # 94 suites / 1091 checks (sim/objectives, ui/projects-panel, hud/panels, hud/devpanel)
 npm run test:replay          # canonical hashes including the new state sections
 npm run test:golden          # golden colony hash
-npm run dev                  # the projects card is beside the vitals from sol 1
+npm run dev                  # the projects card is beside the vitals from sol 1; the pip is on the vitals header
 ```

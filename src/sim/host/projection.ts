@@ -40,6 +40,9 @@ import type { DifficultyId, WorldOptions } from '../difficulty';
 import type { Colonist } from '../lifesupport';
 import type { ObjectiveSnapshot } from '../projects/types';
 import { objectiveSnapshot } from '../systems/ObjectiveSystem';
+import { autonomySnapshot } from '../systems/AutonomySystem';
+import { policySnapshot, type PolicySnapshot } from '../systems/PolicySystem';
+import type { AutonomySnapshot } from '../systems/AutonomySystem';
 import type { OverlayState } from './overlays';
 import { BATTERY_PIN_OVERLAY } from './overlays';
 import type { SimTransport } from './SimHost';
@@ -148,6 +151,9 @@ export interface ViewPayload {
    * cannot disagree about what the colony has been asked to do.
    */
   objectives: ObjectiveSnapshot;
+  /** Phase 3: the autonomy stat, built by the same function the local getter uses. */
+  autonomy: AutonomySnapshot;
+  policies: PolicySnapshot;
   tutorial: {
     milestones: Record<string, { completed: boolean; sol: number; tick: number }>;
     activeWarnings: string[];
@@ -300,6 +306,8 @@ export function projectView(
     netRatePerSol: fluidMap((f) => sim.netRatePerSol(f)),
     storageCapacity: sim.storageCapacity(),
     objectives: objectiveSnapshot(sim.state),
+    autonomy: autonomySnapshot(sim.state),
+    policies: policySnapshot(sim.state),
     tutorial: {
       milestones: { ...sim.state.tutorial.milestones } as any,
       activeWarnings: [...(sim.state.tutorial._activeWarnings ?? [])],

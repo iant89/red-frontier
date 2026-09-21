@@ -31,6 +31,8 @@ import type { BuildingKind, ComponentAmounts, FluidId, ResourceAmounts } from '.
 import type { PowerResult } from '../power';
 import type { DifficultyId, WorldOptions } from '../difficulty';
 import { evaluateSite, maintenanceNeed } from '../rules';
+import { BUILDINGS } from '../defs';
+import { blueprintLock, blueprintLockReason } from '../unlocks';
 import { BATTERY_PIN_OVERLAY } from './overlays';
 import type { SimTransport } from './SimHost';
 import type { ViewPayload } from './projection';
@@ -367,6 +369,11 @@ export class ColonyMirror implements SimView {
    * the same pure rule and current projected obstacles.
    */
   placeVerdict(kind: BuildingKind, x: number, z: number): string | null {
+    const missing = blueprintLock(
+      this.payload.objectives.unlocks.map((u) => u.id),
+      BUILDINGS[kind].requiresUnlock,
+    );
+    if (missing) return blueprintLockReason(missing);
     return evaluateSite(kind, x, z, {
       ground: this.ground,
       buildings: this.payload.buildings,
@@ -392,5 +399,13 @@ export class ColonyMirror implements SimView {
 
   get objectives() {
     return this.payload.objectives;
+  }
+
+  get autonomy() {
+    return this.payload.autonomy;
+  }
+
+  get policies() {
+    return this.payload.policies;
   }
 }

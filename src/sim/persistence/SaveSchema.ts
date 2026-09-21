@@ -25,6 +25,8 @@ import type { TutorialState } from '../state/TutorialState';
 import type { ObjectiveState, CompletionRecord } from '../state/ObjectiveState';
 import type { UnlockRegistry, UnlockRecord } from '../unlocks';
 import { SAVE_VERSION } from '../config';
+import type { AutonomyState } from '../state/AutonomyState';
+import type { PolicyState } from '../state/PolicyState';
 
 // ---- sub-schemas -----------------------------------------------------------
 
@@ -220,7 +222,14 @@ export interface SaveState {
   objectives?: ObjectiveSave | null;
   /** v15 — unlock registry + the direct-order marker (Phase 2). */
   unlocks?: UnlockSave | null;
+  /** v16 — the autonomy stat (Phase 3, AUTONOMY.md). Absent on older colonies. */
+  autonomy?: AutonomySave | null;
+  /** v17 — colony standing orders (Phase 3, slice 2). Absent on older colonies. */
+  policies?: PolicyState | null;
 }
+
+/** Phase 3 — the saved autonomy block. The transient `_holding` is never written. */
+export type AutonomySave = Omit<AutonomyState, '_holding'>;
 
 /**
  * Loose historical save — used as input to migrations. Version may be <11,

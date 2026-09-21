@@ -16,6 +16,9 @@ import { effectiveRoverDef } from '../sim/engineering/upgrades';
 import { updateWaterPanel } from './WaterPanel';
 
 import type { BuildingKind, ComponentId, ResourceId, FluidId } from '../sim/defs';
+import { UNLOCKS, blueprintLock, blueprintLockReason } from '../sim/unlocks';
+import { projectPip, autonomyChip } from './ProjectsPanel';
+import type { ProjectsPanelModel } from './ProjectsPanel';
 import {
   BUILDINGS,
   BUILDING_ORDER,
@@ -74,6 +77,8 @@ export interface HUDCallbacks {
   onMenu?: () => void;
   /** Toggle the developer-mode panel. */
   onDev?: () => void;
+  /** The project pip on the vitals header — toggles the projects card. */
+  onProjectPip?: () => void;
   /** World map selection. */
   onMapSelect?: (type: 'rover' | 'building' | 'colonist' | 'poi', id: number) => void;
   /** World map empty click — optional camera focus. */
@@ -246,6 +251,8 @@ export class HUD {
   private lastMinimapKey = '';
 
   private vitalsCollapsed = false;
+  private projectPipKey = '';
+  private autonomyKey = '';
   private inspectorCollapsed = false;
   private buildCollapsed = false;
 
@@ -442,6 +449,8 @@ export class HUD {
           <span class="vh-sub" id="vitals-sub"></span>
           <button class="mini-btn" id="vitals-toggle" title="Collapse panel" aria-expanded="true">▾</button>
         </div>
+        <button class="proj-pip" id="proj-pip" style="display:none" title="Engineering project"></button>
+        <div class="auto-chip" id="auto-chip" style="display:none" title="Autonomy"></div>
         <div class="vitals-body" id="vitals-body">
         <div id="power-block">
           <div class="pw-top">
@@ -666,6 +675,10 @@ export class HUD {
       window.location.reload();
     });
 
+    this.el('proj-pip').addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.cb.onProjectPip?.();
+    });
     this.el('vitals-toggle').addEventListener('pointerdown', (e) => {
       e.stopPropagation();
       this.setVitalsCollapsed(!this.vitalsCollapsed);
@@ -1381,6 +1394,13 @@ export class HUD {
       btn.addEventListener('pointerdown', (e) => {
         e.stopPropagation();
         this.closeBuildInfo();
+        // A sealed blueprint explains itself instead of arming a ghost the sim
+        // would refuse anyway (Phase 2 blueprint gating).
+        if (btn.classList.contains('locked')) {
+          const lock = btn.querySelector<HTMLElement>('.lock');
+          this.hint(lock?.title ?? 'This blueprint has not been earned yet.');
+          return;
+        }
         const active = this.activeBuild === k;
         this.cb.onPickBuild(active ? null : k);
         // Touch has no hover: holding a blueprint peeks at its dossier instead
@@ -1469,8 +1489,14 @@ export class HUD {
     this.buildInfoAt = null;
   }
 
-  /** Grey out anything the colony cannot currently afford. */
+  /**
+   * Grey out anything the colony cannot currently afford, and mark anything it
+   * has not yet *earned* (Phase 2 blueprint gating). A locked blueprint stays
+   * on the bar so the player can see what a project pays; its badge names the
+   * missing unlock, and the sim refuses the placement regardless.
+   */
   updateAffordability(sim: SimView): void {
+    const earned = sim.objectives?.unlocks.map((u) => u.id) ?? [];
     for (const [k, btn] of this.buildBtns) {
       const def = BUILDINGS[k];
       let affordable = true;
@@ -1481,6 +1507,24 @@ export class HUD {
         }
       }
       btn.classList.toggle('unaffordable', !affordable);
+      const missing = blueprintLock(earned, def.requiresUnlock);
+      const wasLocked = btn.classList.contains('locked');
+      if (!!missing !== wasLocked) {
+        btn.classList.toggle('locked', !!missing);
+        btn.setAttribute('aria-disabled', missing ? 'true' : 'false');
+        let badge = btn.querySelector<HTMLElement>('.lock');
+        if (missing) {
+          if (!badge) {
+            badge = document.createElement('span');
+            badge.className = 'lock';
+            btn.appendChild(badge);
+          }
+          badge.textContent = `🔒 ${UNLOCKS[missing].title}`;
+          badge.title = blueprintLockReason(missing);
+        } else if (badge) {
+          badge.remove();
+        }
+      }
     }
   }
 
@@ -1675,6 +1719,37 @@ export class HUD {
     const online = sim.buildings.filter((b) => b.state === 'online').length;
     const sites = sim.buildings.length - online;
     this.el('vitals-sub').textContent = `${online} online${sites ? ` · ${sites} building` : ''}`;
+
+    // ---- autonomy headline (Phase 3) ----
+    const auto = sim.autonomy;
+    const chipEl = this.el('auto-chip');
+    if (auto) {
+      const chip = autonomyChip(auto);
+      const key = `${chip.text}|${chip.title}`;
+      if (key !== this.autonomyKey) {
+        this.autonomyKey = key;
+        chipEl.style.display = '';
+        chipEl.textContent = chip.text;
+        chipEl.title = chip.title;
+        chipEl.className = `auto-chip ${chip.identity} rung-${chip.rung}`;
+      }
+    } else {
+      chipEl.style.display = 'none';
+    }
+
+    // ---- project pip (Phase 2) ----
+    const pip = sim.objectives ? projectPip(sim.objectives as ProjectsPanelModel) : null;
+    const pipEl = this.el('proj-pip');
+    const pipKey = pip ? `${pip.tone}|${pip.text}|${pip.title}` : '';
+    if (pipKey !== this.projectPipKey) {
+      this.projectPipKey = pipKey;
+      pipEl.style.display = pip ? '' : 'none';
+      if (pip) {
+        pipEl.textContent = pip.text;
+        pipEl.title = pip.title;
+        pipEl.className = `proj-pip ${pip.tone}`;
+      }
+    }
   }
 
   /**

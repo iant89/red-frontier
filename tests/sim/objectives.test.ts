@@ -10,10 +10,15 @@
 import assert from 'node:assert/strict';
 import { Simulation } from '../../src/sim/Simulation';
 import { ObjectiveSystem, objectiveSnapshot, isDirectOrder, solsWithoutOrder } from '../../src/sim/systems/ObjectiveSystem';
-import { evaluateRequirement, requirementKey, requirementUnit } from '../../src/sim/projects/requirements';
+import { evaluateRequirement, requirementKey, requirementUnit, scaledTarget } from '../../src/sim/projects/requirements';
 import { PROJECTS, PROJECT_IDS, projectById, openingProjects } from '../../src/sim/projects/catalog';
 import type { Requirement } from '../../src/sim/projects/types';
-import { ALL_UNLOCKS, UNLOCKS, emptyUnlocks, grantUnlock, hasUnlock } from '../../src/sim/unlocks';
+import { ALL_UNLOCKS, UNLOCKS, emptyUnlocks, grantUnlock, hasUnlock, blueprintLock, blueprintLockReason } from '../../src/sim/unlocks';
+import { BUILDINGS, BUILDING_ORDER } from '../../src/sim/defs';
+import { ConstructionSystem } from '../../src/sim/systems/ConstructionSystem';
+import { ColonyMirror } from '../../src/sim/host/mirror';
+import { projectView } from '../../src/sim/host/projection';
+import { applyCommand } from '../../src/sim/host';
 import { emptyObjectiveState } from '../../src/sim/state/ObjectiveState';
 import { migrateV14Save } from '../../src/sim/persistence/migrations/v14';
 import { decodeSave } from '../../src/sim/persistence/SaveCodec';
@@ -242,7 +247,8 @@ test('an order resets the streak; the clock then rebuilds it', () => {
   const sim = new Simulation({ seed: 3 });
   run(sim, 2);
   assert.ok(solsWithoutOrder(sim.state) >= 1.9, 'no orders yet, so the streak has been running');
-  ObjectiveSystem.noteCommand(sim.state, 'rover/move');
+  // Phase 3: the streak is the autonomy window, ended through the command path.
+  applyCommand(sim, { type: 'rover/move', roverId: sim.rovers[0].id, x: 20, z: 20, queue: false });
   assert.equal(solsWithoutOrder(sim.state), 0, 'an order resets it');
   run(sim, 1);
   assert.ok(solsWithoutOrder(sim.state) >= 0.9, 'and it climbs again');
@@ -252,6 +258,45 @@ test('an order resets the streak; the clock then rebuilds it', () => {
   assert.equal(progress.unit, 'sols');
   assert.equal(progress.target, 10);
   assert.equal(progress.met, false, 'not after one sol');
+});
+
+test('the flagship streak is difficulty-scaled from the data table (review §3.2)', () => {
+  const req = projectById('autonomousColony')!.requirements[0];
+  assert.equal(req.type, 'solsWithoutOrder');
+  const targets: Record<string, number> = {};
+  for (const difficulty of ['settler', 'pioneer', 'survivor'] as const) {
+    const sim = new Simulation({ seed: 11, difficulty });
+    targets[difficulty] = evaluateRequirement(sim.state, req).target;
+  }
+  assert.equal(targets.settler, 3, 'a settler is asked for a long weekend');
+  assert.equal(targets.pioneer, 5, 'a pioneer for most of a week');
+  assert.equal(targets.survivor, 10, 'a survivor for the full ten the roadmap named');
+  assert.ok(targets.settler < targets.pioneer && targets.pioneer < targets.survivor, 'monotonic in difficulty');
+
+  // A plain number is the same everywhere; a partial table falls back to
+  // pioneer, then to whatever it carries — never to a zero that self-completes.
+  assert.equal(scaledTarget(7, 'settler'), 7);
+  assert.equal(scaledTarget({ pioneer: 5 }, 'survivor'), 5);
+  assert.equal(scaledTarget({ settler: 3 }, 'survivor'), 3);
+  assert.equal(scaledTarget({}, 'pioneer'), 0);
+});
+
+test('a settler colony lands the flagship at three sols, a survivor does not', () => {
+  const settle = (difficulty: 'settler' | 'survivor') => {
+    const sim = new Simulation({ seed: 21, difficulty });
+    // Skip the chain: this test is about the streak, not the industry branch.
+    for (const id of ['establishSurvival', 'industrialize', 'remoteOperations'] as const) {
+      ObjectiveSystem.complete(sim.state, projectById(id)!);
+    }
+    ObjectiveSystem.tick(sim.state);
+    assert.ok(sim.state.objectives.active.includes('autonomousColony'), `${difficulty}: flagship offered`);
+    sim.state.lastDirectOrderSol = sim.state.clock.sol;
+    sim.state.autonomy.startedAt = sim.state.clock.solsElapsed;
+    run(sim, 3.25);
+    return sim.state.objectives.completed['autonomousColony'] != null;
+  };
+  assert.equal(settle('settler'), true, 'three unattended sols is enough on settler');
+  assert.equal(settle('survivor'), false, 'and nowhere near enough on survivor');
 });
 
 test('a developer time-jump does not hand out ten sols of autonomy', () => {
@@ -369,7 +414,7 @@ test('the board and the registry round-trip through a save', () => {
   assert.ok(runUntil(sim, () => sim.state.objectives.completed['establishSurvival'] != null, 3) >= 0);
   const saved = snapshotColony(sim.state);
   assert.equal(saved.version, CURRENT_SAVE_VERSION);
-  assert.equal(saved.version, 15, 'Phase 2 ships schema v15');
+  assert.equal(saved.version, CURRENT_SAVE_VERSION, 'the current schema');
 
   const target = createColonyState({ seed: 1 });
   restoreColony(target, decodeSave(JSON.parse(JSON.stringify(saved))));
@@ -550,6 +595,77 @@ test('the board is part of the authoritative state hash', () => {
 test('emptyObjectiveState is the same board every new colony starts from', () => {
   assert.deepEqual(emptyObjectiveState().active, openingProjects());
   assert.deepEqual(emptyObjectiveState().completed, {});
+});
+
+// ------------------------------------------------------- blueprint gating ----
+
+group('Blueprint gating — the registry\'s first consumer');
+
+test('no shipping blueprint is gated (the first projects stay completable)', () => {
+  // Review §5 P2: the first projects must be completable with today's
+  // building set. The mechanism exists; the table gates nothing.
+  for (const kind of BUILDING_ORDER) {
+    assert.equal(BUILDINGS[kind].requiresUnlock, undefined, `${kind} is available from sol 1`);
+  }
+  // And anything a project *asks for* can never be locked behind that project.
+  for (const def of PROJECTS) {
+    for (const req of def.requirements) {
+      if (req.type !== 'buildingOnline') continue;
+      const gate = BUILDINGS[req.building].requiresUnlock;
+      assert.ok(!gate || !def.rewards.includes(gate), `${def.id} does not require what it pays`);
+    }
+  }
+});
+
+test('blueprintLock reads a registry, a set or a list the same way', () => {
+  const reg = emptyUnlocks();
+  assert.equal(blueprintLock(reg, undefined), null, 'an ungated blueprint is open');
+  assert.equal(blueprintLock(reg, 'stormForecasting'), 'stormForecasting');
+  assert.equal(blueprintLock(new Set<string>(), 'stormForecasting'), 'stormForecasting');
+  assert.equal(blueprintLock([], 'stormForecasting'), 'stormForecasting');
+  grantUnlock(reg, 'stormForecasting', 'test', 1, 1);
+  assert.equal(blueprintLock(reg, 'stormForecasting'), null);
+  assert.equal(blueprintLock(new Set(['stormForecasting']), 'stormForecasting'), null);
+  assert.equal(blueprintLock(['stormForecasting'], 'stormForecasting'), null);
+  assert.match(blueprintLockReason('stormForecasting'), /Storm Forecasting/);
+});
+
+test('a gated blueprint is refused by the sim and the ghost alike until the unlock lands', () => {
+  const def = BUILDINGS.repairBay;
+  const saved = def.requiresUnlock;
+  def.requiresUnlock = 'stableOperations';
+  try {
+    const sim = new Simulation({ seed: 77 });
+    const spot = (() => {
+      for (let r = 34; r <= 120; r += 3) {
+        for (let a = 0; a < 360; a += 7) {
+          const x = Math.cos((a * Math.PI) / 180) * r;
+          const z = Math.sin((a * Math.PI) / 180) * r;
+          if (ConstructionSystem.verdict(sim.state, 'warehouse', x, z) === null) return { x, z };
+        }
+      }
+      throw new Error('no spot');
+    })();
+    const mirror = () =>
+      new ColonyMirror(
+        { seed: sim.world.seed, worldHalf: sim.world.half, region: sim.world.region },
+        projectView(sim, 'worker', {}),
+      );
+
+    const refused = ConstructionSystem.verdict(sim.state, 'repairBay', spot.x, spot.z);
+    assert.match(refused ?? '', /Stable Operations/, 'the sim names the missing unlock');
+    assert.equal(mirror().placeVerdict('repairBay', spot.x, spot.z), refused, 'the ghost gives the same answer');
+    assert.equal(sim.placeBuilding('repairBay', spot.x, spot.z), null, 'and placement is refused');
+    assert.equal(sim.devSpawnBuilding('repairBay', spot.x, spot.z), null, 'even the dev backdoor');
+    assert.equal(ConstructionSystem.verdict(sim.state, 'warehouse', spot.x, spot.z), null, 'ungated blueprints are untouched');
+
+    ObjectiveSystem.grant(sim.state, 'stableOperations', 'test');
+    assert.equal(ConstructionSystem.verdict(sim.state, 'repairBay', spot.x, spot.z), null, 'earned: the ground decides again');
+    assert.equal(mirror().placeVerdict('repairBay', spot.x, spot.z), null, 'and the mirror sees the grant');
+    assert.ok(sim.placeBuilding('repairBay', spot.x, spot.z), 'so placement goes through');
+  } finally {
+    def.requiresUnlock = saved;
+  }
 });
 
 await finish('sim/objectives');

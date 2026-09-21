@@ -21,6 +21,7 @@
  */
 
 import type { PowerTier } from './config';
+import type { UnlockId } from './unlocks';
 
 // ------------------------------------------------------- bulk resources ----
 
@@ -459,6 +460,14 @@ export interface BuildingDef {
    * nothing can be crafted until a workshop stands.
    */
   componentSlots?: number;
+  /**
+   * Blueprint gating (Phase 2 unlock registry). When set, the blueprint cannot
+   * be sited until the colony holds this unlock: `ConstructionSystem.verdict`
+   * refuses it, the host mirror's `placeVerdict` says why, and the build bar
+   * greys it out with the project that pays it. Unset — as every shipping
+   * blueprint is today, by design — means available from sol 1.
+   */
+  requiresUnlock?: UnlockId;
   /** Palette ordering / hotkey slot. */
   order: number;
 }

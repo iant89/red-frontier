@@ -21,6 +21,7 @@ import {
 import { hashSimulation } from '../../src/sim/debug/StateHash';
 import { assertInvariants } from '../../src/sim/debug/SimulationAssertions';
 import { Simulation } from '../../src/sim/Simulation';
+import { applyCommand } from '../../src/sim/host';
 import { run, nearDeposit } from '../fixtures/sim';
 import { group, test, finish } from '../harness';
 
@@ -181,7 +182,10 @@ test('transcript replay matches manual run', () => {
   const simManual = new Simulation({ seed, nearDeposits: 0.2 });
   const dep = nearDeposit(simManual, 'ice');
   assert.ok(dep);
-  simManual.issueMine(simManual.rovers[0].id, dep.id);
+  // Through the command path, as the transcript is: an order is state now
+  // (the autonomy window ends on it), so a direct method call would leave the
+  // "manual" colony one break short of the replayed one.
+  applyCommand(simManual, { type: 'rover/mine', roverId: simManual.rovers[0].id, depositId: dep.id, queue: false });
   run(simManual, 0.2);
 
   // run(0.2) = 20 * SOL_SECONDS * 0.2 ticks, SOL_SECONDS = 240 game seconds per sol
@@ -204,7 +208,7 @@ test('canonical scenario 1: colony foundation is pinned and deterministic', () =
     .build();
 
   const { hash, result } = replayAndHash(t);
-  assert.equal(hash, 'rf1-0dc0246485fd22-184c3b80f61d23');
+  assert.equal(hash, 'rf1-15e9be8bf9161d-09402e342d2a89');
   assertInvariants(result.sim);
 });
 
@@ -216,7 +220,7 @@ test('canonical scenario 2: logistics repeat-route haul loop is pinned and deter
     .build();
 
   const { hash, result } = replayAndHash(t);
-  assert.equal(hash, 'rf1-0aaa36bcc0b488-03d7d73ca3bcb8');
+  assert.equal(hash, 'rf1-05c3508397bd14-0d1d9e636ee1fc');
   assertInvariants(result.sim);
 });
 
@@ -230,7 +234,7 @@ test('canonical scenario 3: severe storm protocol and shelter recall is pinned a
     .build();
 
   const { hash, result } = replayAndHash(t);
-  assert.equal(hash, 'rf1-0aed83ab454620-0556950a99cfac');
+  assert.equal(hash, 'rf1-021426e5bff21f-003ef287f463b8');
   assertInvariants(result.sim);
 });
 

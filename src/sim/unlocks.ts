@@ -67,7 +67,7 @@ export const UNLOCKS: Record<UnlockId, UnlockInfo> = {
   autonomousColony: {
     id: 'autonomousColony',
     title: 'Autonomous Colony',
-    blurb: 'The colony ran itself for ten sols. Nothing about Mars changed; everything about the colony did.',
+    blurb: 'The colony ran itself, unattended, for as long as Mars asked. Nothing about Mars changed; everything about the colony did.',
   },
 };
 
@@ -126,6 +126,33 @@ export function grantUnlock(
 /** The ids that are unlocked, in {@link ALL_UNLOCKS} order. */
 export function unlockedIds(reg: UnlockRegistry): UnlockId[] {
   return ALL_UNLOCKS.filter((id) => reg[id] != null);
+}
+
+/**
+ * Blueprint gating — the registry's first consumer.
+ *
+ * A blueprint may name a `requiresUnlock`; until the colony holds it, siting is
+ * refused. This is the one rule, shared by the sim's siting authority
+ * (`ConstructionSystem.verdict`), the host mirror's optimistic `placeVerdict`,
+ * and the build bar's greying — so the answer a ghost preview gives and the
+ * answer that gates the placement are the same call. Returns the missing
+ * unlock, or `null` when the blueprint is open.
+ *
+ * `blueprintLockReason` is the player-facing sentence, phrased the way
+ * `evaluateSite` phrases a siting refusal.
+ */
+export function blueprintLock(
+  reg: Pick<UnlockRegistry, UnlockId> | ReadonlySet<string> | ReadonlyArray<string>,
+  requires: UnlockId | undefined,
+): UnlockId | null {
+  if (!requires) return null;
+  if (reg instanceof Set) return reg.has(requires) ? null : requires;
+  if (Array.isArray(reg)) return reg.includes(requires) ? null : requires;
+  return (reg as UnlockRegistry)[requires] != null ? null : requires;
+}
+
+export function blueprintLockReason(missing: UnlockId): string {
+  return `${UNLOCKS[missing]?.title ?? missing} has not been earned yet — complete the project that grants it`;
 }
 
 /** Count of granted unlocks — the colony report's achievement line (P11). */
