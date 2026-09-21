@@ -70,6 +70,7 @@ import { emptyObjectiveState, type CompletionRecord } from '../state/ObjectiveSt
 import { emptyAutonomyState } from '../state/AutonomyState';
 import { sanitiseAutonomy } from './autonomySave';
 import { sanitisePolicies } from './policySave';
+import { sanitiseHistory } from './historySave';
 import { emptyUnlocks, type UnlockRecord } from '../unlocks';
 import { projectById } from '../projects/catalog';
 
@@ -200,6 +201,12 @@ export function snapshotColony(state: ColonyState): SaveState {
         lastBreak: rest.lastBreak ? { ...rest.lastBreak } : null,
       };
     })(),
+    // v18 (Phase 4): the long records. Rows are plain data; prod/cons ride
+    // inside each sol row and are copied with it.
+    history: {
+      sols: state.solHistory.map((r) => ({ ...r, prod: { ...r.prod }, cons: { ...r.cons } })),
+      journal: state.journal.map((e) => ({ ...e })),
+    },
     tutorial: {
       milestones: { ...state.tutorial.milestones },
       warnings: { ...state.tutorial.warnings },
@@ -481,6 +488,14 @@ export function restoreColony(state: ColonyState, data: SaveState): void {
     (data as { policies?: unknown }).policies,
     new Set(state.buildings.map((b) => b.id)),
   );
+
+  // v18 long records (Phase 4). Missing or hostile → empty charts, empty
+  // log; the rings re-accumulate from the restore forward.
+  {
+    const h = sanitiseHistory((data as { history?: unknown }).history);
+    state.solHistory = h.sols;
+    state.journal = h.journal;
+  }
 
   // v14 tutorial state
   const savedTut = (data as { tutorial?: unknown }).tutorial as

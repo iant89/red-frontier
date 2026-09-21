@@ -473,7 +473,7 @@ export const AUTOSAVE_INTERVAL_S = 45;
  * v10 (P5.2): the component ledger, a per-building `recipe` selection and the
  * bench's work in progress. Additive — see `persistence/migrations/v9.ts`.
  */
-export const SAVE_VERSION = 17;
+export const SAVE_VERSION = 18;
 
 export const WATER_PIPE_LENGTH = 20;
 export const WATER_PIPE_MAX_RUN = 200;
@@ -484,3 +484,11 @@ export const WATER_PUMP_KG_HOUR = 6;
 /** How many samples the HUD graphs retain, and how often the sim records one. */
 export const HISTORY_SAMPLES = 120;
 export const HISTORY_INTERVAL_S = 1;
+
+/**
+ * Phase 4 — bounds for the long records: sol-bucketed history rows (one per
+ * closed sol, so a 240-sol colony holds a page not a database) and the
+ * persisted event journal (bounded ring; COMMERCIAL-ROADMAP-REVIEW §3.5).
+ */
+export const SOL_HISTORY_ROWS = 240;
+export const EVENT_JOURNAL_MAX = 300;

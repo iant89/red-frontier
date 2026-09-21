@@ -27,6 +27,7 @@ import type { UnlockRegistry, UnlockRecord } from '../unlocks';
 import { SAVE_VERSION } from '../config';
 import type { AutonomyState } from '../state/AutonomyState';
 import type { PolicyState } from '../state/PolicyState';
+import type { SolHistoryRow, JournalEntry } from '../state/HistoryState';
 
 // ---- sub-schemas -----------------------------------------------------------
 
@@ -226,10 +227,26 @@ export interface SaveState {
   autonomy?: AutonomySave | null;
   /** v17 — colony standing orders (Phase 3, slice 2). Absent on older colonies. */
   policies?: PolicyState | null;
+  /**
+   * v18 — the long records (Phase 4): downsampled sol rows and the bounded
+   * event journal. Absent on older colonies = empty charts, no log.
+   */
+  history?: HistorySave | null;
 }
 
 /** Phase 3 — the saved autonomy block. The transient `_holding` is never written. */
 export type AutonomySave = Omit<AutonomyState, '_holding'>;
+
+/** Phase 4 — the saved history block: sol rows and the event journal. */
+export interface HistorySave {
+  sols: SolHistoryRowSave[];
+  journal: JournalEntrySave[];
+}
+
+/** A sol row as it sits in a save — plain numbers, fixed fluid keys. */
+export type SolHistoryRowSave = SolHistoryRow;
+/** A journal entry as it sits in a save — `{sol}` spread over the event. */
+export type JournalEntrySave = JournalEntry;
 
 /**
  * Loose historical save — used as input to migrations. Version may be <11,

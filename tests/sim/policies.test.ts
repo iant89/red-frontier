@@ -297,7 +297,7 @@ test('storm-damaged buildings are repaired before dusty ones, and nobody is sent
 group('Persistence: v17 block, v16 migration, hostile block');
 
 test('the policies block round-trips through a save, held ids included', () => {
-  assert.equal(CURRENT_SAVE_VERSION, 17);
+  assert.equal(CURRENT_SAVE_VERSION, 18);
   const sim = unlocked(14);
   buildOnline(sim, 'refinery');
   applyCommand(sim, { type: 'policy/stockpile', on: true, resource: 'silicon', minKg: 450 });

@@ -21,7 +21,7 @@
  */
 
 import { World } from '../World';
-import type { FluidFlow, HistorySample } from '../Simulation';
+import type { FluidFlow, HistorySample, SolHistoryRow } from '../Simulation';
 import type { Poi } from '../pois';
 import type { FluidPools } from '../lifesupport';
 import type { Alert, LogEvent, Severity } from '../alerts';
@@ -307,6 +307,10 @@ export class ColonyMirror implements SimView {
   }
   get history(): ReadonlyArray<HistorySample> {
     return this.payload.history;
+  }
+  /** Phase 4 — the downsampled one-row-per-sol record the dashboard reads. */
+  get solHistory(): ReadonlyArray<SolHistoryRow> {
+    return this.payload.solHistory;
   }
   get sun(): SunState {
     return this.payload.sun;

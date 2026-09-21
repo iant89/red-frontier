@@ -45,7 +45,7 @@ Measured 2026-09-20:
 - Heap: ~108 MB at end (no leak)
 - Max pending queue: 0 (bounded ≤10 enforced)
 - Active reservations: unique, no duplicates
-- Final StateHash: `rf1-04c7c49448948d-1f99000dcbb019` (pinned in `tests/sim/large-colony-stress.test.ts`)
+- Final StateHash: `rf1-1cbb9423798938-0600c4c2a44ba1` (pinned in `tests/sim/large-colony-stress.test.ts`)
 - All invariants green
 
 7-day run (`--days 7`, 33,600 ticks) is supported but not run in CI by default.
@@ -56,9 +56,9 @@ Source: `src/sim/debug/Transcript.ts`, `scripts/replay-transcript.mjs`
 
 | Scenario | Seed | Ticks | Final Hash | Suite |
 |---|---|---|---|---|
-| colony-foundation | 101 | 800 | `rf1-0dc0246485fd22-184c3b80f61d23` | `sim/transcript` |
-| logistics-haul-loop | 2026 | 2000 | `rf1-0aaa36bcc0b488-03d7d73ca3bcb8` | `sim/transcript` |
-| severe-storm-protocol | 303 | 1200 | `rf1-0aed83ab454620-0556950a99cfac` | `sim/transcript` |
+| colony-foundation | 101 | 800 | `rf1-1f83a3df7f37fa-1d5fbdce97e309` | `sim/transcript` |
+| logistics-haul-loop | 2026 | 2000 | `rf1-1b4afed38428d3-0e5c578403db8a` | `sim/transcript` |
+| severe-storm-protocol | 303 | 1200 | `rf1-16382049630e68-10ce753abaa5a0` | `sim/transcript` |
 
 These hashes are pinned in both `Transcript.ts` (`CANONICAL_SCENARIOS`) and
 `tests/sim/transcript.test.ts`. Changing tick behavior must update them
@@ -76,7 +76,7 @@ tank + pump) and runs for 5 sols.
 Artifacts:
 
 - `golden-colony.transcript.json` — seed + commands + duration (diffable)
-- `golden-colony.hash.txt` — pinned final StateHash (`rf1-024150dbf13fe8-03093564627b23`, re-pinned 2026-09-20 for save v15)
+- `golden-colony.hash.txt` — pinned final StateHash (`rf1-07ec76eca95b01-0b5e1464cbeae0`, re-pinned 2026-09-21 for save v18 / Phase 4 history)
 - `golden-colony.save.json` — snapshot for manual inspection
 - `README.md` — how to regenerate
 

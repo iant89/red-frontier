@@ -19,6 +19,7 @@ import type { BuildingKind, ComponentId, ResourceId, FluidId } from '../sim/defs
 import { UNLOCKS, blueprintLock, blueprintLockReason } from '../sim/unlocks';
 import { projectPip, autonomyChip } from './ProjectsPanel';
 import type { ProjectsPanelModel } from './ProjectsPanel';
+import { DashboardPanel } from './DashboardPanel';
 import {
   BUILDINGS,
   BUILDING_ORDER,
@@ -251,6 +252,8 @@ export class HUD {
   private lastMinimapKey = '';
 
   private vitalsCollapsed = false;
+  /** Phase 4 — the operations dashboard overlay (reads the mirror only). */
+  private readonly dashboard = new DashboardPanel();
   private projectPipKey = '';
   private autonomyKey = '';
   private inspectorCollapsed = false;
@@ -417,6 +420,7 @@ export class HUD {
         <button class="btn" id="map-btn" class="btn" title="World map (M)">🗺</button>
         <button class="btn" id="dev-btn" title="Developer mode — world editor (~ backtick)">🛠</button>
         <button class="btn" id="history-btn" title="Alert history (H)">📜</button>
+        <button class="btn" id="dash-btn" title="Operations dashboard (O)">📊</button>
         <button class="btn" id="menu-btn" title="Pause menu — save, settings, expedition info">☰</button>
         <div class="toolbar" id="speeds"></div>
       </div>
@@ -612,6 +616,10 @@ export class HUD {
     this.el('history-btn').addEventListener('pointerdown', (e) => {
       e.stopPropagation();
       this.openAlertHistory();
+    });
+    this.el('dash-btn').addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.dashboard.toggle();
     });
     this.el('menu-btn').addEventListener('pointerdown', (e) => {
       e.stopPropagation();
@@ -1546,6 +1554,8 @@ export class HUD {
 
   // ------------------------------------------------------------ vitals ----
   updateVitals(sim: SimView): void {
+    // Phase 4: the dashboard reads the same mirror; it self-guards on change.
+    this.dashboard.update(sim);
     // ---- clock & sun ----
     this.el('clock-line').textContent = sim.clock.format();
     this.el('phase-label').textContent = sim.clock.phase();
@@ -2018,6 +2028,20 @@ export class HUD {
     this.histFilter = 'all';
     this.renderHistory();
     this.el('history-overlay').style.display = 'flex';
+  }
+
+  /** Phase 4 — operations dashboard (O). Overlay open/close is HUD-owned. */
+  toggleDashboard(): void {
+    this.dashboard.toggle();
+  }
+
+  isDashboardOpen(): boolean {
+    return this.dashboard.isOpen();
+  }
+
+  /** Hide the dashboard. Returns true if it was open (for Esc chaining). */
+  closeDashboard(): boolean {
+    return this.dashboard.close();
   }
 
   /** Hide the history modal. Returns true if it was open (for Esc chaining). */

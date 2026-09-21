@@ -3271,3 +3271,254 @@ body {
     bottom: 32px;
   }
 }
+
+/* ------------------------------------------------------- operations dash ----
+   Phase 4 — the Colony Operations Dashboard overlay. Shares the alert-history
+   frame (.hist-overlay/.hist-card) so the two read as one family. */
+
+.dash-overlay {
+  z-index: 42;
+}
+
+.dash-card {
+  width: min(720px, calc(100vw - 32px));
+  max-height: min(84vh, 760px);
+  overflow-y: auto;
+  padding-bottom: 10px;
+}
+
+.dash-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding: 10px 12px 4px;
+}
+
+.dash-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid var(--ui-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border-left-width: 3px;
+}
+
+.dash-row.tone-ok {
+  border-left-color: var(--cyan);
+}
+
+.dash-row.tone-warn {
+  border-left-color: var(--warn);
+  background: rgba(56, 40, 12, 0.35);
+}
+
+.dash-row.tone-crit {
+  border-left-color: var(--crit);
+  background: rgba(60, 18, 12, 0.4);
+}
+
+.dash-label {
+  font-size: 9.5px;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: var(--ui-text-dim);
+}
+
+.dash-value-block {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.dash-value {
+  font-size: 17px;
+  color: var(--ui-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-sub {
+  font-size: 10px;
+  color: var(--ui-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-status {
+  font-size: 9.5px;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+}
+
+.tone-ok .dash-status {
+  color: var(--cyan);
+}
+
+.tone-warn .dash-status {
+  color: var(--warn);
+}
+
+.tone-crit .dash-status {
+  color: var(--crit);
+}
+
+.dash-spof {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 6px 12px 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 11px;
+  border: 1px solid var(--ui-border);
+}
+
+.dash-spof b {
+  font-size: 9.5px;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.dash-spof.ok {
+  color: var(--ui-text-dim);
+}
+
+.dash-spof.ok b {
+  color: var(--cyan);
+}
+
+.dash-spof.warn {
+  border-color: var(--warn);
+  background: rgba(56, 40, 12, 0.35);
+  color: var(--ui-text);
+}
+
+.dash-spof.warn b {
+  color: var(--warn);
+}
+
+.dash-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 2px;
+}
+
+.dash-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.dash-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  color: var(--ui-text-faint);
+  border: 1px solid var(--ui-border);
+  border-radius: 999px;
+  padding: 3px 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.dash-check.on {
+  color: var(--ui-text);
+  border-color: var(--ui-border-lit);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.dash-check input {
+  accent-color: var(--warn);
+  margin: 0;
+}
+
+.dash-scopes {
+  display: inline-flex;
+  border: 1px solid var(--ui-border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.dash-scope {
+  background: transparent;
+  border: 0;
+  color: var(--ui-text-faint);
+  font-size: 10.5px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.dash-scope.on {
+  color: var(--ui-text);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.dash-graphs {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  padding: 8px 12px 0;
+}
+
+.dash-graph {
+  border: 1px solid var(--ui-border);
+  border-radius: 8px;
+  padding: 6px 8px 8px;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.dash-graph-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 10.5px;
+  color: var(--ui-text);
+  margin-bottom: 4px;
+}
+
+.dash-legend {
+  display: inline-flex;
+  gap: 6px;
+  font-size: 9px;
+  color: var(--ui-text-dim);
+  align-items: center;
+}
+
+.dash-legend i {
+  display: inline-block;
+  width: 8px;
+  height: 2px;
+  border-radius: 1px;
+}
+
+.dash-graph canvas {
+  width: 100%;
+  height: 90px;
+  display: block;
+}
+
+.dash-empty {
+  grid-column: 1 / -1;
+  padding: 18px 10px;
+  text-align: center;
+  color: var(--ui-text-dim);
+  font-size: 11.5px;
+}
+
+@media (max-width: 760px) {
+  .dash-grid,
+  .dash-graphs {
+    grid-template-columns: 1fr;
+  }
+
+  .dash-value {
+    font-size: 15px;
+  }
+}
