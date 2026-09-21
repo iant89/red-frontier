@@ -12,7 +12,7 @@ import { mountHud } from '../fixtures/hud';
 import { DevMode } from '../../src/dev/DevMode';
 import { LocalSimHost } from '../../src/sim/host';
 import type { DevPanelCallbacks } from '../../src/dev/DevPanel';
-import { DevPanel } from '../../src/dev/DevPanel';
+import { DevPanel, playtestReadout, playtestReadoutText } from '../../src/dev/DevPanel';
 import { ROVERS } from '../../src/sim/defs';
 import { SUIT_O2_CAPACITY, DEV_UPGRADE_STEP } from '../../src/sim/config';
 import { findSpot } from '../fixtures/sim';
@@ -318,6 +318,23 @@ test('clearing the selection empties the editor on the next update', () => {
   selection = null;
   panel.update();
   assert.match(q('dv-sel-body').textContent!, /Select a rover/);
+});
+
+group('Developer panel — M2 playtest readout');
+
+test('the readout states the project, the next ask, landings, the streak and the card', () => {
+  panel.update();
+  assert.match(q('dv-pt-project').textContent ?? '', /Establish Survival \d\/5/);
+  assert.match(q('dv-pt-next').textContent ?? '', /online|Stable power/);
+  assert.match(q('dv-pt-landed').textContent ?? '', /^0 · sol \d+ now$/);
+  assert.match(q('dv-pt-streak').textContent ?? '', /sols hands-off · (MANUAL|ASSISTED)$/);
+  assert.equal(q('dv-pt-card').textContent, 'open', 'no callback means the card is assumed open');
+
+  const r = playtestReadout(sim as any, true);
+  assert.equal(r.card, 'collapsed');
+  const text = playtestReadoutText(sim as any, false);
+  assert.match(text, /^\[M2\] Sol \d+/);
+  assert.equal(text.split('\n').length, 6, 'six lines, one per field, for the session log');
 });
 
 await finish('hud/devpanel');

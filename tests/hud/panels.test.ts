@@ -8,10 +8,11 @@
  */
 
 import assert from 'node:assert/strict';
-import { mountHud } from '../fixtures/hud';
+import { mountHud, loadDefs } from '../fixtures/hud';
 import { group, test, finish } from '../harness';
 
-const { dom, doc } = await mountHud();
+const { dom, doc, hud, sim, calls } = await mountHud();
+const { BUILDINGS } = await loadDefs();
 
 /** Pointer event with real coordinates (jsdom's bare Event has none). */
 function ptr(type: string, x: number, y: number, id = 1): Event {
@@ -114,6 +115,67 @@ test('the peek button clears every panel, and a second tap brings them back', ()
   assert.ok(hudRoot.classList.contains('hud-hidden'), 'one tap hides all panels');
   peek.dispatchEvent(new dom.window.Event('pointerdown', { bubbles: true }));
   assert.ok(!hudRoot.classList.contains('hud-hidden'), 'a second tap restores them');
+});
+
+group('Project pip (Phase 2)');
+
+test('the vitals header carries the current project and its count', () => {
+  hud.updateVitals(sim as any);
+  const pip = doc.getElementById('proj-pip') as HTMLElement;
+  assert.ok(pip, 'the pip exists');
+  assert.notEqual(pip.style.display, 'none', 'and shows from sol 1');
+  assert.match(pip.textContent ?? '', /^Establish Survival 0\/5$/);
+  assert.ok(pip.classList.contains('idle'), 'nothing done yet reads as idle');
+  assert.match(pip.title, /next: Oxygen generator online/);
+  const chip = doc.getElementById('auto-chip') as HTMLElement;
+  assert.match(chip.textContent ?? '', /^Autonomy \d+\.\d sols · OPERATOR$/, 'the autonomy headline sits beside it');
+  assert.ok(chip.classList.contains('operator'));
+});
+
+test('the projects panel carries the Standing Orders card and turns its inputs into policy commands', async () => {
+  const { ProjectsPanel } = await import('../../src/ui/ProjectsPanel');
+  const { grantUnlock } = await import('../../src/sim/unlocks');
+  const sent: Array<Record<string, unknown>> = [];
+  const panel = new ProjectsPanel({ onPolicy: (cmd) => sent.push(cmd) });
+  panel.update(sim as any);
+  const root = doc.getElementById('projects-panel')!;
+  assert.ok(root.querySelector('.pol-card.locked'), 'a fresh colony has not earned standing orders');
+
+  grantUnlock(sim.state.unlocks, 'advancedAutomation', 'test', sim.clock.sol, sim.state.ticksRun);
+  panel.update(sim as any);
+  const row = root.querySelector('.pol-row[data-policy="stockpile"]') as HTMLElement;
+  assert.ok(row && !root.querySelector('.pol-card.locked'));
+  const toggle = row.querySelector('[data-pol-on]') as HTMLInputElement;
+  const num = row.querySelector('[data-pol-num="minKg"]') as HTMLInputElement;
+  toggle.checked = true;
+  num.value = '350';
+  num.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+  assert.deepEqual(sent.at(-1), { type: 'policy/stockpile', on: true, resource: 'ice', minKg: 350 });
+
+  const shelter = root.querySelector('.pol-row[data-policy="stormShelter"] [data-pol-on]') as HTMLInputElement;
+  shelter.checked = true;
+  shelter.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+  assert.deepEqual(sent.at(-1), { type: 'policy/stormShelter', on: true });
+});
+
+test('a locked blueprint is marked on the bar and a click explains rather than arms', () => {
+  const saved = BUILDINGS.repairBay.requiresUnlock;
+  BUILDINGS.repairBay.requiresUnlock = 'stableOperations';
+  try {
+    hud.updateAffordability(sim as any);
+    const btn = doc.querySelector('.build-btn.locked') as HTMLElement;
+    assert.ok(btn, 'the sealed blueprint is marked');
+    assert.match(btn.querySelector('.lock')?.textContent ?? '', /Stable Operations/);
+    const before = calls.length;
+    btn.dispatchEvent(ptr('pointerdown', 10, 10));
+    assert.equal(calls.slice(before).filter((c) => c.startsWith('build:')).length, 0, 'no build was armed');
+    const hint = doc.getElementById('hintbar') as HTMLElement;
+    assert.match(hint.textContent ?? '', /Stable Operations/, 'the hintbar says why');
+  } finally {
+    BUILDINGS.repairBay.requiresUnlock = saved;
+    hud.updateAffordability(sim as any);
+    assert.equal(doc.querySelector('.build-btn.locked'), null, 'and it unseals when the gate is lifted');
+  }
 });
 
 await finish('hud/panels');

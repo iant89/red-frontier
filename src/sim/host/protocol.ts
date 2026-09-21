@@ -92,7 +92,17 @@ export type EngineeringCommand =
   | { type: 'engineering/upgrade'; entity: 'rover' | 'building'; id: number; upgrade: UpgradeId }
   | { type: 'engineering/cancel'; entity: 'rover' | 'building'; id: number }
   | { type: 'engineering/paint'; entity: 'rover' | 'building'; id: number; paint: string };
-export type PlayerCommand = RoverCommand | BuildingCommand | WaterCommand | TutorialCommand | ColonistCommand | EngineeringCommand;
+/**
+ * Phase 3 — standing orders. Each command sets one policy's fields; the sim
+ * clamps the numbers. Classified as *policy* by the autonomy stat: setting one
+ * never ends the hands-off window (AUTONOMY.md §4.2).
+ */
+export type PolicyCommand =
+  | { type: 'policy/stockpile'; on: boolean; resource: ResourceId; minKg: number }
+  | { type: 'policy/nightPower'; on: boolean; minBatteryPct: number }
+  | { type: 'policy/stormShelter'; on: boolean }
+  | { type: 'policy/autoMaintain'; on: boolean; maxWearPct: number };
+export type PlayerCommand = RoverCommand | BuildingCommand | WaterCommand | TutorialCommand | ColonistCommand | EngineeringCommand | PolicyCommand;
 export type PlayerCommandType = PlayerCommand['type'];
 
 /**
@@ -162,6 +172,10 @@ export const PLAYER_COMMAND_TYPES: readonly PlayerCommandType[] = [
   'engineering/cancel',
   'engineering/paint',
   'colonist/order',
+  'policy/stockpile',
+  'policy/nightPower',
+  'policy/stormShelter',
+  'policy/autoMaintain',
 ];
 
 /** Every developer backdoor command the protocol accepts. */
@@ -310,6 +324,10 @@ export const COMMAND_SHAPES: Record<SimCommandType, CommandShape> = {
   'engineering/cancel': { entity: 'entity', id: 'id' },
   'engineering/paint': { entity: 'entity', id: 'id', paint: 'paint' },
   'colonist/order': { order: 'order' },
+  'policy/stockpile': { on: 'bool', resource: 'resourceId', minKg: 'amount' },
+  'policy/nightPower': { on: 'bool', minBatteryPct: 'pct' },
+  'policy/stormShelter': { on: 'bool' },
+  'policy/autoMaintain': { on: 'bool', maxWearPct: 'pct' },
   'dev/time': { sol: 'id', frac: 'unit' },
   'dev/storm/force': { kind: 'stormKind' },
   'dev/storm/clear': {},

@@ -45,7 +45,7 @@ Measured 2026-09-20:
 - Heap: ~108 MB at end (no leak)
 - Max pending queue: 0 (bounded ≤10 enforced)
 - Active reservations: unique, no duplicates
-- Final StateHash: `rf1-0602d23cbf6d99-10335f00abe039` (pinned in `tests/sim/large-colony-stress.test.ts`)
+- Final StateHash: `rf1-04c7c49448948d-1f99000dcbb019` (pinned in `tests/sim/large-colony-stress.test.ts`)
 - All invariants green
 
 7-day run (`--days 7`, 33,600 ticks) is supported but not run in CI by default.

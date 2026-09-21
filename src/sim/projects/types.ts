@@ -16,7 +16,17 @@
  */
 
 import type { BuildingKind, ComponentId, FluidId, ResourceId } from '../defs';
+import type { DifficultyId } from '../difficulty';
 import type { UnlockId } from '../unlocks';
+
+/**
+ * A number that may vary by difficulty. A plain number is the same on every
+ * difficulty; a table is read by `ColonyState.difficulty`, falling back to
+ * `pioneer` (the balanced campaign) for a difficulty the table omits. This is
+ * how the review's "3 sols settler / 5 pioneer" (§3.2) lives in the data
+ * table instead of in a branch in the evaluator.
+ */
+export type ScaledNumber = number | Partial<Record<DifficultyId, number>>;
 
 /** The per-rover automation switches a project can ask for. */
 export type ProjectRuleId = 'autoHaul' | 'autoService' | 'stormShelter' | 'autoRescue';
@@ -57,7 +67,7 @@ export type Requirement =
    * phase: AUTONOMY.md (Phase 3) will own the full three-faced autonomy stat,
    * but the streak it is measured from has to be recorded from sol 1.
    */
-  | { type: 'solsWithoutOrder'; sols: number; label: string };
+  | { type: 'solsWithoutOrder'; sols: ScaledNumber; label: string };
 
 export type RequirementType = Requirement['type'];
 

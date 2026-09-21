@@ -75,6 +75,12 @@ export type DomainEvent =
   | { type: 'objective/completed'; project: string; sol: number }
   /** Phase 2: an unlock changed hands — granted by a project, later by a POI. */
   | { type: 'unlock/granted'; unlock: string; sol: number }
+  /** Phase 3: an autonomy window ended — by an order or by a breaker. */
+  | { type: 'autonomy/break'; reason: string; streak: number; sol: number }
+  /** Phase 3: the ladder moved, either way. */
+  | { type: 'autonomy/rung'; from: string; to: string; identity: string; sol: number }
+  /** Phase 3: a standing order acted — the read model's "policies are working" signal. */
+  | { type: 'policy/acted'; policy: 'stockpile' | 'nightPower' | 'stormShelter' | 'autoMaintain'; sol: number }
   | { type: 'tutorial/milestone'; milestone: string; sol: number }
   | { type: 'tutorial/warning'; warning: string; sol: number }
   | { type: 'tutorial/hint'; hint: string; sol: number };

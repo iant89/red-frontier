@@ -70,6 +70,8 @@ import { emptyFlows, type FluidFlow } from './ResourceState';
 import { emptyTutorialState, type TutorialState } from './TutorialState';
 import { emptyObjectiveState, type ObjectiveState } from './ObjectiveState';
 import { emptyUnlocks, type UnlockRegistry } from '../unlocks';
+import { emptyAutonomyState, type AutonomyState } from './AutonomyState';
+import { emptyPolicyState, type PolicyState } from './PolicyState';
 import type { Poi } from '../pois';
 
 export interface ColonyState {
@@ -133,6 +135,17 @@ export interface ColonyState {
    * the number so the flagship project is measurable from sol 1).
    */
   lastDirectOrderSol: number;
+  /**
+   * Phase 3: the autonomy stat (AUTONOMY.md) — streak, coverage, resilience
+   * and the rung, all measured. `lastDirectOrderSol` above is the Phase 2
+   * marker it supersedes; both are kept so a v15 save's streak carries over.
+   */
+  autonomy: AutonomyState;
+  /**
+   * Phase 3 (slice 2): the colony's standing orders. Set by `policy/*`
+   * commands, read every tick by PolicySystem, saved from v17.
+   */
+  policies: PolicyState;
 
   simTime: number;
   ticksRun: number;
@@ -255,11 +268,14 @@ export function createColonyState(params: ColonyStateParams): ColonyState {
   const objectives = emptyObjectiveState();
   const unlocks = emptyUnlocks();
 
+  // Generous supplies still have to fit in the pod's tanks: a Settler start
+  // (or "abundant" supplies) would otherwise land with more oxygen than the
+  // pod can hold, which the `fluid-range` invariant rightly refuses.
   const supplies = diff.suppliesMul * suppliesMulFor(worldOptions.supplies);
   pools.amounts = {
-    water: POD_STARTING_FLUIDS.water * supplies,
-    oxygen: POD_STARTING_FLUIDS.oxygen * supplies,
-    food: POD_STARTING_FLUIDS.food * supplies,
+    water: Math.min(fluid.water, POD_STARTING_FLUIDS.water * supplies),
+    oxygen: Math.min(fluid.oxygen, POD_STARTING_FLUIDS.oxygen * supplies),
+    food: Math.min(fluid.food, POD_STARTING_FLUIDS.food * supplies),
   };
 
   return {
@@ -295,6 +311,10 @@ export function createColonyState(params: ColonyStateParams): ColonyState {
     objectives,
     unlocks,
     lastDirectOrderSol: 0,
+    // The window opens at the clock's own start, not at 0.0 — a colony lands
+    // mid-morning and must not be credited the hours before it did.
+    autonomy: emptyAutonomyState(clock.solsElapsed),
+    policies: emptyPolicyState(),
     simTime: 0,
     ticksRun: 0,
     remainder: 0,

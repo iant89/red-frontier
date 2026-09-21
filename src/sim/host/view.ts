@@ -34,7 +34,7 @@ import type {
   AlertsView,
   BuildingView,
   ColonistView,
-  ObjectiveView,
+  AutonomyView, PolicyView, ObjectiveView,
   ResourceView,
   RoverView,
   WeatherView,
@@ -115,6 +115,10 @@ export type SimFields = ResourceView & {
    * claim, and no command to invent.
    */
   readonly objectives: ObjectiveView;
+  /** Phase 3: the autonomy stat — streak, rung, coverage, single points. */
+  readonly autonomy: AutonomyView;
+  /** Phase 3: the standing orders — what is armed, what each is holding. */
+  readonly policies: PolicyView;
 };
 
 // ---------------------------------------------------------- pure queries ----

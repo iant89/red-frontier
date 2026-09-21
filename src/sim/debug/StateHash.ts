@@ -131,6 +131,15 @@ function project(sim: Simulation): unknown {
     },
     unlocks: sim.state.unlocks,
     lastDirectOrderSol: sim.state.lastDirectOrderSol,
+    // P3: the autonomy stat is measured state — two colonies with different
+    // streaks are different colonies. The transient edge memory is excluded.
+    autonomy: (() => {
+      const { _holding: _t, ...rest } = sim.state.autonomy;
+      return rest;
+    })(),
+    // P3: standing orders are colony state — two colonies run to different
+    // policies diverge on the next tick.
+    policies: sim.state.policies,
     tutorial: {
       milestones: sim.state.tutorial.milestones,
       warnings: sim.state.tutorial.warnings,

@@ -20,6 +20,7 @@
 
 import type { Simulation } from '../Simulation';
 import type { DevCommand, PlayerCommand, SimAck, SimCommand } from './protocol';
+import type { PolicyId } from '../state/PolicyState';
 import { isDevCommand } from './protocol';
 import { getProfiler } from '../debug/Profiler';
 /** The ack a command that simply succeeded returns. */
@@ -29,11 +30,16 @@ const ACK: SimAck = { ok: true };
  * Apply one verified player command (intent execution).
  */
 export function applyPlayerCommand(sim: Simulation, cmd: PlayerCommand): SimAck {
-  // One line, on the one path every order takes: the autonomy streak is reset
-  // by intent, not by effect, so a command the sim refuses still counts as the
-  // player having taken the controls. (ObjectiveSystem decides which commands
-  // are orders — P3's AUTONOMY.md owns the classification.)
+  // One line, on the one path every order takes: the Phase 2 marker is reset
+  // by intent, not by effect. The Phase 3 autonomy window (below, after the
+  // switch) ends only on an *accepted* intervention — AUTONOMY.md §4.2.
   sim.noteOrder(cmd.type);
+  const ack = applyPlayerCommandInner(sim, cmd);
+  sim.noteCommandResult(cmd.type, ack.ok);
+  return ack;
+}
+
+function applyPlayerCommandInner(sim: Simulation, cmd: PlayerCommand): SimAck {
   switch (cmd.type) {
     // ------------------------------------------------------- rover orders ----
     case 'rover/move':
@@ -128,6 +134,19 @@ export function applyPlayerCommand(sim: Simulation, cmd: PlayerCommand): SimAck 
     case 'colonist/order':
       sim.orderColonist(cmd.order);
       return ACK;
+
+    // ---------------------------------------------------- standing orders ----
+    // Phase 3: the payload minus its discriminator is the patch; the sim
+    // clamps every number and refuses the lot when the unlock is missing (the
+    // panel greys itself from `view.policies.unlocked`, so a refusal here is
+    // a hand-made command or a stale UI, and it reads the ack back).
+    case 'policy/stockpile':
+    case 'policy/nightPower':
+    case 'policy/stormShelter':
+    case 'policy/autoMaintain': {
+      const { type, ...patch } = cmd;
+      return { ok: sim.setPolicy(type.slice('policy/'.length) as PolicyId, patch) };
+    }
   }
 }
 

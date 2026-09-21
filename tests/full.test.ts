@@ -28,6 +28,8 @@ import './sim/golden-colony.test';
 import './sim/forecast.test';
 import './sim/tutorial.test';
 import './sim/objectives.test';
+import './sim/autonomy.test';
+import './sim/policies.test';
 import './sim/life-support.test';
 import './sim/life-support-system.test';
 import './sim/logistics-system.test';

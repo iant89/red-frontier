@@ -8,7 +8,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { renderProjectsHtml, formatRequirement } from '../../src/ui/ProjectsPanel';
+import { renderProjectsHtml, formatRequirement, projectPip, autonomyChip, renderPolicyHtml } from '../../src/ui/ProjectsPanel';
 import type { ObjectiveRequirementRow, ProjectsPanelModel } from '../../src/ui/ProjectsPanel';
 import { group, test, finish } from '../harness';
 
@@ -126,6 +126,100 @@ test('player-visible text is escaped, because all of it is data', () => {
   assert.equal(/<script>/.test(html), false, 'no raw markup survives into the panel');
   assert.match(html, /&lt;script&gt;/, 'it is escaped instead');
   assert.match(html, /a &amp; b/);
+});
+
+group('The HUD pip states the situation in a glance');
+
+test('it names the lead project with its count and the next ask', () => {
+  const pip = projectPip(board)!;
+  assert.ok(pip);
+  assert.equal(pip.text, 'Establish Survival 1/4');
+  assert.equal(pip.tone, 'progress');
+  assert.match(pip.title, /next: Water extractor online \(0 \/ 1\)/);
+});
+
+test('the tone follows the situation, not a timer', () => {
+  const p = board.active[0];
+  const idle = projectPip({ ...board, active: [{ ...p, met: 0, requirements: p.requirements.map((r) => ({ ...r, met: false })) }] })!;
+  assert.equal(idle.tone, 'idle', 'nothing done yet');
+  const near = projectPip({ ...board, active: [{ ...p, met: 3 }] })!;
+  assert.equal(near.tone, 'near', 'one requirement left');
+  assert.equal(near.text, 'Establish Survival 3/4');
+  const done = projectPip({ ...board, active: [], completed: [{ id: 'x', title: 'X', sol: 3 }] })!;
+  assert.equal(done.tone, 'done');
+  assert.match(done.text, /all complete/);
+  assert.equal(projectPip({ ...board, active: [], completed: [] }), null, 'nothing to say on an empty board');
+});
+
+test('with two projects on the board the pip leads with the closer one and counts the rest', () => {
+  const p = board.active[0];
+  const other = { ...p, id: 'industrialize', title: 'Industrialize', met: 3, total: 4 };
+  const pip = projectPip({ ...board, active: [p, other] })!;
+  assert.equal(pip.text, 'Industrialize 3/4 +1');
+  assert.equal(pip.tone, 'near');
+});
+
+group('The autonomy headline (Phase 3)');
+
+test('it reads the streak and the identity, and its tooltip teaches the last break', () => {
+  const chip = autonomyChip({
+    current: 6.8,
+    best: 11.2,
+    rung: 'redundant',
+    identity: 'engineer',
+    coverage: 0.82,
+    singlePoints: [],
+    lastBreak: { reason: 'intervention', streak: 6.8, detail: 'ordered a rover to mine' },
+  });
+  assert.equal(chip.text, 'Autonomy 6.8 sols · ENGINEER');
+  assert.equal(chip.identity, 'engineer');
+  assert.match(chip.title, /REDUNDANT · coverage 82% · best 11\.2 sols/);
+  assert.match(chip.title, /No single machine can end this colony/);
+  assert.match(chip.title, /Last break: ordered a rover to mine at 6\.8 sols/);
+
+  const broke = autonomyChip({
+    current: 0.2, best: 3, rung: 'assisted', identity: 'operator', coverage: 0.4,
+    singlePoints: ['water', 'oxygen'],
+    lastBreak: { reason: 'life-support-critical', streak: 3, detail: 'Oxygen reserve critical' },
+  });
+  assert.match(broke.title, /Single points of failure: water, oxygen/);
+  assert.match(broke.title, /Last break: Oxygen reserve critical after 3\.0 sols/);
+});
+
+group('The Standing Orders card (Phase 3, slice 2)');
+
+const POLICIES = {
+  unlocked: true,
+  stockpile: { on: true, resource: 'iron', minKg: 400, currentKg: 252.3 },
+  nightPower: { on: true, minBatteryPct: 40, shedding: 2 },
+  stormShelter: { on: false },
+  autoMaintain: { on: false, maxWearPct: 30, worstWearPct: 51 },
+  actions: 7,
+};
+
+test('it lists the four policies with a toggle, one number each, and what each is holding', () => {
+  const html = renderPolicyHtml(POLICIES);
+  assert.match(html, /Standing Orders/);
+  assert.match(html, /7 actions/);
+  for (const id of ['stockpile', 'nightPower', 'stormShelter', 'autoMaintain']) {
+    assert.match(html, new RegExp(`data-policy="${id}"`), id);
+    assert.match(html, new RegExp(`data-pol-on="${id}"`), `${id} toggle`);
+  }
+  assert.match(html, /252 \/ 400 kg/, 'stockpile states the floor against the silo');
+  assert.match(html, /<option value="iron" selected>/);
+  assert.match(html, /data-pol-num="minKg"[^>]*value="400"/);
+  assert.match(html, /2 shed until morning/);
+  assert.match(html, /worst wear 51 %/);
+  assert.match(html, /none of these end your autonomy streak/);
+  assert.doesNotMatch(html, /disabled/);
+});
+
+test('locked, every control is disabled and the card says what unlocks it', () => {
+  const html = renderPolicyHtml({ ...POLICIES, unlocked: false });
+  assert.match(html, /pol-card locked/);
+  assert.match(html, /unlock with <b>Industrialize<\/b>/);
+  assert.match(html, /locked</);
+  assert.equal((html.match(/ disabled/g) ?? []).length, 8, 'four toggles + four inputs');
 });
 
 await finish('ui/projects-panel');

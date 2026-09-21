@@ -323,6 +323,7 @@ export class Game {
       // race that disposed the host before the save could finish).
       onMenu: () => this.openPauseMenu(),
       onDev: () => this.toggleDevPanel(),
+      onProjectPip: () => this.projectsPanel.toggleCollapsed(),
       onSaveProgress: (open, saved) => this.menuCtrl.onSaveProgress(open, saved),
       onSaveRetry: () => this.retrySave(),
       onSaveAsNew: () => this.saveAsNew(),
@@ -343,7 +344,9 @@ export class Game {
       onAction: (a, arg) => this.handleAction(a, arg),
     });
 
-    this.projectsPanel = new ProjectsPanel();
+    this.projectsPanel = new ProjectsPanel({
+      onPolicy: (cmd) => this.host?.send(cmd as any),
+    });
 
     this.dev = new DevMode(
       (sev, text) => this.hud.addLog(sev, text),
@@ -367,6 +370,7 @@ export class Game {
       armSpawn: (spec) => this.setArmedSpawn(spec),
       setHint: (t) => this.hud.hint(t),
       onToggleEnabled: (on) => this.setDevEnabled(on),
+      isProjectsCardCollapsed: () => this.projectsPanel.isCollapsed(),
       onClose: () => this.setDevPanelVisible(false),
     });
     this.store = new SaveStore();

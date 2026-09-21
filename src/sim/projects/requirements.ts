@@ -12,7 +12,23 @@
  */
 
 import type { ColonyState } from '../state/ColonyState';
-import type { Requirement, RequirementProgress, RequirementUnit } from './types';
+import type { Requirement, RequirementProgress, RequirementUnit, ScaledNumber } from './types';
+import type { DifficultyId } from '../difficulty';
+
+/**
+ * Resolve a {@link ScaledNumber} for a difficulty. A table that omits the
+ * colony's difficulty falls back to `pioneer`, then to the first value it
+ * carries — a project author who writes `{ settler: 3 }` gets 3 everywhere
+ * rather than a target of zero that completes on the tick it is offered.
+ */
+export function scaledTarget(n: ScaledNumber, difficulty: DifficultyId): number {
+  if (typeof n === 'number') return n;
+  const own = n[difficulty];
+  if (typeof own === 'number') return own;
+  if (typeof n.pioneer === 'number') return n.pioneer;
+  for (const v of Object.values(n)) if (typeof v === 'number') return v;
+  return 0;
+}
 
 /** A requirement's unit, so the panel can say "kg" instead of guessing. */
 export function requirementUnit(req: Requirement): RequirementUnit {
@@ -175,8 +191,11 @@ export function evaluateRequirement(state: ColonyState, req: Requirement): Requi
     }
 
     case 'solsWithoutOrder':
-      current = Math.max(0, state.clock.sol - state.lastDirectOrderSol);
-      target = req.sols;
+      // Phase 3: the autonomy streak — it ends on an accepted order *and* on
+      // any breaker, so the flagship cannot be earned by watching a colony
+      // drown. Whole sols, so the number agrees with the dashboard headline.
+      current = Math.floor(state.clock.solsElapsed - state.autonomy.startedAt + 1e-9);
+      target = scaledTarget(req.sols, state.difficulty);
       break;
   }
 
