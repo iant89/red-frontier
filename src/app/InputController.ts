@@ -318,6 +318,7 @@ export class InputController {
     if (e.key === 'Escape') {
       if (
         this.d.hud.closeWorldMap() ||
+        this.d.hud.closeAdvisor() ||
         this.d.hud.closeDashboard() ||
         this.d.hud.closeAlertHistory() ||
         this.d.hud.closeBuildInfo()
@@ -360,6 +361,12 @@ export class InputController {
     if (key === 'o') {
       // Phase 4 — the operations dashboard reads the mirror; it never writes.
       this.d.hud.toggleDashboard();
+      this.d.audio.select();
+      return;
+    }
+    if (key === 'b') {
+      // Phase 5 — the bottleneck advisor: reads, advises, never solves.
+      this.d.hud.toggleAdvisor();
       this.d.audio.select();
       return;
     }

@@ -82,6 +82,43 @@ export interface PolicyView {
   readonly lines: Readonly<Record<'stockpile' | 'nightPower' | 'stormShelter' | 'autoMaintain', string>>;
 }
 
+/**
+ * Phase 5 — the bottleneck advisory as the panel reads it. Plain data, built
+ * by the sim-side analyzer (`sim/bottlenecks/`); the panel renders, the
+ * player decides. `entityId` rows focus the named machine, alert-style.
+ */
+export interface BottleneckFactorView {
+  readonly key: string;
+  readonly label: string;
+  readonly entityId: number | null;
+}
+
+/** Phase 5 — one thing the player's hands could do. No commands in it. */
+export interface BottleneckSolutionView {
+  readonly key: string;
+  readonly label: string;
+  readonly entityId: number | null;
+}
+
+/** Phase 5 — one measured, ranked bottleneck. */
+export interface BottleneckView {
+  readonly kind: 'water' | 'oxygen' | 'power';
+  readonly title: string;
+  readonly severity: 'watch' | 'warning' | 'critical';
+  readonly productionPerSol: number;
+  readonly consumptionPerSol: number;
+  readonly unit: 'kg' | 'kWh';
+  readonly projectedShortageSols: number | null;
+  readonly factors: ReadonlyArray<BottleneckFactorView>;
+  readonly solutions: ReadonlyArray<BottleneckSolutionView>;
+}
+
+/** Phase 5 — the ranked list, worst first; empty means nothing is short. */
+export interface BottlenecksView {
+  readonly bottlenecks: ReadonlyArray<BottleneckView>;
+  readonly next: BottleneckView | null;
+}
+
 /** Phase 2 — the board: what is offered, what landed, what was earned. */
 export interface ObjectiveView {
   readonly active: ReadonlyArray<ObjectiveProjectView>;

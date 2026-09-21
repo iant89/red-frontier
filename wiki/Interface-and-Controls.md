@@ -25,6 +25,7 @@ the colony — see [Architecture Overview](Architecture-Overview.md).
 | Blueprints 1–9 | `1`…`9` | — |
 | Save | `Ctrl`/`Cmd`+`S` | auto every 45 s |
 | Operations dashboard | `O` | 📊 topbar button |
+| Bottleneck advisor | `B` | ⚠ topbar button (badged) |
 | Developer panel | `` ` `` (backquote) | 🛠 topbar button |
 
 Speed modes are `Paused / 1× / 2× / 4×`, multiplying sim steps per frame — the
@@ -81,6 +82,21 @@ history graphs (power, water, oxygen, food, ore, rover utilization, battery
 reserves, production, consumption) over the live ring or the per-sol record. It
 is strictly a read: the dashboard states what the colony is doing and names no
 fix — diagnosis stays the player's job.
+
+## The bottleneck advisor
+
+`B` or the ⚠ topbar button opens the **Bottleneck Advisor** — the counterpart
+the dashboard deliberately does not carry. For each measured bottleneck
+(worst first, of the three kinds it watches: water, oxygen, power) it states
+production vs consumption per sol, the projected shortage in sols, the
+*contributing factors* behind it (each one a measured fact — a damaged
+machine, an emptied silo, a 2.4 km haul, a refinery outdrawing the grid), and
+*possible solutions* — suggestions only. Tapping a factor or solution that
+names a machine focuses it, exactly like an alert card. The advisor never
+issues a command: it names the problem and solving it stays the player's. The
+⚠ button carries a count badge in the worst severity's colour whenever any
+bottleneck is active, so a shortage is visible even with the panel closed —
+and the panel states "No bottlenecks" when nothing is short.
 
 ## The map
 

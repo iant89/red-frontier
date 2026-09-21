@@ -2,6 +2,83 @@
 
 Persistent notes for future coding sessions.
 
+## Commercial roadmap — Phase 5: the bottleneck system (2026-09-21)
+
+**Goal:** turn raw simulation information into engineering decisions
+(COMMERCIAL-ROADMAP.md Phase 5, re-baselined per COMMERCIAL-ROADMAP-REVIEW.md
+§5 P5; the §5 P13 rider shipped already with Phase 4's dashboard SPOF strip).
+Full spec: `docs/COMMERCIAL-PHASE-5.md`. Branch `arena/01a0c3fd-red-frontier`.
+
+**What shipped (save unchanged v18 — fully derived, no migration, no hash
+re-pin; suite 100 / 1192):**
+
+- **`src/sim/bottlenecks/`** — `types.ts` (plain-JSON report/snapshot; *no
+  Infinity* — projectedShortage is `null` when not draining, and that is the
+  JSON-safety trick), `solutions.ts` (static advice as data — the P2
+  "content is data" habit), `analyzer.ts` (the pure measurement). Three
+  kinds only: water, oxygen, power.
+- **Severity = the P1 forecast tiers.** Fluid reports reuse
+  `forecastFluidWithRates`, so the advisor can never disagree with the
+  tutorial banner about how bad a shortage is. Healthy colony → an *empty*
+  snapshot; the panel deliberately renders "No bottlenecks."
+- **Factors are measured, machine-linked, capped 4** (and solutions 4) —
+  producer scrutiny (damaged → `repair` echo, switched-off → `switch-on`,
+  starved/throttled, idle with the sim's own `idleReason`); water feed
+  (empty silo + stranded rovers, nearest-ice km from the build centroid,
+  tankage < 2 sols of burn, thirstiest consumer); oxygen degrades to a
+  *symptom* when water fails first ("Fix water first" outranks building a
+  generator); power (deficit with both kW figures, shed tier, the
+  **dead-before-dawn** check — battery sols computed at
+  `SOL_HOURS` vs `solsUntilSunrise(frac)` from the clock's 0.25/0.75 sun
+  quartiles — daylight-only dust at `< 0.8` transmission, pod-only pack,
+  the heaviest running machine by measured `loadKw`).
+- **Don't-auto-solve is enforced by shape**, not comment: factors/solutions
+  carry strings and entity ids only; the payload field is read-only; the
+  panel's only interaction is `focus` (the alert-card gesture, via the
+  existing `cb.onAction('focus', id)` line). Each card ends with the oath
+  from strings.ts. The P4 dashboard stays advice-free — its NEXT-BOTTLENECK
+  absence remains pinned by `tests/ui/dashboard`.
+- **Boundary = the P3 four-seam pattern**: `projection.ts` payload field
+  (`bottlenecks: bottleneckSnapshot(sim.state)`), `viewModels.ts` view types,
+  `view.ts` SimFields slot, `mirror.ts` getter, plus the `Simulation`
+  parity getter. No system, no state, no `_view` cache needed — computed on
+  demand like `objectiveSnapshot`, so restore paints before tick 1.
+- **UI** — `src/ui/AdvisorPanel.ts` (overlay in the dashboard family;
+  `advisorModelFromView`/`renderAdvisorHtml`/`advisorBadge` pure, class is a
+  shell). Topbar ⚠ button behind `dash-btn` carries the **badge**: count in
+  worst-severity tone (`#advisor-btn.has-<tone>`), hidden when clear — the
+  one place a shortage shouts with the panel closed. Hotkey `B`; Esc chain
+  sits between world map and dashboard.
+
+**Gotchas worth remembering:**
+
+- `weather.solarTransmission` is ~0.9–0.95 from *ambient* haze on a clear
+  sol — factor thresholds must sit well below it (0.8) or clear skies read
+  as dust storms all day.
+- Fresh colony at night: pod RTG (14 kW) covers the tiny demand, so the
+  battery *charges* overnight — night-death scenarios need real loads or a
+  poked `state.power` (the analyzer reads whatever the grid measured;
+  pure-function testing of power case = poke `state.power` fields, no tick
+  needed).
+- `run(sim, n)` advances **sols** (4800 ticks/sol); water-critical probes
+  need only ~0.05 sol after dropping the pool.
+- Repaint-guard sentinels must never be `''` when an *empty* model's change
+  key can also be `''` — the advisor's first open on a healthy colony
+  rendered blank until the sentinel became `'\u0000repaint'` (caught by the
+  browser smoke, invisible to the mock-driven unit tests).
+- Browser smoke: `node scripts/setup-playwright.mjs` first, serve
+  `npm run build` via `vite preview`, `?worker=0` for the in-process host so
+  probes can poke `game.host.sim.state`; the update-checker's TLS failure to
+  the open web is sandbox noise, not a regression.
+- `assert.match(string, regexp)` — argument order bit once in ui/advisor.
+- esbuild probes are cheap: `npx esbuild x.ts --bundle --platform=node
+  --format=esm --outfile=x.mjs && node x.mjs` against `src/` directly,
+  deterministic seeds make pin-values observable before writing asserts.
+
+**Next (review §6 order):** P6' — survey confidence + expedition planning
+(seeded in-sim survey rolls, estimates as ranges, expeditions as a
+range/fuel decision). P8' rover history & naming is cheap and slots anywhere.
+
 ## Commercial roadmap — Phase 4: colony operations dashboard (2026-09-21)
 
 **Goal:** let players answer "why is my colony failing?" without spreadsheet

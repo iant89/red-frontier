@@ -34,7 +34,7 @@ import type {
   AlertsView,
   BuildingView,
   ColonistView,
-  AutonomyView, PolicyView, ObjectiveView,
+  AutonomyView, PolicyView, ObjectiveView, BottlenecksView,
   ResourceView,
   RoverView,
   WeatherView,
@@ -119,6 +119,12 @@ export type SimFields = ResourceView & {
   readonly autonomy: AutonomyView;
   /** Phase 3: the standing orders — what is armed, what each is holding. */
   readonly policies: PolicyView;
+  /**
+   * Phase 5: the bottleneck advisory — what is short, why, and what the
+   * player's hands could do. Read-only by design: the panel describes
+   * solutions, and the player stays the one who decides.
+   */
+  readonly bottlenecks: BottlenecksView;
 };
 
 // ---------------------------------------------------------- pure queries ----

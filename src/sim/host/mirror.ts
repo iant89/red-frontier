@@ -412,4 +412,8 @@ export class ColonyMirror implements SimView {
   get policies() {
     return this.payload.policies;
   }
+
+  get bottlenecks() {
+    return this.payload.bottlenecks;
+  }
 }
